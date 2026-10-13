@@ -201,6 +201,38 @@ def market_of(code: str) -> str:
     return ""
 
 
+#: 沪深京 A 股**个股**前缀集（单一来源）——与 live 同源：口径取自
+#: local_tdx_data 的 vipdoc 目录判定（sh/sz/bj 三目录文件名前缀），
+#: 排除指数（000/880/399 等）/ETF（5xx/15xx）/债券/B 股（900/200）。
+ASHARE_STOCK_PREFIXES = {
+    "sh": ("600", "601", "603", "605", "688"),
+    "sz": ("000", "001", "002", "003", "300", "301"),
+    "bj": ("43", "83", "87", "88", "920"),
+}
+
+
+def is_ashare_stock(code: str) -> bool:
+    """沪深京 A 股**个股**判定（排除指数/ETF/债券/B 股）——live 同源单源。
+
+    显式后缀（.SH/.SZ/.BJ）按对应市场前缀集判（目录等价物）；裸码先排
+    880/881（market_of 同源=沪市统计指数，不个股——北交所 88 段个股必须
+    带 .BJ 后缀或 vipdoc bj 目录语境，否则按指数处理）。非 6 位数字 ⇒ False。
+    """
+    s = str(code).strip().upper()
+    mkt = ""
+    if "." in s:
+        s, suf = s.rsplit(".", 1)
+        mkt = suf.lower() if suf in {"SH", "SZ", "BJ"} else ""
+    if not (s.isdigit() and len(s) == 6):
+        return False
+    if mkt:
+        ps = ASHARE_STOCK_PREFIXES.get(mkt)
+        return ps is not None and s.startswith(ps)
+    if s.startswith(("880", "881")):
+        return False
+    return any(s.startswith(ps) for ps in ASHARE_STOCK_PREFIXES.values())
+
+
 def is_a_share_position(row: dict | None) -> bool:
     """持仓快照行是否属于 A 股（沪深北）标的。**A 股采集/分析链的统一过滤点。**
 

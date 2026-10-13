@@ -22,6 +22,7 @@ import pandas as pd
 import pytest
 
 from custos.research import evolution_loop as el
+from custos.research import universe as _uv
 from custos.research.evolution import genome
 from custos.research.evolution import llm_client as lc
 from custos.research.evolution import loop as loop_mod
@@ -1183,7 +1184,11 @@ class TestStalePoolGuard:
         tag_dir = tmp_path / "out" / "t1"
         tag_dir.mkdir(parents=True)
         stale = TrajectoryPool(
-            tag_dir / "trajectory_pool.json", objective_version=_cur_obj_ver()
+            tag_dir / "trajectory_pool.json",
+            objective_version=_cur_obj_ver(),
+            universe_sha256=_uv.universe_sha256(
+                sorted(bars)
+            ),  # v0.356 宇宙守卫：旧产物须带同名单指纹
         )
         stale.add(_mk_traj("ROC(CLOSE,5)"))
         stale.save()
@@ -1201,7 +1206,11 @@ class TestStalePoolGuard:
         tag_dir = tmp_path / "out" / "t1"
         tag_dir.mkdir(parents=True)
         stale = TrajectoryPool(
-            tag_dir / "trajectory_pool.json", objective_version=_cur_obj_ver()
+            tag_dir / "trajectory_pool.json",
+            objective_version=_cur_obj_ver(),
+            universe_sha256=_uv.universe_sha256(
+                sorted(bars)
+            ),  # v0.356 宇宙守卫：旧产物须带同名单指纹
         )
         stale.add(_mk_traj("MA(CLOSE,3)"))  # 与 MockLLM 脚本表达式都不撞
         stale.save()

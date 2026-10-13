@@ -2161,11 +2161,12 @@ def sample_codes(all_codes: list[str], n: int, seed: int = 0) -> list[str]:
     """从全 A 代码列表随机抽 N 只（带 seed 可复现），用于代表性样本校准。
 
     n<=0 或 n>=总数 → 返回全部（去空、去重、排序）。
+    **实现已下沉 universe.py（v0.356，破 bt↔universe 环）**——本别名逐位
+    委托，既有 bf./bt.sample_codes 调用面不变。
     """
-    codes = sorted({str(c).strip() for c in all_codes if str(c).strip()})
-    if n <= 0 or n >= len(codes):
-        return codes
-    return sorted(random.Random(seed).sample(codes, n))
+    from custos.research.universe import sample_codes as _sc  # noqa: PLC0415
+
+    return _sc(all_codes, n, seed)
 
 
 def forward_metrics(
@@ -5379,50 +5380,13 @@ def _indicator_cache_of(args: Any) -> Optional[Any]:
 
 
 def _resolve_universe(args: Any, ap: argparse.ArgumentParser) -> list[str]:
-    """解析股票宇宙：--codes-file（钉死，优先级最高）>
-    --universe-local/--universe-sample > --codes。为空 fail-closed（ap.error）。
+    """解析股票宇宙——**单源已下沉 ``research/universe.py``（v0.356，TODO #89）**：
+    --codes-file（钉死，优先级最高）> --universe-local/--universe-sample >
+    --codes > 缺省规则构造（vipdoc 全量个股；宇宙为空 fail-closed）。
     stderr 的 [INFO] 行是 m2_stop_sweep 等扫描脚本的解析面，逐字保留。"""
-    if args.codes_file:
-        # 钉死宇宙：优先级最高，跳过所有抽样逻辑。
-        # ⚠️ 为什么需要它：universe 来自 vipdoc 目录列举，会随通达信下载变动
-        # （实测一轮扫描中 5535→5536）；`sample_codes(seed=0)` 的 seed 固定没用，
-        # **被抽的池子变了** ⇒ 抽到的是另一组 1000 只。长时间扫描里各方案宇宙不同，
-        # 跨方案比较就混进了「换了一批票」这个噪声。
-        p = Path(args.codes_file)
-        if not p.is_file():
-            ap.error(f"--codes-file 不存在: {p}")
-        codes = [
-            ln.strip()
-            for ln in p.read_text(encoding="utf-8").splitlines()
-            if ln.strip() and not ln.strip().startswith("#")
-        ]
-        print(
-            f"[INFO] universe=codes_file({p.name}) {len(codes)} 只（**已钉死**）",
-            file=sys.stderr,
-        )
-    elif args.universe_local or args.universe_sample > 0:
-        from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
+    from custos.research import universe as _universe  # noqa: PLC0415
 
-        if args.universe_local:
-            base = local_tdx_data.list_local_vipdoc_codes()
-            src = "local_vipdoc"
-        else:
-            base = local_tdx_data.get_stock_list()
-            src = "online_get_stock_list"
-        codes = (
-            sample_codes(base, args.universe_sample, args.seed)
-            if args.universe_sample > 0
-            else list(base)
-        )
-        print(
-            f"[INFO] universe={src} 共 {len(base)} 只，取 {len(codes)} 只（seed={args.seed}）",
-            file=sys.stderr,
-        )
-    else:
-        codes = [c.strip() for c in args.codes.split(",") if c.strip()]
-    if not codes:
-        ap.error("需提供 --codes / --universe-sample N / --universe-local")
-    return codes
+    return _universe.resolve(args, ap)
 
 
 def _make_loader(

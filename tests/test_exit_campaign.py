@@ -383,6 +383,7 @@ class TestProvisionalCandidate:
                 fake,
                 tmp_path / f"t{seed}" / "campaign_ledger.json",
                 tag=f"t{seed}",
+                synthetic=True,
             )
             if r["provisional_candidates"]:
                 rep = r
@@ -535,7 +536,11 @@ class TestEndToEnd:
     def test_falsified_stop(self, tmp_path):
         cfg = ec.CampaignConfig(batch_size=6, n_random=2, seed=11)
         rep = ec.run_campaign(
-            cfg, _fake_all_lose, tmp_path / "t" / "campaign_ledger.json", tag="t"
+            cfg,
+            _fake_all_lose,
+            tmp_path / "t" / "campaign_ledger.json",
+            tag="t",
+            synthetic=True,
         )
         assert rep["status"] == "falsified"
         assert "结局②" in rep["verdict"]
@@ -551,7 +556,11 @@ class TestEndToEnd:
         # 全赢 C2 但随机臂同为 0.50 ⇒ C4 不过（不严格大于）⇒ 近失连发到预算帽
         cfg = ec.CampaignConfig(batch_size=4, n_random=2, budget_cap=12, seed=3)
         rep = ec.run_campaign(
-            cfg, _fake_all_win_c2, tmp_path / "t" / "campaign_ledger.json", tag="t"
+            cfg,
+            _fake_all_win_c2,
+            tmp_path / "t" / "campaign_ledger.json",
+            tag="t",
+            synthetic=True,
         )
         assert rep["status"] == "budget_exhausted"
         assert "预算帽" in rep["verdict"]
@@ -576,7 +585,7 @@ class TestEndToEnd:
 
         cfg = ec.CampaignConfig(batch_size=16, n_random=0, seed=23)
         rep = ec.run_campaign(
-            cfg, fake, tmp_path / "t" / "campaign_ledger.json", tag="t"
+            cfg, fake, tmp_path / "t" / "campaign_ledger.json", tag="t", synthetic=True
         )
         assert rep["status"] == "candidate_found"
         assert "C5" in rep["verdict"]
@@ -585,7 +594,15 @@ class TestEndToEnd:
 
     def test_resume_continues_from_ledger(self, tmp_path):
         ledger = tmp_path / "t" / "campaign_ledger.json"
-        cfg = ec.CampaignConfig(batch_size=4, n_random=2, seed=17, max_batches=1)
+        # 判定窗=受保护段（2017~2021）才登记台账（v2 口径）——k 走 redirect 的 tmp 台账
+        cfg = ec.CampaignConfig(
+            batch_size=4,
+            n_random=2,
+            seed=17,
+            max_batches=1,
+            judgment_start="2017-01-01",
+            judgment_end="2021-12-31",
+        )
         rep1 = ec.run_campaign(cfg, _fake_all_lose, ledger, tag="t")
         assert rep1["status"] == "running" and rep1["n_batches"] == 1
         # 宿主杀后重启：读台账续跑（此处把护栏改 2 批模拟「继续」）
@@ -603,15 +620,21 @@ class TestEndToEnd:
     def test_resume_terminal_report_only(self, tmp_path, capsys):
         ledger = tmp_path / "t" / "campaign_ledger.json"
         cfg = ec.CampaignConfig(batch_size=6, n_random=2, seed=11)
-        ec.run_campaign(cfg, _fake_all_lose, ledger, tag="t")
-        rep = ec.run_campaign(cfg, _fake_all_lose, ledger, resume=True, tag="t")
+        ec.run_campaign(cfg, _fake_all_lose, ledger, tag="t", synthetic=True)
+        rep = ec.run_campaign(
+            cfg, _fake_all_lose, ledger, resume=True, tag="t", synthetic=True
+        )
         assert rep["status"] == "falsified"  # 不续跑，直接再出报告
         assert "已有结局" in capsys.readouterr().err
 
     def test_max_batches_guard_is_not_a_verdict(self, tmp_path):
         cfg = ec.CampaignConfig(batch_size=4, n_random=1, seed=5, max_batches=1)
         rep = ec.run_campaign(
-            cfg, _fake_all_win_c2, tmp_path / "t" / "campaign_ledger.json", tag="t"
+            cfg,
+            _fake_all_win_c2,
+            tmp_path / "t" / "campaign_ledger.json",
+            tag="t",
+            synthetic=True,
         )
         assert rep["status"] == "running"
         assert "非结局" in rep["verdict"]
@@ -672,7 +695,9 @@ class TestResumeSpaceGuard:
         # 模拟 Phase 1 迭代期改档位：stop_pct 5 移出空间（幸存者含 sp=5）
         monkeypatch.setitem(eg.LEVELS, "stop_pct", (4.0, 6.0, 8.0, 10.0, 12.0))
         with pytest.raises(ec.LedgerSpaceChanged, match="档位空间|--tag"):
-            ec.run_campaign(cfg, _fake_all_win_c2, ledger, resume=True, tag="t")
+            ec.run_campaign(
+                cfg, _fake_all_win_c2, ledger, resume=True, tag="t", synthetic=True
+            )
 
     def test_main_exit2_on_stale_population(self, tmp_path, monkeypatch):
         ledger, _cfg = self._ledger_with_population(tmp_path)
@@ -694,7 +719,9 @@ class TestResumeSpaceGuard:
 
     def test_same_space_resume_not_blocked(self, tmp_path):
         ledger, cfg = self._ledger_with_population(tmp_path)
-        rep = ec.run_campaign(cfg, _fake_all_lose, ledger, resume=True, tag="t")
+        rep = ec.run_campaign(
+            cfg, _fake_all_lose, ledger, resume=True, tag="t", synthetic=True
+        )
         assert rep["n_batches"] == 1  # 同空间续跑不受守卫影响
 
 
@@ -734,3 +761,45 @@ class TestCli:
     def test_bad_budget_rejected(self, tmp_path):
         with pytest.raises(SystemExit):
             ec.main(self._argv(tmp_path, "--budget", "0"), evaluator=_fake_all_lose)
+
+
+class TestResumeUniverseGuard:
+    """台账宇宙守卫（v0.356，TODO #89）：换宇宙续跑 fail-closed。"""
+
+    META = {
+        "universe_rule": "ashare_full_asof",
+        "n_codes": 3,
+        "universe_sha256": "abc123abc123abcd",
+    }
+
+    def _ledger_with_meta(self, tmp_path, meta):
+        ledger = tmp_path / "t" / "campaign_ledger.json"
+        cfg = ec.CampaignConfig(batch_size=2, n_random=1, seed=5, max_batches=1)
+        ec.save_ledger(ledger, "t", cfg, ec.CampaignState(), [], universe=meta)
+        return ledger
+
+    def test_saved_ledger_carries_universe(self, tmp_path):
+        doc = json.loads(
+            self._ledger_with_meta(tmp_path, self.META).read_text(encoding="utf-8")
+        )
+        assert doc["universe"] == self.META
+        assert doc["schema"] == ec.LEDGER_SCHEMA
+
+    def test_matching_universe_loads(self, tmp_path):
+        ledger = self._ledger_with_meta(tmp_path, self.META)
+        _cfg, _state, _batches, tag = ec.load_ledger(
+            ledger, expected_universe_sha256=self.META["universe_sha256"]
+        )
+        assert tag == "t"
+
+    def test_mismatch_universe_refused(self, tmp_path):
+        ledger = self._ledger_with_meta(tmp_path, self.META)
+        with pytest.raises(ValueError, match="宇宙指纹不符"):
+            ec.load_ledger(ledger, expected_universe_sha256="ffff0000ffff0000")
+
+    def test_no_expected_skips_guard(self, tmp_path):
+        """不传 expected（纯读取/测试通道）不校验宇宙。"""
+        _cfg, _state, _batches, tag = ec.load_ledger(
+            self._ledger_with_meta(tmp_path, self.META)
+        )
+        assert tag == "t"

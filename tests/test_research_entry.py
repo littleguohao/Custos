@@ -70,9 +70,13 @@ class TestStaleIsVisible:
     """
 
     def test_no_stale_tools_after_44(self):
-        """#44 定案后注册表不应再有 stale 条目；新增 stale 须同步更新本断言。"""
+        """#44 定案后注册表不应再有 stale 条目；新增 stale 须同步更新本断言。
+        v0.356（TODO #90）：C5 两终端退役标 stale——pre2019 终审由判定段
+        2017~2021 + holdout 接替，已判结论不改（工具保留可复现 R36/R37）。"""
         got = {n for n, (k, _) in entry.TOOLS.items() if k == "stale"}
-        assert not got, f"stale 集合变了：{got}"
+        assert got == {"exit_c5_terminal", "score_c5_terminal"}, (
+            f"stale 集合变了：{got}"
+        )
 
     def test_stale_machinery_still_registered(self):
         """机制保留：ORDER/LABEL 里 stale 还在，未来标 stale 的工具能渲染分节。"""

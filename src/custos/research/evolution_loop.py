@@ -1034,6 +1034,9 @@ def main(
     pool = TrajectoryPool.load(
         out_dir / "trajectory_pool.json",
         expected_objective_version=sg.OBJECTIVE_VERSION,
+        expected_universe_sha256=(getattr(args, "universe_meta", None) or {}).get(
+            "universe_sha256"
+        ),
     )
 
     # 双窗物理隔离 ①：加载后立刻按 mining_end 截尾一份副本给循环；全量 bars

@@ -478,3 +478,36 @@ class TestGenomeFields:
         pool.add(_mk(gate="j_low", exit_params={"stop_pct": 5}))
         with pytest.raises(ValueError, match="冲突"):
             pool.add(_mk(gate="j_low_adx25", exit_params={"stop_pct": 5}))
+
+
+class TestUniverseGuard:
+    """轨迹池宇宙守卫（v0.356，TODO #89）：换宇宙续跑 fail-closed。"""
+
+    def test_saved_payload_carries_universe(self, tmp_path):
+        p = TrajectoryPool(tmp_path / "pool.json", universe_sha256="abc123abc123abcd")
+        p.save()
+        doc = json.loads((tmp_path / "pool.json").read_text(encoding="utf-8"))
+        assert doc["universe_sha256"] == "abc123abc123abcd"
+
+    def test_matching_universe_loads(self, tmp_path):
+        p = TrajectoryPool(tmp_path / "pool.json", universe_sha256="abc123abc123abcd")
+        p.save()
+        pool = TrajectoryPool.load(
+            tmp_path / "pool.json", expected_universe_sha256="abc123abc123abcd"
+        )
+        assert len(pool) == 0
+
+    def test_mismatch_universe_refused(self, tmp_path):
+        p = TrajectoryPool(tmp_path / "pool.json", universe_sha256="abc123abc123abcd")
+        p.save()
+        with pytest.raises(ValueError, match="宇宙指纹不符"):
+            TrajectoryPool.load(
+                tmp_path / "pool.json", expected_universe_sha256="ffff0000ffff0000"
+            )
+
+    def test_no_expected_adopts_stored(self, tmp_path):
+        """不传 expected（纯表达式消费通道）不校验，并采用池中指纹。"""
+        p = TrajectoryPool(tmp_path / "pool.json", universe_sha256="abc123abc123abcd")
+        p.save()
+        pool = TrajectoryPool.load(tmp_path / "pool.json")
+        assert pool._universe_sha256 == "abc123abc123abcd"

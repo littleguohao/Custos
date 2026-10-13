@@ -90,3 +90,37 @@ class TestBuild:
         assert blk["data_last_date"] is None
         assert blk["cmdline"] is None
         assert blk["objective_version"] == sg.OBJECTIVE_VERSION
+
+
+class TestUniverseFields:
+    """宇宙三件套（v0.356，TODO #89）：meta 优先 / codes_file 回退 / 全 None。"""
+
+    def test_universe_meta_priority(self, tmp_path):
+        codes = tmp_path / "c.txt"
+        codes.write_text("600000\n", encoding="utf-8")
+        meta = {
+            "universe_rule": "ashare_full_asof",
+            "n_codes": 3,
+            "universe_sha256": "0123456789abcdef",
+        }
+        ns = argparse.Namespace(codes_file=str(codes), cmdline=None, universe_meta=meta)
+        blk = pv.build(ns, unit="R99")
+        assert blk["universe_rule"] == "ashare_full_asof"
+        assert blk["n_codes"] == 3
+        assert blk["universe_sha256"] == "0123456789abcdef"  # meta 优先于文件哈希
+
+    def test_codes_file_fallback(self, tmp_path):
+        codes = tmp_path / "c.txt"
+        codes.write_text("600000\n", encoding="utf-8")
+        blk = pv.build(
+            argparse.Namespace(codes_file=str(codes), cmdline=None), unit="R99"
+        )
+        assert blk["universe_rule"] == "codes_file"
+        assert blk["n_codes"] is None
+        assert blk["universe_sha256"] == pv.file_sha256(codes)
+
+    def test_no_universe_all_none(self):
+        blk = pv.build(argparse.Namespace(codes_file="", cmdline=None), unit="R99")
+        assert blk["universe_rule"] is None
+        assert blk["n_codes"] is None
+        assert blk["universe_sha256"] is None

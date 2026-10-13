@@ -77,10 +77,10 @@ TOOLS: dict[str, tuple[str, str]] = {
         " + 台账多重比较记账（基准 pct5_trail08，随机臂随行；--resume 续跑）",
     ),
     "exit_c5_terminal": (
-        "driver",
-        "R37-C5 pre2019 终审终端（判据 v0.273 定稿）：冻结候选 vs pct5_trail08"
-        " 配对 bootstrap SE+n 前置，只接受 pre2019 段内窗口（硬拒绝镜像），"
-        "只能杀不能确认",
+        "stale",
+        "🔄 C5 已退役（v0.356，TODO #90：pre2019 终审由判定段 2017~2021 + "
+        "holdout 接替，已判结论不改）——R37-C5 终审终端（判据 v0.273）："
+        "冻结候选 vs pct5_trail08 配对 bootstrap SE+n 前置，只能杀不能确认",
     ),
     "factor_exit_study": (
         "driver",
@@ -152,6 +152,14 @@ TOOLS: dict[str, tuple[str, str]] = {
         "check_reach 实测兜底），显式 --count 仍是覆盖通道；纯函数叶子模块"
         "（exit_campaign 等导入不成环）；CLI 打印某起点的推算根数",
     ),
+    "universe": (
+        "diagnostic",
+        "研究宇宙单一来源（v0.356，TODO #89 owner 定案）：缺省=沪深京 A 股"
+        "全量个股（vipdoc 枚举，is_ashare_stock 与 live 同源）+ 信号日 as-of"
+        " 满 60 根资格 + 不过滤 ST + 不设版本号（规则+n_codes+名单 sha256 进"
+        " provenance，台账/轨迹池续跑不一致拒）；--codes-file 为显式钉死"
+        "兼容通道（R40 及此前单元沿用）；CLI 打印规则/数量/指纹",
+    ),
     "cost_sensitivity": (
         "diagnostic",
         "成本副读数（v0.329，owner 方法论 review #6）：25/50bps 双报——"
@@ -168,10 +176,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "0 事件非零退出不写产物",
     ),
     "score_c5_terminal": (
-        "driver",
-        "R36-C5 pre2019 终审终端（score 侧，exit_c5_terminal 同族镜像）：冻结"
-        " v0-lattice 基因组（产物自含读取）vs 等倍率基准，日簇配对 bootstrap"
-        " + v0.281 CI 三分，只接受 pre2019 段内窗口，只能杀不能确认",
+        "stale",
+        "🔄 C5 已退役（v0.356，TODO #90：pre2019 终审由判定段 2017~2021 + "
+        "holdout 接替，已判结论不改）——R36-C5 终审终端（score 侧，"
+        "exit_c5_terminal 同族镜像）：冻结 v0-lattice 基因组 vs 等倍率基准，"
+        "日簇配对 bootstrap + CI 三分，只能杀不能确认",
     ),
     "score_filter_study": (
         "study",

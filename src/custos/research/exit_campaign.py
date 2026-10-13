@@ -611,7 +611,7 @@ def ctl_step(
 # 战役主循环 + 台账
 # ---------------------------------------------------------------------------
 
-LEDGER_SCHEMA = "exit_campaign_ledger/v3"  # v3：+c4_min_pool 两段式 provisional（v0.269；v2=q95 池）
+LEDGER_SCHEMA = "exit_campaign_ledger/v4"  # v4：+universe 续跑守卫（v0.356，TODO #89；v3=c4 两段式）
 
 
 def ledger_path_for(out_dir: Path, tag: str) -> Path:
@@ -619,7 +619,12 @@ def ledger_path_for(out_dir: Path, tag: str) -> Path:
 
 
 def save_ledger(
-    path: Path, tag: str, cfg: CampaignConfig, state: CampaignState, batches: list[dict]
+    path: Path,
+    tag: str,
+    cfg: CampaignConfig,
+    state: CampaignState,
+    batches: list[dict],
+    universe: Optional[dict] = None,
 ) -> None:
     """整本原子重写（tmp+replace；每批一次，被杀只丢当批——v0.258 教训）。"""
     write_json_atomic(
@@ -627,6 +632,7 @@ def save_ledger(
         {
             "schema": LEDGER_SCHEMA,
             "objective_version": _sg_obj_version(),  # 续跑守卫（v0.320，见 load_ledger）
+            "universe": universe,  # 续跑守卫（v0.356：meta 三件套，None=未解析）
             "campaign": tag,
             "config": asdict(cfg),
             "state": asdict(state),
@@ -635,14 +641,21 @@ def save_ledger(
     )
 
 
-def load_ledger(path: Path) -> tuple[CampaignConfig, CampaignState, list[dict], str]:
-    """读台账 → (config, state, batches, tag)；schema/objective 版本不符即报错（不猜）。
+def load_ledger(
+    path: Path, *, expected_universe_sha256: Optional[str] = None
+) -> tuple[CampaignConfig, CampaignState, list[dict], str]:
+    """读台账 → (config, state, batches, tag)；schema/objective/宇宙不符即报错（不猜）。
 
     ⚠️ objective_version 守卫（v0.320，owner review）：random_pool 里存的是
     objective 值——跨 objective 版本续跑会把新旧口径（量级差近一个数量级）
     混进同一池，q95 与候选比较的就不是同一把尺子且**全程无报错**。版本
     不符（含守卫前旧台账无此字段）⇒ fail-closed 拒绝续跑：换 --tag 开新
     战役（R37 已收口，旧台账本不该续）。
+
+    ⚠️ universe 守卫（v0.356，TODO #89）：台账记解析时宇宙 meta（规则+
+    n_codes+名单指纹）——换宇宙续跑（含 vipdoc 下载变动导致的全量名单
+    漂移）会把另一批票混进同一随机池，与跨 objective 版本同害；传入当前
+    解析的 universe_sha256 且不一致（含旧 v4 台账缺字段）⇒ fail-closed。
     """
     doc = json.loads(path.read_text(encoding="utf-8"))
     if doc.get("schema") != LEDGER_SCHEMA:
@@ -657,6 +670,14 @@ def load_ledger(path: Path) -> tuple[CampaignConfig, CampaignState, list[dict], 
             "跨版本续跑会把新旧口径混进同一随机池（v0.320 守卫），"
             "请换 --tag 开新战役"
         )
+    if expected_universe_sha256 is not None:
+        got_u = (doc.get("universe") or {}).get("universe_sha256")
+        if got_u != expected_universe_sha256:
+            raise ValueError(
+                f"台账宇宙指纹不符: {got_u!r}（当前解析 {expected_universe_sha256}）"
+                "——换宇宙续跑会把另一批票混进同一随机池（v0.356 守卫），"
+                "请换 --tag 开新战役"
+            )
     cfg = CampaignConfig(**doc["config"])
     st = doc["state"]
     state = CampaignState(
@@ -701,6 +722,7 @@ def run_campaign(
     resume: bool = False,
     tag: str = "",
     synthetic: bool = False,
+    universe_meta: Optional[dict] = None,
 ) -> dict:
     """战役主循环：批次 → CTL → 台账，直到 CTL 给出结局（或 max_batches 冒烟停）。
 
@@ -712,7 +734,10 @@ def run_campaign(
     batches: list[dict] = []
     state = CampaignState()
     if resume and ledger_path.exists():
-        cfg_l, state, batches, tag_l = load_ledger(ledger_path)
+        cfg_l, state, batches, tag_l = load_ledger(
+            ledger_path,
+            expected_universe_sha256=(universe_meta or {}).get("universe_sha256"),
+        )
         if cfg_l != cfg:
             print(
                 f"[WARN] --resume：CLI 配置与台账不一致，以**台账**为准（tag={tag_l}）",
@@ -775,7 +800,7 @@ def run_campaign(
                 rw_rand.append(None)
         record = ctl_step(cfg, state, evolve, rand, rw_evolve, rw_rand, evaluator, rng)
         batches.append(record)
-        save_ledger(ledger_path, tag, cfg, state, batches)
+        save_ledger(ledger_path, tag, cfg, state, batches, universe=universe_meta)
         print(
             f"[campaign] 批 {state.batch_id} 毕：top={record['top_key']} "
             f"C2过={len(record['c2_pass_keys'])} 开放家族={len(state.open_families)} "
@@ -785,7 +810,18 @@ def run_campaign(
             file=sys.stderr,
         )
 
-    _wu_k = wu.record_use("R37", "judgment", tag, "战役判定窗读数", synthetic=synthetic)
+    from custos.research import load_window as lw  # noqa: PLC0415
+
+    # v2 台账口径（TODO #90）：只有判定窗=受保护段（2017~2021）才登记——
+    # legacy 窗（2024~2026）已并入挖掘 B，读挖掘段不入台账（挖掘数据自由可读）。
+    _is_protected_judgment = (cfg.judgment_start, cfg.judgment_end) == lw.SEG_JUDGMENT
+    _wu_k = (
+        wu.record_use(
+            "R37", "judgment_2017_2021", tag, "战役判定窗读数", synthetic=synthetic
+        )
+        if _is_protected_judgment
+        else None
+    )
     from custos.research import provenance as pv  # noqa: PLC0415
     from custos.research.load_window import EXIT_BARS_HOLDOUT_NOTE  # noqa: PLC0415
     import types as _t  # noqa: PLC0415
@@ -796,9 +832,15 @@ def run_campaign(
         "status": state.status,
         "objective_version": _sg_obj_version(),
         "window_usage": {
-            "window": "judgment",
+            "window": (
+                "judgment_2017_2021" if _is_protected_judgment else "mining_segment"
+            ),
             "k": _wu_k,
-            "note": wu.usage_note("R37", "judgment", _wu_k),
+            "note": (
+                wu.usage_note("R37", "judgment_2017_2021", _wu_k)
+                if _is_protected_judgment
+                else "判定窗在挖掘段内（非受保护段 2017~2021）——读挖掘段不入台账（v2 口径）"
+            ),
         },
         "forward_holdout_note": EXIT_BARS_HOLDOUT_NOTE,
         "provenance": pv.build(
@@ -925,6 +967,9 @@ def make_v0_replay_evaluator(args: Any, ap: argparse.ArgumentParser) -> Evaluato
         codes=args.codes,
     )
     codes = bt._resolve_universe(ns, ap)
+    args.universe_meta = (
+        ns.universe_meta
+    )  # 回塞 CLI args：main 续跑守卫/provenance 用（v0.356）
     starts = [args.mining_start, args.judgment_start]
     regime = bt.load_amv_regime(since=min(starts))
     if not regime:
@@ -1156,6 +1201,7 @@ def main(
             resume=args.resume,
             tag=args.tag,
             synthetic=evaluator is not None,  # 注入评估器 ⇒ 不写台账（v0.334）
+            universe_meta=getattr(args, "universe_meta", None),
         )
     except LedgerSpaceChanged as exc:
         ap.error(str(exc))  # 档位空间守卫：干净 exit 2，不留 traceback

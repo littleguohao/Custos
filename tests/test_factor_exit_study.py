@@ -390,7 +390,9 @@ class TestJudges:
 
 
 class TestCliGuards:
-    def test_pre2019_overlap_rejected(self):
+    def test_cross_segment_rejected(self):
+        """v2 段检查（TODO #90）：窗口越段即拒（原 pre2019 交集拒绝的接任者——
+        mining-start 2015 ⇒ 窗跨挖掘 A/判定/挖掘 B 三段，不在任何单段内）。"""
         ap = fes._build_parser()
         args = ap.parse_args(["--tag", "t", "--mining-start", "2015-01-01"])
         with pytest.raises(SystemExit):

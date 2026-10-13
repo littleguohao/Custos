@@ -32,6 +32,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from custos.core.paths import TDX_ROOT, cn_today, CACHE_DIR  # noqa: E402
 from custos.core.code_utils import (
+    ASHARE_STOCK_PREFIXES,
     SH_INDEX_BARE,
     market_of,
     norm_code as _cu_norm_code,
@@ -864,17 +865,13 @@ def get_stock_name_map(pool_type: str = "5") -> dict[str, str]:
 def _is_ashare_stock_file(market: str, code6: str) -> bool:
     """按 vipdoc 文件的市场目录 + 6位代码判定是否 A 股个股（排除指数/ETF/债券）。
 
+    前缀集单源 = ``code_utils.ASHARE_STOCK_PREFIXES``（逐位等价委托）：
     - sh: 600/601/603/605/688（排除 000/880 指数、5xx ETF/基金）
     - sz: 000/001/002/003/300/301（排除 15/16/18 ETF、399 指数）
     - bj: 43/83/87/88/920
     """
-    if market == "sh":
-        return code6.startswith(("600", "601", "603", "605", "688"))
-    if market == "sz":
-        return code6.startswith(("000", "001", "002", "003", "300", "301"))
-    if market == "bj":
-        return code6.startswith(("43", "83", "87", "88", "920"))
-    return False
+    ps = ASHARE_STOCK_PREFIXES.get(market)
+    return ps is not None and code6.startswith(ps)
 
 
 def list_local_vipdoc_codes(

@@ -28,19 +28,29 @@ def _read(path):
 class TestRecordUse:
     def test_k_increments_and_windows_separate(self, tmp_path):
         p = tmp_path / "led.jsonl"
-        assert wu.record_use("R39", "judgment", "t1", "x", path=p) == 1
-        assert wu.record_use("R40", "judgment", "t2", "x", path=p) == 2
-        assert wu.record_use("R37-C5", "pre2019", "t3", "x", path=p) == 1
-        assert wu.count_uses("judgment", path=p) == 2
-        assert wu.count_uses("pre2019", path=p) == 1
+        assert wu.record_use("R39", "judgment_2017_2021", "t1", "x", path=p) == 1
+        assert wu.record_use("R40", "judgment_2017_2021", "t2", "x", path=p) == 2
+        assert wu.count_uses("judgment_2017_2021", path=p) == 2
+        assert wu.count_uses("pre2019", path=p) == 0
         rows = _read(p)
-        assert [r["unit"] for r in rows] == ["R39", "R40", "R37-C5"]
+        assert [r["unit"] for r in rows] == ["R39", "R40"]
         assert all(r["schema"] == wu.SCHEMA for r in rows)
+
+    def test_frozen_window_keys_rejected(self, tmp_path):
+        """v2 布局（TODO #90）：旧键只判读历史行，新写入 fail-closed。"""
+        p = tmp_path / "led.jsonl"
+        for frozen in ("judgment", "pre2019"):
+            with pytest.raises(ValueError, match="已冻结"):
+                wu.record_use("R39", frozen, "t", "x", path=p)
+        assert not p.exists()  # 拒绝在写入前，不落任何行
+        # 历史行判读不受影响（count_uses/usage_note 只读）
+        assert wu.count_uses("judgment", path=p) == 0
+        assert "2024-08-01~2026-09-04" in wu.usage_note("R39", "judgment", 1)
 
     def test_daily_snapshot_created(self, tmp_path):
         p = tmp_path / "led.jsonl"
-        wu.record_use("R39", "judgment", "t1", "x", path=p)
-        wu.record_use("R40", "judgment", "t2", "x", path=p)
+        wu.record_use("R39", "judgment_2017_2021", "t1", "x", path=p)
+        wu.record_use("R40", "judgment_2017_2021", "t2", "x", path=p)
         baks = list(tmp_path.glob("led.jsonl.bak_*"))
         assert len(baks) == 1
         assert len(_read(baks[0])) == 1  # 快照=第二次写入前的内容
@@ -49,13 +59,13 @@ class TestRecordUse:
     def test_write_failure_does_not_crash(self, tmp_path, capsys):
         d = tmp_path / "as_dir"
         d.mkdir()  # 用目录当路径 ⇒ open 失败
-        k = wu.record_use("R39", "judgment", "t1", "x", path=d)
+        k = wu.record_use("R39", "judgment_2017_2021", "t1", "x", path=d)
         assert k == 0  # 写不进去 ⇒ 返回当时计数（0），不炸研究
         assert "判定窗台账写入失败" in capsys.readouterr().err
 
     def test_default_path_is_redirected(self):
         """不显式传 path ⇒ 走 conftest 改道的 tmp（不碰真实 governance 台账）。"""
-        k = wu.record_use("RTEST", "judgment", "t", "x")
+        k = wu.record_use("RTEST", "judgment_2017_2021", "t", "x")
         assert k == 1
         assert "governance" not in str(wu.LEDGER)
 

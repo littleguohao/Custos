@@ -357,6 +357,7 @@
 | 2026-10-13 | v0.353 | **mypy 进 CI（owner 拍板——0 错基线时进 CI 成本最低；TODO #85 闭环）**：tests.yml 新增 mypy job（ubuntu 单平台 + mypy.linux.ini 压噪口径——Windows 全量不压是另一套噪音面，见 audit.ps1），命令 uv run --with mypy==2.4.0；版本三处互锚（workflow/audit.sh/audit.ps1——单边漂移=本地与 CI 结果分叉）；AGENTS §3 同步「CI 红必须当天修」含 mypy job | owner 2026-10-13 | CI mypy job 绿 |
 | 2026-10-13 | v0.354 | **研究宇宙口径定案（owner 拍板，实现 TODO #89）**：s3000 冻结名单退役——新单元用沪深京 A 股个股全量、信号日 as-of 满 N 根即有资格、不过滤 ST（无历史 ST 状态）、不设版本号（provenance 记规则+n_codes+sha，续跑口径不一致拒绝）；R40 及此前单元沿用 s3000 | owner | 治理守卫绿 |
 | 2026-10-13 | v0.355 | **研究窗口布局定案（owner 拍板，实现 TODO #90/#91）**：2000 年后数据全启用——挖掘 A 2000~2016 / 判定 2017~2021（批量只读一次）/ 挖掘 B 2022~2026-09-04 / holdout 不变；段边界禁开仓隔离带；C5 退役（已判结论不改）；切换后先在挖掘段做基线重测 | owner | 治理守卫绿 |
+| 2026-10-13 | v0.356 | **#89/#90 Phase 0 单源件（owner 定案；三口径拍板：隔离带段末 90 天/合并读数/N=60）**：universe.py 宇宙单源（缺省=vipdoc 全量 as-of，--codes-file 改可选）+ is_ashare_stock 公共谓词（live 同源委托）；load_window v2 段常量+段检查+隔离带单源；provenance 宇宙三件套；续跑守卫加宇宙（ledger v4/轨迹池）；台账键换代 judgment_2017_2021（旧键冻结 fail-closed）；C5 入口退役（TOOLS stale）+ pre2019 硬拒绝拆除 | owner 2026-10-13 | mypy=0；钉测 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

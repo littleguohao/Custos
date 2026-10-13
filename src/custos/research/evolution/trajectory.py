@@ -247,11 +247,17 @@ class TrajectoryPool:
     """轨迹池：全量轨迹的内存索引 + JSON 持久化。"""
 
     def __init__(
-        self, path: Path | None = None, objective_version: str | None = None
+        self,
+        path: Path | None = None,
+        objective_version: str | None = None,
+        universe_sha256: str | None = None,
     ) -> None:
         self._path = path
         self._objective_version = (
             objective_version  # 池口径标记（save 落盘；续跑守卫见 load）
+        )
+        self._universe_sha256 = (
+            universe_sha256  # 宇宙名单指纹（save 落盘；续跑守卫见 load，v0.356）
         )
         self._items: list[Trajectory] = []  # 插入序，all/best 的稳定序来源
         self._by_id: dict[str, Trajectory] = {}
@@ -329,6 +335,7 @@ class TrajectoryPool:
         payload = {
             "version": _FILE_VERSION,
             "objective_version": self._objective_version,
+            "universe_sha256": self._universe_sha256,
             "trajectories": [t.to_dict() for t in self._items],
         }
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -339,7 +346,10 @@ class TrajectoryPool:
 
     @classmethod
     def load(
-        cls, path: Path, expected_objective_version: str | None = None
+        cls,
+        path: Path,
+        expected_objective_version: str | None = None,
+        expected_universe_sha256: str | None = None,
     ) -> TrajectoryPool:
         """文件不存在 → 空池（path 仍绑定，可直接 save）；损坏 → raise。
 
@@ -349,8 +359,17 @@ class TrajectoryPool:
         此字段 ⇒ 同样拒）。不符 ⇒ ValueError（fail-closed：换 --tag 开新
         池）。不传 expected 的读法（测试/纯表达式消费）不校验。本模块保持
         零同包依赖：版本值由调用方注入，不 import strategy_grid。
+
+        ⚠️ universe 守卫（v0.356，TODO #89）：传 ``expected_universe_sha256``
+        时校验名单指纹——换宇宙续跑（含 vipdoc 下载变动导致的全量名单漂移）
+        会把另一批票的轨迹混进同一池，与跨 objective 版本同害；不符（含
+        守卫前旧池缺字段）⇒ ValueError。
         """
-        pool = cls(path, objective_version=expected_objective_version)
+        pool = cls(
+            path,
+            objective_version=expected_objective_version,
+            universe_sha256=expected_universe_sha256,
+        )
         if not path.exists():
             return pool
         with path.open("r", encoding="utf-8") as fh:
@@ -368,6 +387,16 @@ class TrajectoryPool:
             pool._objective_version = got
         else:
             pool._objective_version = payload.get("objective_version")
+        if expected_universe_sha256 is not None:
+            got_u = payload.get("universe_sha256")
+            if got_u != expected_universe_sha256:
+                raise ValueError(
+                    f"轨迹池宇宙指纹不符: {got_u!r}（当前解析 "
+                    f"{expected_universe_sha256}）——换宇宙续跑会把另一批票"
+                    "混进同一池（v0.356 守卫），请换 --tag 开新池"
+                )
+        else:
+            pool._universe_sha256 = payload.get("universe_sha256")
         records = payload.get("trajectories")
         if not isinstance(records, list):
             raise ValueError(f"trajectories 必须是 list: {path}")

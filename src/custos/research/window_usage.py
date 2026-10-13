@@ -39,11 +39,19 @@ LEDGER = RESEARCH_DIR / "window_usage.jsonl"
 
 SCHEMA = "window_usage/v1"
 
-#: 窗名 → 区间锚定（展示/判读用；键只用窗名）
+#: 窗名 → 区间锚定（展示/判读用；键只用窗名）。
+#: v0.356（TODO #90）：判定窗换代 2017~2021（新键 judgment_2017_2021——
+#: 攒一批候选**只读一次**，单独记台账）；旧键 judgment（2024~2026，已并入
+#: 挖掘 B）/pre2019（C5 退役）**冻结**——只判读历史行，不再新写。
 WINDOW_SPAN = {
+    "judgment_2017_2021": "2017-01-01~2021-12-31",
     "judgment": "2024-08-01~2026-09-04",
     "pre2019": "2010-01-01~2016-12-31",
 }
+
+#: 冻结窗名（只判读历史行）：record_use 收到这些键 ⇒ fail-closed（忘改调用
+#: 点的信号——新写入只允许 judgment_2017_2021；合成路径本就不写，不受影响）。
+FROZEN_WINDOWS = frozenset({"judgment", "pre2019"})
 
 
 def _backup_ledger_daily(path: Path) -> None:
@@ -109,6 +117,12 @@ def record_use(
     """
     if synthetic:
         return None
+    if window in FROZEN_WINDOWS:
+        raise ValueError(
+            f"窗口键 {window!r} 已冻结（v2 布局：判定窗换代 judgment_2017_2021，"
+            "旧 judgment 并入挖掘 B、pre2019 随 C5 退役）——只判读历史行，"
+            "不再新写；调用点忘改键的信号（TODO #90）"
+        )
     path = Path(path) if path else LEDGER
     row: dict[str, Any] = {
         "schema": SCHEMA,

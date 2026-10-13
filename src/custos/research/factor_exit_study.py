@@ -50,10 +50,6 @@ from custos.core.paths import RESEARCH_DIR
 from custos.research.evolution import exit_genome as eg
 from custos.research import criteria_kit as kit
 from custos.research import window_usage as wu
-from custos.research.exit_c5_terminal import (
-    PRE2019_END,
-    PRE2019_START,
-)
 
 #: R39 写死档集（K=4，机制象限策展；全部经 exit_genome.validate 合法）
 PROFILES: dict[str, dict[str, Any]] = {
@@ -1089,22 +1085,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _check_windows(args: Any, ap: argparse.ArgumentParser) -> None:
-    """窗口护栏：与 pre2019 untouched 段交集即拒（同族镜像）+ 双窗次序 +
-    **前向 holdout 冻结**（v0.321，owner 方法论 review #1②；v0.330 起
-    校验本体=load_window 共享单源——owner review #2②）。"""
-    from custos.research.load_window import forward_holdout_violation  # noqa: PLC0415
+    """窗口护栏：段检查（load_window.segment_violation 单源——窗口须 ⊆ 挖掘 A/
+    判定/挖掘 B 之一且不触 holdout；v0.356，TODO #90）+ 双窗次序。
+    v0.356 拆除 pre2019 交集硬拒绝——C5 退役、挖掘 A 与该段天然重叠。
+    R40 旧窗（⊆ 挖掘 B）段内子窗自动合法（兼容通道在案）。"""
+    from custos.research.load_window import segment_violation  # noqa: PLC0415
 
     for wname in ("mining", "judgment"):
         s = getattr(args, f"{wname}_start")
         e = getattr(args, f"{wname}_end")
-        if s > e:
-            ap.error(f"{wname} 窗口起终点颠倒: {s}~{e}")
-        if s <= PRE2019_END and e >= PRE2019_START:
-            ap.error(
-                f"{wname} 窗口 {s}~{e} 与 pre2019 untouched 段"
-                f"（{PRE2019_START}~{PRE2019_END}）交集——研究工具对 pre2019 硬拒绝"
-            )
-        msg = forward_holdout_violation(s, e)
+        msg = segment_violation(s, e)
         if msg:
             ap.error(f"{wname} {msg}")
     if args.mining_end >= args.judgment_start:

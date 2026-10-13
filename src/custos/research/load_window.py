@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import date as _date
+from datetime import timedelta as _timedelta
 from typing import Any, Iterable, Optional
 
 #: 前向 holdout 冻结起点（v0.321，owner 方法论 review #1②）：≥此日期的
@@ -22,6 +23,62 @@ from typing import Any, Iterable, Optional
 #: evolution_loop/strategy_grid/backtest_factors 入口漏守被 owner review
 #: #2 实测抓出）；exit_c5_terminal 等处 re-export 兼容。
 FORWARD_HOLDOUT_START = "2026-09-05"
+
+#: 新窗口布局段常量（owner 2026-10-13 拍板，TODO #90，v2 布局）：
+#: 挖掘 A（原 pre2019 并入——起点待 TODO #91 数据核查，单源在此一行可调）/
+#: 判定（攒一批候选**只读一次**，单独记台账）/ 挖掘 B（原挖掘窗+已读脏的
+#: 原判定窗）/ 前向 holdout（冻结不变）。C5 pre2019 终审退役（已判结论不改）。
+SEG_MINING_A = ("2000-01-01", "2016-12-31")
+SEG_JUDGMENT = ("2017-01-01", "2021-12-31")
+SEG_MINING_B = ("2022-01-01", "2026-09-04")
+SEGMENTS = (SEG_MINING_A, SEG_JUDGMENT, SEG_MINING_B)
+SEGMENT_NAMES = ("mining_a", "judgment", "mining_b")
+
+#: 段边界禁开仓隔离带 = 段末单侧 90 自然日（≈最长持有期 3 个月——
+#: owner 2026-10-13 拍板）：截止后不开仓，持仓就不会跨段读到下一段的
+#: 结果；段首不滤（指标预热只读价格，定案豁免）。
+SEGMENT_BUFFER_DAYS = 90
+
+
+def entry_deadline(seg_end: str) -> str:
+    """段的入场截止日 = 段末日 − SEGMENT_BUFFER_DAYS（YYYY-MM-DD）。"""
+    return (
+        _date.fromisoformat(str(seg_end)[:10]) - _timedelta(days=SEGMENT_BUFFER_DAYS)
+    ).isoformat()
+
+
+def clip_entries(recs: list, seg_end: str, *, key: Any = "date") -> list:
+    """滤掉入场日 > entry_deadline(seg_end) 的记录（段末隔离带单源）。
+
+    ``key``：记录里入场日字段名（信号 "date" / 交易 "entry_date"）或
+    取日期的可调用；段首侧不滤（预热只读价格不算读判定段）。剔除数由
+    调用方 len 差值自记（报告要求隔离带剔除数在案）。"""
+    dl = entry_deadline(seg_end)
+    get = key if callable(key) else lambda r: str(r.get(key) or "")[:10]
+    return [r for r in recs if get(r) <= dl]
+
+
+def segment_violation(start: str, end: str) -> Optional[str]:
+    """窗口段检查（v2 布局单源）：[start,end] 须完整落在**某一段内**
+    （挖掘 A / 判定 / 挖掘 B 之一；段内子窗合法——R40 旧窗 ⊆ 挖掘 B 自动
+    合法，兼容通道在案），越段或触及前向 holdout ⇒ 错误文案；否则 None。"""
+    s, e = str(start)[:10], str(end)[:10]
+    if e < s:
+        return f"窗口 {s}~{e} 起终颠倒"
+    msg = forward_holdout_violation(s, e)
+    if msg:
+        return msg
+    for ss, ee in SEGMENTS:
+        if ss <= s and e <= ee:
+            return None
+    return (
+        f"窗口 {s}~{e} 不在任何研究段内"
+        f"（挖掘 A {SEG_MINING_A[0]}~{SEG_MINING_A[1]} /"
+        f" 判定 {SEG_JUDGMENT[0]}~{SEG_JUDGMENT[1]} /"
+        f" 挖掘 B {SEG_MINING_B[0]}~{SEG_MINING_B[1]}）"
+        "——越段窗口禁止（v2 布局，owner 2026-10-13 拍板）"
+    )
+
 
 #: 出场落 holdout 的口径注记（owner review #2②：判定窗末尾前进场的交易，
 #: 出场会落到 holdout 区间的 bar 上）。选择**注记**而非截数据：截到 09-04
