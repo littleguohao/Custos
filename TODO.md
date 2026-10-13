@@ -21,7 +21,6 @@
 | 61 | capital_intent 等 candidate 因子的分值校准（candidate→active 前提，含 #62 迁入的 7 个技术分轴因子）。目标函数已由 objective v2.1 承担；剩余的「分层行动语义」经 R42 证伪，目前无在案路径 | P3 | owner | 定：维持 candidate 结案，或随 #87 终局另立问法 | owner 2026-10-09；[R42](governance/research/R42_score_tier_position.md) |
 | 76 | #67 接口收敛的最后保险：1800 候选表标注列影子对照，非 BJ 宇宙逐位一致攒满 10 个交易日即闭环（进度 3/10，09-24 为止） | P3 | 生产机 | 继续跑 `scripts/dev/shadow_1800_compare.sh` 并记进度 | [设计稿](governance/strategy/_factors/interface_unification_plan.md)；v0.239 / v0.295 |
 | 80 | LLM 转岗：从「提数值表达式」改为「读失败模式、提机制假设」（证据：表达式提案不比随机好，Phase 1 诊断是机制级洞察）。原落地形态 R37 Phase 3 已随 R37 收口失效，需重定落点 | P3 | owner | 定落点（R39 已允许 LLM 提机制假设、不碰数值） | owner 方法论 review 2026-09-23 ③（①②④ 已闭环 v0.267/0.286/0.296） |
-| 85 | mypy 进 CI 门槛防回退（v0.346 已清到 0） | P3 | owner | 拍板后由 coder 在 `.github` 工作流加 mypy 步骤 | 原 #84 遗留（v0.346） |
 | 86 | R36 后续维度剩余三项：③条件化/regime（0AMV 作因子条件变量）④盈亏比排序（服务仓位）⑤horizon 与出场轴对齐；另「结构因子基准臂」待打分侧重开时议 | P3 | 挂起 | 判据新建成本高，排在 #81 之后 | owner 2026-09-23 五维度③④⑤；原 #81/#80① |
 | 59 | scorer 双形态剩余：pvcorr / low_vol / momentum / reversal_quality± 可接 `_SCORER_PRECOMPUTE`（每键需逐位等价钉测）；mcap 与黑盒 detector 不接 | P3 | 挂起 | 随回测批次顺带做 | v0.73 审查（③批量写 ④分页并发已否决，理由见 `fetch_pit_financials.py` docstring）；v0.236（s_shape 系已落地） |
 | 26 | 板块信息利用：剩余子项（回调四项切换检查脚本化、主线题材判定重设计）在清理瘦身方向下优先级存疑 | P3 | 挂起 | owner 下次提到时再定做不做 | CHANGELOG v0.77-v0.80 |
@@ -109,6 +108,7 @@
 | 79 | R37 出场轴进化战役 | 2026-10-08 | v0.296 |
 | 83 | R42 功效节 MDE 表回填 | 2026-10-11 | v0.337 |
 | 84 | research 编排主函数 F 级复杂度收敛 | 2026-10-12 | v0.347；遗留「mypy 进 CI」→ #85 |
+| 85 | mypy 进 CI 门槛防回退 | 2026-10-13 | v0.353（tests.yml mypy job） |
 
 ## 维护约定
 

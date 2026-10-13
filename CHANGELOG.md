@@ -354,6 +354,7 @@
 | 2026-10-12 | v0.350 | **TODO「已失效」表取消，改原出处就地标注（owner 拍板）**：7 项逐条回写——R10 待跑 3（qlib 去偏）🔄勿照做、待跑 4 与正文「值得补 pct_03/04」标已完成、R13 qlib 行 🔄、sector_inflow_study / fetch_pit_financials docstring 写明已证伪与刻意不做（批量写/分页并发）；R3/R22 原已标注。test_todo_list 换成原出处同段标记回归钉 8 条（变异 7/7）；AGENTS §6⑤ 与维护约定同步 | owner | 治理守卫绿 |
 | 2026-10-13 | v0.351 | **R41 判毕 falsified（r41_probe）**：计划版（stop_loss_ref 止损）vs 现行 EXIT_RULES——C1 过；C2 判定窗 rdd 相对门不过（Δmargin=+0.0074 但 ret_over_dd 0.36<0.65）；C3 扰动 4/4 翻转；C4 provisional 不影响判决。C2/C3 与 n-random 无关，探针读数即正式口径，正式跑不再发；position_plans 维持影子层，TODO #60 ②只剩 plan_shadow_review K=20 路径（详见 R41 单元） | 判据 v0.315/v0.317 跑数前写死，机械判决 | — |
 | 2026-10-13 | v0.352 | **README 加免责声明（owner）**：非投资建议、回测带幸存者偏差（R14）绝对读数不代表实盘、代码按现状提供、风险自担、数据源条款自守；research/README 当前状态把 R41 移入已关闭路线 | owner | 治理守卫绿 |
+| 2026-10-13 | v0.353 | **mypy 进 CI（owner 拍板——0 错基线时进 CI 成本最低；TODO #85 闭环）**：tests.yml 新增 mypy job（ubuntu 单平台 + mypy.linux.ini 压噪口径——Windows 全量不压是另一套噪音面，见 audit.ps1），命令 uv run --with mypy==2.4.0；版本三处互锚（workflow/audit.sh/audit.ps1——单边漂移=本地与 CI 结果分叉）；AGENTS §3 同步「CI 红必须当天修」含 mypy job | owner 2026-10-13 | CI mypy job 绿 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

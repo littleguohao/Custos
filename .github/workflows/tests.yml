@@ -27,3 +27,19 @@ jobs:
         shell: bash
         run: sed -i 's|pypi\.tuna\.tsinghua\.edu\.cn/packages|files.pythonhosted.org/packages|g; s|pypi\.tuna\.tsinghua\.edu\.cn/simple|pypi.org/simple|g' uv.lock
       - run: uv run pytest -q
+
+  # mypy 类型门槛（2026-10-13 v0.353 起）：mypy 已清到 0 错，趁零位进 CI 防回退。
+  # 只跑 ubuntu：压噪配置 scripts/mypy.linux.ini 本就是 Linux 口径（Windows 全量不压
+  # 是另一套噪音面，见 scripts/audit.ps1 注释）。mypy 版本与 scripts/audit.sh /
+  # audit.ps1 三处互锚——升级要三处一起改，否则本地/CI 结果分叉。
+  mypy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Rewrite tuna mirror URLs to PyPI (tuna 403s from GH runners)
+        shell: bash
+        run: sed -i 's|pypi\.tuna\.tsinghua\.edu\.cn/packages|files.pythonhosted.org/packages|g; s|pypi\.tuna\.tsinghua\.edu\.cn/simple|pypi.org/simple|g' uv.lock
+      - run: uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/

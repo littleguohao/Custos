@@ -110,11 +110,12 @@ schema 并在生产者落盘前 `require()`（豁免要登记理由），否则�
 uv run python scripts/dev/test_affected.py   # 本地迭代默认：受影响模块 + 守卫集（--dry-run 看选择，--full 转全量）
 uv run pytest -q                             # 全量（~6 分钟 / ~6600 例）；GitHub CI 双平台每个 push/PR 必跑
 bash scripts/audit.sh                        # 六件套；第 0 件 ruff format --check 是唯一硬门槛
-uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/
+uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 错基线；CI 有同名 job（ubuntu），版本与 audit.sh/ps1 三处互锚
 ```
 
 - **测试分工**：本地提交前 `test_affected.py` 必须绿；全量交给 CI（ubuntu + windows），
-  **CI 红必须当天修**。conftest / pyproject / uv.lock / .github / tests/helpers_* 改动
+  **CI 红必须当天修**（含 mypy job——0 错基线，任何新增 type error 即红）。conftest /
+  pyproject / uv.lock / .github / tests/helpers_* 改动
   自动转全量；治理文件（governance/**、TODO/CHANGELOG/README/AGENTS、非数据 JSON）改动
   追加治理守卫集，并按「文件名出现在哪个测试里」补选。
 - Python ≥3.11，依赖只有 pandas/mootdx/openpyxl/requests——**不得新增第三方依赖**

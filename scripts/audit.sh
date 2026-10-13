@@ -37,7 +37,8 @@ echo "      exit=$?（3=有疑似项，需人工甄别，paths 常量等 API 面
 
 if [ "$SKIP_MYPY" -eq 0 ]; then
     echo "[5/6] mypy（类型检查，首次较慢；用 scripts/mypy.linux.ini 压 Linux 环境噪音，Windows 全量不压）..."
-    uv run --with mypy mypy --config-file scripts/mypy.linux.ini src/ > reports/mypy_type.txt 2>&1
+    # 版本与 .github/workflows/tests.yml mypy job / audit.ps1 互锚（v0.353 起 mypy=0 进 CI）
+    uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/ > reports/mypy_type.txt 2>&1
     echo "      exit=$? → reports/mypy_type.txt"
 else
     echo "[5/6] mypy —— 跳过（--skip-mypy）"

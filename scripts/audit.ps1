@@ -1,4 +1,4 @@
-﻿# 静态检查套件（Windows）—— 每次大改之后跑一遍。
+# 静态检查套件（Windows）—— 每次大改之后跑一遍。
 # 报告输出到 reports\（已 gitignore，不入库）。工具经 `uv run --with` 临时注入。
 #
 # 用法（PowerShell）：
@@ -43,8 +43,9 @@ if ($SkipMypy) {
 } else {
     # ⚠️ 有意不带 --config-file：Windows 环境是全的（pandas-stubs/mootdx/tqcenter
     # 都可用），全量不压；Linux 的噪音豁免在 scripts/mypy.linux.ini，仅 audit.sh 使用。
+    # 版本与 .github/workflows/tests.yml mypy job / audit.sh 互锚（v0.353 起 mypy=0 进 CI）。
     Invoke-Audit "[5/6] mypy（类型检查，首次较慢）" "reports\mypy_type.txt" {
-        uv run --with mypy mypy src/
+        uv run --with mypy==2.4.0 mypy src/
     }
 }
 
