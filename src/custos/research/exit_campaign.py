@@ -1179,15 +1179,24 @@ def main(
         args.count = resolve_count(args.count, args.mining_start)  # v0.328 缺省自动推算
     except ValueError as exc:
         ap.error(str(exc))
-    # 前向 holdout 硬拒绝（v0.330 owner review #2②：战役壳此前漏守——
-    # --judgment-end 2026-10-08 实测能通过校验进加载，共享单源=load_window）
-    reject_forward_holdout(
-        (
-            ("mining", args.mining_start, args.mining_end),
-            ("judgment", args.judgment_start, args.judgment_end),
-        ),
-        ap,
-    )
+    # 窗口段检查（v0.358 单源=load_window.segment_violation，含 holdout——
+    # 战役壳此前漏守被 owner review #2② 抓出；判定∩挖掘不相交，v2 口径）
+    from custos.research.load_window import segment_violation  # noqa: PLC0415
+
+    for _wn, _s, _e in (
+        ("mining", args.mining_start, args.mining_end),
+        ("judgment", args.judgment_start, args.judgment_end),
+    ):
+        _msg = segment_violation(_s, _e)
+        if _msg:
+            ap.error(f"{_wn} {_msg}")
+    if not (
+        args.mining_end < args.judgment_start or args.judgment_end < args.mining_start
+    ):
+        ap.error(
+            f"挖掘窗与判定窗必须不相交: mining={args.mining_start}..{args.mining_end}"
+            f" 与 judgment={args.judgment_start}..{args.judgment_end} 相交"
+        )
     ev = evaluator if evaluator is not None else make_v0_replay_evaluator(args, ap)
     ledger = ledger_path_for(Path(args.out_dir), args.tag)
     if not args.resume and ledger.exists():

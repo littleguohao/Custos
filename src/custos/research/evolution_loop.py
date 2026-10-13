@@ -79,11 +79,8 @@ OUTDIR = LOGS / "evolution"
 
 DEFAULT_SEED = 20260909  # 与 LoopConfig.seed 默认一致
 
-# pre2019 untouched 终审段（打分族反过拟合纪律，R12 判据纪律 / R24-R30 沿用）：
-# 2010-2016 段是唯一没被挖掘/调参碰过的终审窗（R22/R24 两轮候选全部死于该段
-# 半窗翻转），进化挖掘/判定窗与之相交一律硬拒绝，保持其 untouched。
-PRE2019_START = "2010-01-01"
-PRE2019_END = "2016-12-31"
+# pre2019 段（2010-2016）已并入挖掘 A（v2 布局 v0.356，TODO #90）——原
+# pre2019 untouched 终审纪律随 C5 退役解除，段检查单源=load_window。
 
 
 class _BudgetExceeded(RuntimeError):
@@ -305,28 +302,33 @@ def _validate_judgment_window(args: Any, ap: argparse.ArgumentParser) -> None:
         ap.error(str(exc))
 
 
-def _overlaps_pre2019(start: str, end: str) -> bool:
-    """闭区间相交判定（ISO 日期字符串序即时间序；端点相接也算碰）。"""
-    return start <= PRE2019_END and end >= PRE2019_START
+def _check_windows(args: Any, ap: argparse.ArgumentParser) -> None:
+    """窗口段检查（v2 布局，v0.358，TODO #90）：逐窗 segment_violation 单源
+    （含 holdout）；--final-judge 时另校验挖掘∩判定不相交（任一序皆可，
+    旧次序规则与 pre2019 硬拒绝已随 C5 退役拆除）。"""
+    from custos.research import load_window as _lw  # noqa: PLC0415
+    from custos.research.evolution.dual_window import (  # noqa: PLC0415
+        Window,
+        validate_windows,
+    )
 
-
-def _reject_pre2019(args: Any, ap: argparse.ArgumentParser) -> None:
-    """pre2019 untouched 终审段硬拒绝：挖掘/判定窗与之相交 → ap.error（exit 2）。
-
-    风格对齐 score_combo_search_study.py 的 pre2019 守卫（⛔ 反过拟合纪律）。
-    """
-    if _overlaps_pre2019(args.mining_start, args.mining_end):
-        ap.error(
-            "⛔ 反过拟合纪律：进化挖掘/判定不许碰 pre2019 untouched 终审段"
-            "（2010-2016）——"
-            f"挖掘窗 {args.mining_start}..{args.mining_end} 与之相交"
-        )
-    if args.final_judge and _overlaps_pre2019(args.judgment_start, args.judgment_end):
-        ap.error(
-            "⛔ 反过拟合纪律：进化挖掘/判定不许碰 pre2019 untouched 终审段"
-            "（2010-2016）——"
-            f"判定窗 {args.judgment_start}..{args.judgment_end} 与之相交"
-        )
+    for wname, s, e in (
+        ("mining", args.mining_start, args.mining_end),
+        ("judgment", args.judgment_start, args.judgment_end),
+    ):
+        if wname == "judgment" and not args.final_judge:
+            continue
+        msg = _lw.segment_violation(s, e)
+        if msg:
+            ap.error(f"{wname} {msg}")
+    if args.final_judge:
+        try:
+            validate_windows(
+                Window(args.mining_start, args.mining_end),
+                Window(args.judgment_start, args.judgment_end),
+            )
+        except ValueError as exc:
+            ap.error(str(exc))
 
 
 def _factor_axis_banner(args: Any) -> None:
@@ -392,15 +394,7 @@ def _validate_args(args: Any, ap: argparse.ArgumentParser) -> None:
             "--joint/--grid-judge 必须显式 --count 盖住窗口"
             "（单元格子进程不继承 loader 默认深度，默认 500 ≈ 两年）"
         )
-    _reject_pre2019(args, ap)
-    # 前向 holdout 硬拒绝（v0.330 owner review #2②，共享单源=load_window；
-    # judgment 窗仅在 --final-judge 时生效——与 pre2019 守卫同口径）
-    from custos.research.load_window import reject_forward_holdout  # noqa: PLC0415
-
-    wins: list[tuple[str, str, str]] = [("mining", args.mining_start, args.mining_end)]
-    if args.final_judge:
-        wins.append(("judgment", args.judgment_start, args.judgment_end))
-    reject_forward_holdout(wins, ap)
+    _check_windows(args, ap)
 
 
 def _assemble_llm(args: Any, ap: argparse.ArgumentParser) -> Any:

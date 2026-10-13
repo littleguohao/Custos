@@ -40,11 +40,14 @@ class DualWindowResult:
 
 
 def validate_windows(mining: Window, judgment: Window) -> None:
-    """fail-closed：窗口格式/自身倒挂/重叠或逆序一律 ValueError。
+    """fail-closed：窗口格式/自身倒挂/段检查/相交一律 ValueError。
 
-    窗口必须严格不重叠且 mining 在 judgment 之前：``mining.end >= judgment.start``
-    即拒绝（端点相接也算重叠 —— 同一天不能既挖又判）。
-    """
+    v2 布局（v0.358，TODO #90）：两窗须各自完整落在某研究段内
+    （``load_window.segment_violation`` 单源），且 mining 与 judgment
+    **不相交**（任一序皆可——判定段天然夹在挖掘 A/B 之间，旧「mining 必在
+    judgment 之前」次序规则退役；端点相接也算相交——同一天不能既挖又判）。"""
+    from custos.research import load_window as _lw  # noqa: PLC0415
+
     for w in (mining, judgment):
         try:
             s, e = date.fromisoformat(w.start), date.fromisoformat(w.end)
@@ -52,10 +55,14 @@ def validate_windows(mining: Window, judgment: Window) -> None:
             raise ValueError(f"窗口日期须为 YYYY-MM-DD: {w}") from exc
         if s > e:
             raise ValueError(f"窗口起止倒挂: start={w.start} > end={w.end}")
-    if mining.end >= judgment.start:
+        msg = _lw.segment_violation(w.start, w.end)
+        if msg:
+            raise ValueError(msg)
+    if not (mining.end < judgment.start or judgment.end < mining.start):
         raise ValueError(
-            "窗口必须严格不重叠且 mining 在 judgment 之前: "
-            f"mining.end={mining.end} >= judgment.start={judgment.start}"
+            "挖掘窗与判定窗必须不相交: "
+            f"mining={mining.start}..{mining.end} 与 "
+            f"judgment={judgment.start}..{judgment.end} 相交"
         )
 
 

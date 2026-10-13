@@ -890,7 +890,7 @@ class TestFinalJudgment:
     def test_overlapping_windows_rejected(self):
         pool = TrajectoryPool()
         pool.add(_mk_traj("ROC(CLOSE,5)"))
-        with pytest.raises(ValueError, match="不重叠"):
+        with pytest.raises(ValueError, match="不相交"):
             loop_mod.final_judgment(
                 pool,
                 make_bars(),
@@ -1102,10 +1102,10 @@ class TestCLI:
         assert exc.value.code == 2
 
 
-# ---------- pre2019 untouched 终审段硬拒绝（反过拟合纪律） ----------
+# ---------- 窗口段检查（v2 布局，v0.358——pre2019 守卫的接任者） ----------
 
 
-class TestPre2019Guard:
+class TestSegmentGuard:
     @staticmethod
     def _parse(*extra):
         ap = el._build_parser()
@@ -1114,26 +1114,59 @@ class TestPre2019Guard:
     @pytest.mark.parametrize(
         "start,end",
         [
-            ("2015-01-01", "2020-12-31"),  # 跨越终审段右缘
-            ("2010-01-01", "2016-12-31"),  # 恰好覆盖整段
-            ("2009-01-01", "2010-01-01"),  # 端点相接也算碰
-            ("2012-06-01", "2013-06-30"),  # 整窗落在段内
+            ("2015-01-01", "2020-12-31"),  # 跨挖掘 A↔判定段
+            ("2021-12-01", "2022-01-15"),  # 跨判定↔挖掘 B 边界
+            ("1999-01-01", "2005-01-01"),  # 段外（挖掘 A 起点前）
+            ("2026-08-01", "2026-09-05"),  # 触及 holdout
         ],
     )
-    def test_mining_overlap_rejected(self, capsys, start, end):
+    def test_mining_segment_violation_rejected(self, capsys, start, end):
         ap, args = self._parse(
             "--direction", "动量", "--mining-start", start, "--mining-end", end
         )
         with pytest.raises(SystemExit) as exc:
             el._validate_args(args, ap)
         assert exc.value.code == 2
-        err = capsys.readouterr().err
-        assert (
-            "⛔ 反过拟合纪律" in err and "pre2019 untouched 终审段（2010-2016）" in err
-        )
+        assert "mining" in capsys.readouterr().err
 
-    def test_judgment_overlap_rejected(self, capsys):
-        # 挖掘窗干净（2009 年底结束）、判定窗碰段 —— 两个窗各自独立检查
+    def test_mining_judgment_overlap_rejected(self):
+        # 两窗各自段内合法但相交（同段内重叠）——不相交规则
+        ap, args = self._parse(
+            "--direction",
+            "动量",
+            "--mining-start",
+            "2018-01-01",
+            "--mining-end",
+            "2020-06-30",
+            "--final-judge",
+            "--judgment-start",
+            "2020-06-01",
+            "--judgment-end",
+            "2021-12-31",
+        )
+        with pytest.raises(SystemExit) as exc:
+            el._validate_args(args, ap)
+        assert exc.value.code == 2
+
+    def test_judgment_before_mining_accepted(self):
+        """v2 新合法形态：判定早于挖掘但不相交（旧次序规则已退役）。"""
+        ap, args = self._parse(
+            "--direction",
+            "动量",
+            "--mining-start",
+            "2022-01-01",
+            "--mining-end",
+            "2024-07-31",
+            "--final-judge",
+            "--judgment-start",
+            "2017-01-01",
+            "--judgment-end",
+            "2021-12-31",
+        )
+        el._validate_args(args, ap)  # 不抛即通过
+
+    def test_both_inside_mining_a_accepted(self):
+        """原 pre2019 段内两窗（已并入挖掘 A）不相交 ⇒ 合法（C5 退役）。"""
         ap, args = self._parse(
             "--direction",
             "动量",
@@ -1147,11 +1180,7 @@ class TestPre2019Guard:
             "--judgment-end",
             "2013-12-31",
         )
-        with pytest.raises(SystemExit) as exc:
-            el._validate_args(args, ap)
-        assert exc.value.code == 2
-        err = capsys.readouterr().err
-        assert "⛔ 反过拟合纪律" in err and "判定窗" in err
+        el._validate_args(args, ap)  # 不抛即通过
 
     def test_clean_windows_accepted(self):
         ap, args = self._parse(
@@ -1168,12 +1197,6 @@ class TestPre2019Guard:
             "2022-12-31",
         )
         el._validate_args(args, ap)  # 不抛即通过
-
-    def test_overlap_helper_boundaries(self):
-        assert el._overlaps_pre2019("2016-12-31", "2020-01-01")  # 左缘相接
-        assert el._overlaps_pre2019("2000-01-01", "2010-01-01")  # 右缘相接
-        assert not el._overlaps_pre2019("2017-01-01", "2020-12-31")
-        assert not el._overlaps_pre2019("2000-01-01", "2009-12-31")
 
 
 class TestStalePoolGuard:

@@ -104,11 +104,6 @@ from custos.research.evolution.score_genome import (  # noqa: E402
     perturb_weights,
     weight_lattice,
 )
-from custos.research.evolution_loop import (  # noqa: E402  # pre2019 段单源（终审段口径只有这一处）
-    PRE2019_END,
-    PRE2019_START,
-    _overlaps_pre2019,
-)
 
 OUTDIR = LOGS / "score_evolution"
 
@@ -385,7 +380,7 @@ def _resolve_legs(args: Any, ap: argparse.ArgumentParser) -> tuple[list[str], st
 
 
 def _validate_windows(args: Any, ap: argparse.ArgumentParser) -> tuple[Window, Any]:
-    """双窗校验 + pre2019 硬拒绝（mining 必填；judgment 同给或同缺）。"""
+    """双窗校验（段检查+不相交，v0.358 段感知单源；mining 必填；judgment 同给或同缺）。"""
     if bool(args.judgment_start) != bool(args.judgment_end):
         ap.error("--judgment-start 与 --judgment-end 必须同时给出")
     mining = Window(args.mining_start, args.mining_end)
@@ -394,23 +389,19 @@ def _validate_windows(args: Any, ap: argparse.ArgumentParser) -> tuple[Window, A
     )
     try:
         if judgment is None:
-            _validate_single_window(mining)  # 单窗：格式+倒挂
+            _validate_single_window(mining)  # 单窗：格式+倒挂+段检查
         else:
             validate_windows(mining, judgment)
     except ValueError as exc:
         ap.error(str(exc))
-    for name, w in (("挖掘窗", mining), ("判定窗", judgment)):
-        if w is not None and _overlaps_pre2019(w.start, w.end):
-            ap.error(
-                f"⛔ 反过拟合纪律：打分进化挖掘/判定不许碰 pre2019 untouched 终审段"
-                f"（{PRE2019_START}..{PRE2019_END}）——{name} {w.start}..{w.end} 与之相交"
-            )
     return mining, judgment
 
 
 def _validate_single_window(w: Window) -> None:
-    """单窗校验：日期格式 + 起止不倒挂（无第二窗，不做重叠判定）。"""
+    """单窗校验：日期格式 + 起止不倒挂 + 段检查（v2 布局，v0.358——
+    load_window.segment_violation 单源；无第二窗，不做相交判定）。"""
     from datetime import date  # noqa: PLC0415
+    from custos.research import load_window as _lw  # noqa: PLC0415
 
     try:
         s, e = date.fromisoformat(w.start), date.fromisoformat(w.end)
@@ -418,6 +409,9 @@ def _validate_single_window(w: Window) -> None:
         raise ValueError(f"窗口日期须为 YYYY-MM-DD: {w}") from exc
     if s > e:
         raise ValueError(f"窗口起止倒挂: start={w.start} > end={w.end}")
+    msg = _lw.segment_violation(w.start, w.end)
+    if msg:
+        raise ValueError(msg)
 
 
 def _resolve_exit(args: Any, ap: argparse.ArgumentParser) -> dict:

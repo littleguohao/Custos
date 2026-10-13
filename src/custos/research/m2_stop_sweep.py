@@ -50,10 +50,11 @@
     uv run python src/custos/research/m2_stop_sweep.py --report-only     # 只重出报表
     uv run python src/custos/research/m2_stop_sweep.py --cross-window    # 2022-2024 复核
 
-⚠️ **宇宙与 K 线窗口默认已钉死**（2026-08-12 #17，owner 拍板）：窗口默认
-`DEFAULT_WINDOW`（见常量注释），宇宙默认 `--dump-codes` 落表共用 ⇒ 默认跑出来的
-批次即可复现。要显式关闭用 `--no-window` / `--no-pin-universe`（报表会打
-「本批不可复现」警告）；历史未钉命令的行为变化是已接受的代价。
+⚠️ **K 线窗口默认已钉死**（2026-08-12 #17，owner 拍板）：窗口默认
+`DEFAULT_WINDOW`（见常量注释）⇒ 默认跑出来的批次即可复现，要显式关闭用
+`--no-window`（报表会打「本批不可复现」警告）；宇宙钉表机制 2026-10-13 随
+`--pin-universe` 退役（v0.356 定案——复现性由 provenance 宇宙 sha 承担，
+缺省宇宙=规则构造全量个股）；历史未钉命令的行为变化是已接受的代价。
 
 ## 为什么慢，以及怎么快（2026-08-05）
 
@@ -503,18 +504,16 @@ def _base_args(
 def _fp_suffix(
     cross: bool,
     window: Optional[tuple[str, str]] = None,
-    pin_universe: bool = False,
 ) -> str:
     """指纹里样本量之后的部分。**每个会改变「比的是什么」的开关都要进来。**
 
     拼装式而不是一串正则分组，是为了以后加开关时 `_collect` 不用同步改正则
-    （改漏了就会重演混批事故）。
+    （改漏了就会重演混批事故）。宇宙钉死位已随 v0.356 定案移除（--pin-universe
+    退役——复现性由 provenance 宇宙 sha 承担）。
     """
     s = ""
     if window:
         s += "_w" + window[0].replace("-", "") + "-" + window[1].replace("-", "")
-    if pin_universe:
-        s += "_u"
     if cross:
         s += "_cw"
     return s
@@ -524,7 +523,6 @@ def _fingerprint(
     sample: int,
     cross: bool,
     window: Optional[tuple[str, str]] = None,
-    pin_universe: bool = False,
 ) -> str:
     """结果文件的参数指纹。
 
@@ -532,13 +530,14 @@ def _fingerprint(
     再跑 1000 样本时，300 的旧文件被 `[SKIP]` 直接复用 ⇒ 汇总表里 ~400 笔的方案与
     ~1300 笔的基准混在一起比，A 组一半方案的判定全部无效。
 
-    ⚠️ **窗口与宇宙钉死也要进来**：钉了窗口/宇宙的批次与没钉的不是同一件事
+    ⚠️ **窗口钉死也要进来**：钉了窗口的批次与没钉的不是同一件事
     （前者可复现、后者随通达信下载漂移），混着汇总同样无效。
     未钉 不加后缀，保持已有文件名不失效。
     （数据源后缀曾用于区分 tdx 与 qlib 两批结果；qlib 已整删，tdx 本就无后缀，
-    旧文件名不受影响。）
+    旧文件名不受影响；宇宙 _u 位 2026-10-13 随 --pin-universe 退役移除，
+    带 _u 的旧批次留盘为历史，新批次按无后缀名重跑。）
     """
-    return f"s{sample}" + _fp_suffix(cross, window, pin_universe)
+    return f"s{sample}" + _fp_suffix(cross, window)
 
 
 def _run(
@@ -559,7 +558,7 @@ def _run(
     """
     tag = f"{group}/{name}"
     OUTDIR.mkdir(parents=True, exist_ok=True)
-    fp = _fingerprint(sample, cross, window, bool(codes_file))
+    fp = _fingerprint(sample, cross, window)
     out = OUTDIR / f"{group}__{name}__{fp}.json"
     if out.exists() and not force:
         return tag, out, f"[SKIP] {out.name}"
@@ -874,7 +873,7 @@ def _run_all(
     # 信号层复用（2026-09-03）：信号轴相同的方案组共享一次进场扫描（_plan_signal_reuse）。
     # producer 必须先跑完落盘信号，replay 才能重放 ⇒ 轻活拆成两波（重活本就串行，
     # 簇内 producer 排在 replay 前即可）。
-    fp = _fingerprint(sample, cross, window, bool(codes_file))
+    fp = _fingerprint(sample, cross, window)
     plan = _plan_signal_reuse(todo, fp)
 
     def _sig_args(g: str, n: str, e: list[str]) -> list[str]:
@@ -1205,14 +1204,13 @@ def _collect(
     cross: bool,
     sample: Optional[int] = None,
     window: Optional[tuple[str, str]] = None,
-    pin_universe: bool = False,
 ) -> dict[str, list[dict]]:
     """按指纹收集结果。``sample=None`` 时自动取**最大样本量**那一批。
 
     只汇总同一指纹的文件——混合样本量、混合窗口比较都是无意义的
     （见 `_fingerprint` 注释）。
     """
-    suffix = _fp_suffix(cross, window, pin_universe)
+    suffix = _fp_suffix(cross, window)
     sample = _resolve_sample(_available_samples(suffix), sample)
     if sample is None:
         return {g: [] for g in GROUPS}
@@ -1893,9 +1891,8 @@ def report(
     cross: bool,
     sample: Optional[int] = None,
     window: Optional[tuple[str, str]] = None,
-    pin_universe: bool = False,
 ) -> None:
-    groups = _collect(cross, sample, window, pin_universe)
+    groups = _collect(cross, sample, window)
     if not any(groups.values()):
         print("没有结果文件，先跑扫描")
         return
@@ -1905,20 +1902,14 @@ def report(
         f"# M2 机制扫描  样本 {n_sample} 只  数据源 tdx"
         f"（本地 vipdoc，仅当前挂牌）"
         f"{'  区间 2022-2024（跨窗复核）' if cross else ''}"
-        f"{f'  窗口 {window[0]}~{window[1]}(已钉死)' if window else ''}"
-        f"{'  宇宙已钉死' if pin_universe else ''}"
+        f"{'  窗口已钉死' if window else ''}"
     )
-    if not (window and pin_universe) and not cross:
-        print("# ⚠️ 未同时钉死窗口与宇宙 ⇒ **本批不可复现**：vipdoc 目录与 .day 都会随")
+    if not window and not cross:
+        print("# ⚠️ 未钉死窗口 ⇒ **本批不可复现**：.day 会随通达信下载变动，")
         print(
-            "#    通达信下载变动，长时间扫描里各方案的宇宙/K线窗口不同（实测 5535→5536、"
+            "#    长时间扫描里各方案的 K 线窗口不同（实测同参数笔数 1106/1092/1087）。"
         )
-        print(
-            "#    同参数笔数 1106/1092/1087）。钉死自 2026-08-12 起是**默认**（#17），"
-        )
-        print(
-            "#    本批是被 --no-window/--no-pin-universe 显式关闭的；恢复：去掉这两个开关"
-        )
+        print("#    本批是被 --no-window 显式关闭的；恢复：去掉这个开关")
     print("#" * 74)
     for g in ("A_stop_low", "B_stop_pct"):
         if groups.get(g):
@@ -1931,38 +1922,6 @@ def report(
     _warn_missing(groups)
     if not cross:
         print("\n⚠️ 通过的组仍须跨窗复核：--cross-window（2022-2024）。")
-
-
-def _prepare_universe(
-    sample: int, cross: bool, window: Optional[tuple[str, str]]
-) -> Optional[str]:
-    """先跑一次 `--dump-codes` 落一份代码表，供全部方案共用 ⇒ **钉死宇宙**。
-
-    为什么不在本脚本里直接抽样：universe 解析要 import `local_tdx_data`（依赖
-    TDX_ROOT），在没有这些数据的机器上会直接失败。
-    交给 `backtest_factors --dump-codes` 复用它已有的 universe 逻辑，只做一次目录列举，
-    很快（不加载任何 K 线）。
-    """
-    OUTDIR.mkdir(parents=True, exist_ok=True)
-    fp = _fingerprint(sample, cross, window, True)
-    path = OUTDIR / f"_universe__{fp}.txt"
-    if path.is_file() and path.stat().st_size > 0:
-        n = sum(1 for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip())
-        print(f"[SKIP] 宇宙已存在 {path.name}（{n} 只）")
-        return str(path)
-    # 只要 universe 选择相关的参数，不要窗口/回测参数
-    probe = ["--trade-sim"]
-    probe += ["--universe-local", "--universe-sample", str(sample)]
-    probe += ["--dump-codes", str(path)]
-    print(f"[PREP] 落一份宇宙到 {path.name} 供全部方案共用")
-    r = subprocess.run([sys.executable, str(SCRIPT)] + probe, cwd=str(BASE))
-    if r.returncode != 0 or not path.is_file():
-        print(
-            f"⚠️ 宇宙落盘失败（exit={r.returncode}）⇒ **本轮不钉宇宙**，"
-            f"各方案仍会各自抽样（可能漂移）"
-        )
-        return None
-    return str(path)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -2011,22 +1970,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="显式关闭窗口钉死（退回「从今天往前数 --count 根」的漂移窗口；"
         "报表会打「本批不可复现」警告）",
     )
-    ap.add_argument(
-        "--pin-universe",
-        action="store_true",
-        default=True,
-        help="先落一份代码表供全部方案共用 ⇒ 钉死宇宙。"
-        "vipdoc 目录会随下载变动(实测扫描中 5535→5536)，"
-        "seed 固定也没用——**被抽的池子变了**。"
-        "2026-08-12（#17）起**默认开**，显式关闭用 --no-pin-universe",
-    )
-    ap.add_argument(
-        "--no-pin-universe",
-        action="store_false",
-        dest="pin_universe",
-        help="显式关闭宇宙钉死（各方案各自抽样，可能漂移；"
-        "报表会打「本批不可复现」警告）",
-    )
     return ap
 
 
@@ -2064,14 +2007,13 @@ def _run_schemes(
     if not todo:
         print(f"--only {a.only} 没匹配到任何组/方案")
         return 2, None
-    codes_file = None
-    if a.pin_universe:
-        codes_file = _prepare_universe(sample, a.cross_window, window)
+    codes_file = (
+        None  # --pin-universe 已随 v0.356 宇宙定案退役（provenance sha 担复现）
+    )
     print(
         f"将跑 {len(todo)} 个方案，样本 {sample} 只"
         f"{'，区间 2022-2024' if a.cross_window else ''}"
         f"{f'，窗口 {window[0]}~{window[1]}' if window else ''}"
-        f"{'，宇宙已钉死' if codes_file else ''}"
         f"{f'，并行 {a.jobs} 进程' if a.jobs > 1 else ''}"
     )
     _run_all(
@@ -2108,7 +2050,6 @@ def main() -> int:
         a.cross_window,
         sample if not a.report_only else a.sample,
         window,
-        bool(codes_file) or (a.report_only and a.pin_universe),
     )
     return 0
 

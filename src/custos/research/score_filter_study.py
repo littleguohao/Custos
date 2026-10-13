@@ -41,7 +41,6 @@ from typing import Any, Callable, Optional
 from custos.core.paths import LOGS, RESEARCH_DIR
 from custos.research import criteria_kit as kit
 from custos.research import window_usage as wu
-from custos.research.evolution_loop import _overlaps_pre2019, PRE2019_END, PRE2019_START
 
 #: 预注册 4 测试对象（不许加）
 FILTER_KEYS = ("v0_self", "neg4", "p2_sole", "reversal_quality")
@@ -571,7 +570,11 @@ def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description="R36 Phase 4 排序器→过滤器判据研究（4 对象×X 网格写死；只读双窗，pre2019 硬拒绝）"
     )
-    ap.add_argument("--codes-file", required=True, help="钉死宇宙 codes 表（s2999）")
+    ap.add_argument(
+        "--codes-file",
+        default="",
+        help="钉死宇宙 codes 表（兼容通道；缺省=规则构造全量个股，v0.356）",
+    )
     ap.add_argument("--mining-start", required=True)
     ap.add_argument("--mining-end", required=True)
     ap.add_argument("--judgment-start", required=True)
@@ -591,20 +594,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap = _build_parser()
     args = ap.parse_args(argv)
     args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])
-    from custos.research.load_window import forward_holdout_violation  # noqa: PLC0415
+    from custos.research.load_window import segment_violation  # noqa: PLC0415
 
     for name, s, e in (
         ("mining", args.mining_start, args.mining_end),
         ("judgment", args.judgment_start, args.judgment_end),
     ):
-        if _overlaps_pre2019(s, e):
-            ap.error(
-                f"⛔ 反过拟合纪律：Phase 4 挖掘/判定不许碰 pre2019 untouched 终审段"
-                f"（{PRE2019_START}..{PRE2019_END}）——{name} {s}..{e} 与之相交"
-            )
-        _fh = forward_holdout_violation(s, e)  # v0.330 owner review #2②
-        if _fh:
-            ap.error(f"{name} {_fh}")
+        _sv = segment_violation(
+            s, e
+        )  # v0.358 段检查单源（含 holdout；pre2019 拒绝已退役）
+        if _sv:
+            ap.error(f"{name} {_sv}")
     try:
         rep = run_study(args)
     except (RuntimeError, ValueError) as exc:

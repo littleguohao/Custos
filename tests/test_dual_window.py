@@ -67,17 +67,26 @@ def assert_stats_equal(a, b):
 
 
 def test_overlapping_windows_rejected():
-    # 端点相接也算重叠：同一天不能既挖又判
-    with pytest.raises(ValueError, match="不重叠"):
+    # 端点相接也算相交：同一天不能既挖又判
+    with pytest.raises(ValueError, match="不相交"):
         dw.validate_windows(
             Window("2024-01-01", "2024-03-01"), Window("2024-03-01", "2024-05-01")
         )
 
 
-def test_reversed_windows_rejected():
-    with pytest.raises(ValueError, match="不重叠"):
+def test_judgment_before_mining_accepted():
+    """v2 新合法形态（v0.358）：判定早于挖掘但不相交——旧「mining 必在
+    judgment 之前」次序规则已退役（判定段天然夹在挖掘 A/B 之间）。"""
+    dw.validate_windows(
+        Window("2024-05-01", "2024-06-01"), Window("2024-01-01", "2024-03-01")
+    )
+
+
+def test_cross_segment_rejected():
+    """段检查（v0.358）：越段窗口即拒（mining 跨挖掘 A↔判定边界）。"""
+    with pytest.raises(ValueError, match="研究段"):
         dw.validate_windows(
-            Window("2024-05-01", "2024-06-01"), Window("2024-01-01", "2024-03-01")
+            Window("2016-06-01", "2017-06-01"), Window("2018-01-01", "2019-01-01")
         )
 
 

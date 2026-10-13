@@ -169,11 +169,15 @@ uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 �
   不建 contracts schema。
 - **新研究终端合入清单**（缺一不合）：
   1. 判据结构用 `criteria_kit` 组装（四态、C4 池与状态、q95、簇打乱），不得自写一份；
-  2. rdd 门用 `strategy_grid.rdd_gate_ok` 并传事先固定的参照档；C5 用 `exit_c5_terminal.apply_c5`；
-  3. 窗口参数调 `load_window.forward_holdout_violation`；`--count` 用 `resolve_count`；
+  2. rdd 门用 `strategy_grid.rdd_gate_ok` 并传事先固定的参照档；C5 已退役（v0.356，
+     终审=判定段 2017~2021 批量只读一次 + holdout，勿再引 `exit_c5_terminal`）；
+  3. 窗口走 v2 段（`load_window.SEG_*` 常量），校验调 `load_window.segment_violation`；
+     段末隔离带用 `entry_deadline`/`clip_entries`；`--count` 用 `resolve_count`；
      逐股加载的终端调 `check_reach`；
-  4. 读判定窗/pre2019 调 `window_usage.record_use`，`synthetic` 在函数**入口**快照；
-  5. 报告接 `provenance.build` 与 `cost_sensitivity`；
+  4. 读受保护判定窗（2017~2021）调 `window_usage.record_use`（键 `judgment_2017_2021`，
+     旧键冻结拒写；读挖掘段不登记），`synthetic` 在函数**入口**快照；
+  5. 宇宙经 `universe.resolve`（缺省=规则构造全量个股，`--codes-file` 仅兼容通道）；
+     报告接 `provenance.build`（宇宙三件套）与 `cost_sensitivity`；
   6. 带零假设校准两连测 + 回归哨兵（`tests/test_null_calibration.py`，collect_all 口径
      须含成簇用例）；带「生产路径写台账」钉测。
 - **进化引擎**：LLM 只做提案，decision 由确定性函数给出；`--joint` / `--grid-judge`

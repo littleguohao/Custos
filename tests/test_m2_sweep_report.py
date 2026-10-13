@@ -2025,12 +2025,9 @@ class TestReportUsesTheBatchJustRun:
         monkeypatch.setattr(m2, "_run_all", lambda *a, **k: None)
         _write(tmp_path, "A_stop_low", "00_baseline", fp="s300", n=409)
         _write(tmp_path, "A_stop_low", "00_baseline", fp="s2000", n=2600)
-        # --no-window/--no-pin-universe（2026-08-12 #17 起钉死是默认）：本测试聚焦
-        # 「汇总刚跑的那批样本」，与钉死无关；不关默认钉死则会去找 s300_w*_u 指纹，
-        # 且 _prepare_universe 会真跑子进程。
-        monkeypatch.setattr(
-            sys, "argv", ["m2", "--sample", "300", "--no-window", "--no-pin-universe"]
-        )
+        # --no-window（钉死默认）：本测试聚焦「汇总刚跑的那批样本」，与钉死无关；
+        # 不关默认钉死则会去找 s300_w* 指纹。
+        monkeypatch.setattr(sys, "argv", ["m2", "--sample", "300", "--no-window"])
         m2.main()
         out = capsys.readouterr().out
         assert "样本 300 只" in out, "应汇总刚跑的 s300，而非最大的 s2000"
@@ -2041,10 +2038,8 @@ class TestReportUsesTheBatchJustRun:
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         _write(tmp_path, "A_stop_low", "00_baseline", fp="s300", n=409)
         _write(tmp_path, "A_stop_low", "00_baseline", fp="s2000", n=2600)
-        # 同上：--no-* 退回旧默认（未钉死），本测试只验「--report-only 取最大批」。
-        monkeypatch.setattr(
-            sys, "argv", ["m2", "--report-only", "--no-window", "--no-pin-universe"]
-        )
+        # 同上：--no-window 退回旧默认（未钉死），本测试只验「--report-only 取最大批」。
+        monkeypatch.setattr(sys, "argv", ["m2", "--report-only", "--no-window"])
         m2.main()
         assert "样本 2000 只" in capsys.readouterr().out
 
@@ -2140,27 +2135,28 @@ class TestPinnedWindowAndUniverse:
         assert "--universe-local" not in a and "--universe-sample" not in a
 
     def test_fingerprint_separates_pinned_batches(self):
-        """钉过的批次与没钉的不是同一件事（前者可复现）⇒ 不能混着汇总。"""
+        """钉过窗口的批次与没钉的不是同一件事（前者可复现）⇒ 不能混着汇总。
+        宇宙 _u 位已随 --pin-universe 退役移除（v0.356 定案）。"""
         plain = m2._fingerprint(1000, False)
         win = m2._fingerprint(1000, False, ("2024-08-01", "2026-08-05"))
-        both = m2._fingerprint(1000, False, ("2024-08-01", "2026-08-05"), True)
+        cross = m2._fingerprint(1000, True)
         assert plain == "s1000"
         assert win == "s1000_w20240801-20260805"
-        assert both == "s1000_w20240801-20260805_u"
-        assert len({plain, win, both}) == 3
+        assert cross == "s1000_cw"
+        assert len({plain, win, cross}) == 3
 
     def test_collect_isolates_pinned_from_unpinned(self, tmp_path, monkeypatch):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
         _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000", n=1106)
         _write(
-            tmp_path, "A_stop_low", "trail_08", fp="s1000_w20240801-20260805_u", n=1150
+            tmp_path, "A_stop_low", "trail_08", fp="s1000_w20240801-20260805", n=1150
         )
         assert [r["name"] for r in m2._collect(cross=False)["A_stop_low"]] == [
             "00_baseline"
         ]
-        got = m2._collect(
-            cross=False, window=("2024-08-01", "2026-08-05"), pin_universe=True
-        )["A_stop_low"]
+        got = m2._collect(cross=False, window=("2024-08-01", "2026-08-05"))[
+            "A_stop_low"
+        ]
         assert [r["name"] for r in got] == ["trail_08"]
 
     def test_report_warns_when_not_reproducible(self, tmp_path, monkeypatch, capsys):
@@ -2168,36 +2164,15 @@ class TestPinnedWindowAndUniverse:
         _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000")
         m2.report(cross=False)
         out = capsys.readouterr().out
-        assert "本批不可复现" in out and "5535→5536" in out
+        assert "本批不可复现" in out and "--no-window" in out
 
     def test_report_no_warning_when_pinned(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000_w20240801-20260805_u")
-        m2.report(cross=False, window=("2024-08-01", "2026-08-05"), pin_universe=True)
+        _write(tmp_path, "A_stop_low", "00_baseline", fp="s1000_w20240801-20260805")
+        m2.report(cross=False, window=("2024-08-01", "2026-08-05"))
         out = capsys.readouterr().out
         assert "本批不可复现" not in out
         assert "已钉死" in out
-
-    def test_prepare_universe_reuses_existing(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        fp = m2._fingerprint(1000, False, None, True)
-        (tmp_path / f"_universe__{fp}.txt").write_text(
-            "600000\n000001\n", encoding="utf-8"
-        )
-        monkeypatch.setattr(
-            m2.subprocess, "run", lambda *a, **k: pytest.fail("已有代码表不该再跑一次")
-        )
-        got = m2._prepare_universe(1000, False, None)
-        assert got and "2 只" in capsys.readouterr().out
-
-    def test_prepare_universe_degrades_on_failure(self, tmp_path, monkeypatch, capsys):
-        """落盘失败不能中断扫描——退回各自抽样（可能漂移）并明确告警。"""
-        monkeypatch.setattr(m2, "OUTDIR", tmp_path)
-        monkeypatch.setattr(
-            m2.subprocess, "run", lambda *a, **k: type("R", (), {"returncode": 1})()
-        )
-        assert m2._prepare_universe(1000, False, None) is None
-        assert "本轮不钉宇宙" in capsys.readouterr().out
 
     def test_window_conflicts_with_cross_window(self, monkeypatch, capsys):
         monkeypatch.setattr(
@@ -2222,29 +2197,27 @@ class TestPinnedWindowAndUniverse:
         monkeypatch.setattr(
             m2,
             "report",
-            lambda cross, sample=None, window=None, pin_universe=False: got.update(
-                cross=cross, window=window, pin_universe=pin_universe
+            lambda cross, sample=None, window=None: got.update(
+                cross=cross, window=window
             ),
         )
         return got
 
     def test_defaults_pin_window_and_universe(self, monkeypatch):
-        """#17（2026-08-12 owner 拍板）：不给任何开关时，窗口钉 DEFAULT_WINDOW、宇宙钉死。"""
-        monkeypatch.setattr(m2, "_prepare_universe", lambda *a, **k: "/tmp/u.txt")
+        """#17（2026-08-12 owner 拍板）：不给任何开关时窗口钉 DEFAULT_WINDOW；
+        宇宙钉表机制已随 --pin-universe 退役（v0.356——不再落 codes 表）。"""
         monkeypatch.setattr(m2, "_run_all", lambda *a, **k: None)
         got = self._capture_report(monkeypatch)
         monkeypatch.setattr(sys, "argv", ["m2", "--sample", "300"])
         assert m2.main() == 0
-        assert got["window"] == m2.DEFAULT_WINDOW and got["pin_universe"] is True
+        assert got["window"] == m2.DEFAULT_WINDOW
 
     def test_no_flags_restore_unpinned(self, monkeypatch):
-        """--no-window/--no-pin-universe 必须能显式关回旧默认（否则反向 flag 形同虚设）。"""
+        """--no-window 必须能显式关回旧默认（否则反向 flag 形同虚设）。"""
         got = self._capture_report(monkeypatch)
-        monkeypatch.setattr(
-            sys, "argv", ["m2", "--report-only", "--no-window", "--no-pin-universe"]
-        )
+        monkeypatch.setattr(sys, "argv", ["m2", "--report-only", "--no-window"])
         assert m2.main() == 0
-        assert got["window"] is None and got["pin_universe"] is False
+        assert got["window"] is None
 
     def test_cross_window_overrides_default_window(self, monkeypatch):
         """--cross-window 自带 2022-2024 窗口 ⇒ 默认钉死让位，**不报错**；

@@ -359,6 +359,7 @@
 | 2026-10-13 | v0.355 | **研究窗口布局定案（owner 拍板，实现 TODO #90/#91）**：2000 年后数据全启用——挖掘 A 2000~2016 / 判定 2017~2021（批量只读一次）/ 挖掘 B 2022~2026-09-04 / holdout 不变；段边界禁开仓隔离带；C5 退役（已判结论不改）；切换后先在挖掘段做基线重测 | owner | 治理守卫绿 |
 | 2026-10-13 | v0.356 | **#89/#90 Phase 0 单源件（owner 定案；三口径拍板：隔离带段末 90 天/合并读数/N=60）**：universe.py 宇宙单源（缺省=vipdoc 全量 as-of，--codes-file 改可选）+ is_ashare_stock 公共谓词（live 同源委托）；load_window v2 段常量+段检查+隔离带单源；provenance 宇宙三件套；续跑守卫加宇宙（ledger v4/轨迹池）；台账键换代 judgment_2017_2021（旧键冻结 fail-closed）；C5 入口退役（TOOLS stale）+ pre2019 硬拒绝拆除 | owner 2026-10-13 | mypy=0；钉测 |
 | 2026-10-13 | v0.357 | **#89/#90 Phase 1 四终端 v2 切换（bear/factor_exit/plan_rules/score_tier）**：缺省=挖掘 A∪B 合并池（三段末隔离带各一刀）+判定 2017~2021；legacy 显式窗⊆段内+双窗不相交（取代旧次序规则）——R40 参数合成数据报告逐位同一（金样钉在案）；record_use 条件登记新键 judgment_2017_2021（legacy 读挖掘段不入台账）；bear 随机臂母体同隔离带纪律补齐；provenance 宇宙三件套回塞接线；TOOLS 文案同步 | owner 2026-10-13 | 钉测 700+；mypy=0 |
+| 2026-10-13 | v0.358 | **#89/#90 Phase 2 其余入口 + 文档收尾**：窗口校验全切 segment_violation 单源（dual_window 改格式+不相交任一序+段检查；score_evolution/evolution_loop/score_filter/exit_campaign 接线，pre2019 拦截与旧次序规则随 C5 退役全拆；引擎 CLI 保持 holdout-only 不砍自由度）；score_filter --codes-file 改可选；m2 去 --pin-universe（复现性由 provenance 宇宙 sha 承担）；README 窗口/宇宙节改落地口径+旧制标 🔄；AGENTS §5 同步；TODO #89/#90 闭环、生产机遗留立 #92 | owner 2026-10-13 | 钉测 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
