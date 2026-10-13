@@ -355,6 +355,7 @@
 | 2026-10-13 | v0.351 | **R41 判毕 falsified（r41_probe）**：计划版（stop_loss_ref 止损）vs 现行 EXIT_RULES——C1 过；C2 判定窗 rdd 相对门不过（Δmargin=+0.0074 但 ret_over_dd 0.36<0.65）；C3 扰动 4/4 翻转；C4 provisional 不影响判决。C2/C3 与 n-random 无关，探针读数即正式口径，正式跑不再发；position_plans 维持影子层，TODO #60 ②只剩 plan_shadow_review K=20 路径（详见 R41 单元） | 判据 v0.315/v0.317 跑数前写死，机械判决 | — |
 | 2026-10-13 | v0.352 | **README 加免责声明（owner）**：非投资建议、回测带幸存者偏差（R14）绝对读数不代表实盘、代码按现状提供、风险自担、数据源条款自守；research/README 当前状态把 R41 移入已关闭路线 | owner | 治理守卫绿 |
 | 2026-10-13 | v0.353 | **mypy 进 CI（owner 拍板——0 错基线时进 CI 成本最低；TODO #85 闭环）**：tests.yml 新增 mypy job（ubuntu 单平台 + mypy.linux.ini 压噪口径——Windows 全量不压是另一套噪音面，见 audit.ps1），命令 uv run --with mypy==2.4.0；版本三处互锚（workflow/audit.sh/audit.ps1——单边漂移=本地与 CI 结果分叉）；AGENTS §3 同步「CI 红必须当天修」含 mypy job | owner 2026-10-13 | CI mypy job 绿 |
+| 2026-10-13 | v0.354 | **研究宇宙口径定案（owner 拍板，实现 TODO #89）**：s3000 冻结名单退役——新单元用沪深京 A 股个股全量、信号日 as-of 满 N 根即有资格、不过滤 ST（无历史 ST 状态）、不设版本号（provenance 记规则+n_codes+sha，续跑口径不一致拒绝）；R40 及此前单元沿用 s3000 | owner | 治理守卫绿 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
