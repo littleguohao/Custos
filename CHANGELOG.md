@@ -363,6 +363,7 @@
 | 2026-10-13 | v0.359 | **owner review 四修（跑数前必修）**：①台账漏改两处（score_filter/score_evolution 无条件写冻结键⇒生产尾部崩）改条件登记+生产钉测×2；C5 两终端改入口即拒；②holdout 硬拒绝下沉 _load_one_bars/_load_bars_local（显式 end≥2026-09-05 一律拒，factor_ic_profile 类漏守全堵）；③段前预热 300 根（warmup_bars+两 warm 函数信号日≥段起点过滤，四终端 v2 接线、legacy 0 根不变，bear 母体同步）——指标不再冷启动；④隔离带文档更正：作用=防 open_end 强平偏差（R11 已证偏正），非防跨段泄露（数据本截到段末） | owner review | mypy=0；钉测 |
 | 2026-10-13 | v0.360 | **CI 红根因修复：四处 legacy 金样浮点归一化比对**——金样嵌本机全精度浮点（margin/expR/q95 来自 numpy 求和），numpy 按 CPU SIMD 路径（AVX2/AVX512）分派求和核、末位 ULP 跨代际可不同 ⇒ 本机全过、GitHub runner 双平台必挂（608f4ef/4b43312 红根因，owner 供 FAILED 行定位）；tests/helpers_golden.py 新增 norm_floats/canon_json（归一 1e-12，行为级断言不变），score_tier/factor_exit/bear 改两侧同口径比对，plan_rules 哈希同口径重捕金样 | owner+coder 联合定位 | CI 待验 |
 | 2026-10-13 | v0.361 | **owner review 二修（v2 纪律漏洞）**：①holdout end=None 后路堵死——加载层 end=None 默认截到 2026-09-04，allow_holdout=True 显式豁免（仅 plan_shadow_review 复盘 live 影子 + evolution_loop 尾随执行）；②判定段两后门堵死——load_window 新增 mining_violation（挖掘窗∩判定段即拒）+ touches_judgment（登记改相交制，判定子窗不漏登记），7 入口+dual_window 统一接线；钉测：挖掘∩判定段拒绝×7 + 判定子窗登记×7 + end=None 截断×3 + 两函数单源矩阵 | owner review | mypy=0；钉测 |
+| 2026-10-13 | v0.362 | **Windows CI 红根因修复（ci-diag-1 九轮二分实锤：plan_rules TestLegacyR40Compat）**：provenance.pre_reg_doc 由 str(Path.relative_to) 改 .as_posix()——Windows 产出反斜杠路径，Linux 捕的金样哈希必挂（ubuntu 绿 windows 红真因）；加恒正斜杠钉测；其余 Path 衍生字段复核无同类（cmdline=用户输入原文、universe/git=哈希） | coder 二分定位 | CI 待验 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

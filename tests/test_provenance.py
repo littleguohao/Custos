@@ -124,3 +124,17 @@ class TestUniverseFields:
         assert blk["universe_rule"] is None
         assert blk["n_codes"] is None
         assert blk["universe_sha256"] is None
+
+    def test_pre_reg_doc_uses_posix_separators(self):
+        """pre_reg_doc 恒为正斜杠（v0.362——Windows 反斜杠让跨机金样/哈希必挂，
+        CI round1~9 二分定位实锤：plan_rules TestLegacyR40Compat）。"""
+        doc = pv.BASE / "governance" / "research" / "R36_perfect_b1_supervised_scoring.md"
+        blk = pv.build(
+            argparse.Namespace(codes_file="", cmdline=None),
+            unit="R99",
+            pre_reg_doc=doc,
+        )
+        assert blk["pre_reg_doc"] == (
+            "governance/research/R36_perfect_b1_supervised_scoring.md"
+        )
+        assert "\\" not in blk["pre_reg_doc"]

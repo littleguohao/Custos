@@ -138,7 +138,7 @@ def build(
         "unit": str(unit),
         "criteria_version": criteria_version,
         "pre_reg_doc": (
-            str(pre_reg_doc.relative_to(BASE))
+            pre_reg_doc.relative_to(BASE).as_posix()
             if pre_reg_doc is not None and pre_reg_doc.is_relative_to(BASE)
             else (str(pre_reg_doc) if pre_reg_doc is not None else None)
         ),
