@@ -35,13 +35,16 @@ SEGMENTS = (SEG_MINING_A, SEG_JUDGMENT, SEG_MINING_B)
 SEGMENT_NAMES = ("mining_a", "judgment", "mining_b")
 
 #: 段边界禁开仓隔离带 = 段末单侧 90 自然日（≈最长持有期 3 个月——
-#: owner 2026-10-13 拍板）：截止后不开仓，持仓就不会跨段读到下一段的
-#: 结果；段首不滤（指标预热只读价格，定案豁免）。
+#: owner 2026-10-13 拍板）。⚠️ 作用口径（owner review #4 更正）：**防
+#: open_end 强制平仓偏差**——数据本身已截到段末，持仓本就不可能读到下一段，
+#: 不存在泄露；段末开仓的交易会在段末 bar 被强制按 open_end 平仓，而 R11
+#: 已证明 open_end 系统性偏正 ⇒ 段末 90 天不开仓，减少这批偏差交易。
+#: 段首不滤（指标预热只读价格，定案豁免）。
 SEGMENT_BUFFER_DAYS = 90
 
 
 def entry_deadline(seg_end: str) -> str:
-    """段的入场截止日 = 段末日 − SEGMENT_BUFFER_DAYS（YYYY-MM-DD）。"""
+    """段的入场截止日 = 段末日 − SEGMENT_BUFFER_DAYS（YYYY-MM-DD，防 open_end 偏差）。"""
     return (
         _date.fromisoformat(str(seg_end)[:10]) - _timedelta(days=SEGMENT_BUFFER_DAYS)
     ).isoformat()
@@ -50,6 +53,9 @@ def entry_deadline(seg_end: str) -> str:
 def clip_entries(recs: list, seg_end: str, *, key: Any = "date") -> list:
     """滤掉入场日 > entry_deadline(seg_end) 的记录（段末隔离带单源）。
 
+    作用=防 open_end 强制平仓偏差（owner review #4 更正——不是防跨段泄露：
+    数据已截到段末，持仓读不到下一段；R11 已证 open_end 系统性偏正，段末
+    开仓=段末强平的交易占比随隔离带下降）。
     ``key``：记录里入场日字段名（信号 "date" / 交易 "entry_date"）或
     取日期的可调用；段首侧不滤（预热只读价格不算读判定段）。剔除数由
     调用方 len 差值自记（报告要求隔离带剔除数在案）。"""

@@ -963,9 +963,9 @@ class TestProductionRecordUse:
         monkeypatch.setattr(
             ec,
             "warm_v0_signals",
-            lambda codes, regime, index_df, *, count, cost_bps, start, end: spec[
-                (start, end)
-            ],
+            lambda codes, regime, index_df, *, count, cost_bps, start, end, warmup_bars=0: (
+                spec[(start, end)]
+            ),
         )
         monkeypatch.setattr(
             fes,

@@ -489,10 +489,13 @@ def run_study(
                 cost_bps=args.cost_bps,
                 start=start,
                 end=end,
+                # v2 段前预热 300 根（v0.359，owner review #3）；legacy 0 根
+                warmup_bars=300 if layout == "v2" else 0,
             )
 
     # ── 逐段 warm/collect →（v2）段末隔离带 clip（段末 SEGMENT_BUFFER_DAYS
-    # 自然日截止开仓——持仓不跨段读下一段的结果；在 replay/判据之前；剔除数
+    # 自然日截止开仓——防 open_end 强制平仓偏差（owner review #4；数据本已截到段末，
+    # 不存在跨段泄露；R11 已证 open_end 系统性偏正）；在 replay/判据之前；剔除数
     # 入报告 segments 块；legacy 兼容通道不 clip，逐位保真）──
     segments: dict[str, dict[str, Any]] = {}
     for name, s, e in [*mining_segs, ("judgment", *judgment_span)]:

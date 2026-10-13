@@ -977,3 +977,72 @@ class TestScorerExpr:
         assert _json.dumps(t_with, sort_keys=True, allow_nan=True) == _json.dumps(
             t_without, sort_keys=True, allow_nan=True
         )
+
+
+class TestLoaderHoldoutGuard:
+    """holdout 硬拒绝下沉加载层（v0.359，owner review #2——factor_ic_profile
+    漏守实测抓到）：显式 end ≥ 2026-09-05 一律 ValueError，任何入口不漏。"""
+
+    def test_load_bars_local_rejects_holdout_end(self, monkeypatch):
+        monkeypatch.setattr(
+            bt.local_tdx_data if hasattr(bt, "local_tdx_data") else bt,
+            "__noop__",
+            None,
+            raising=False,
+        )
+        with pytest.raises(ValueError, match="holdout"):
+            bt._load_bars_local(["600000"], 500, "2026-08-01", "2026-09-10")
+
+    def test_load_one_bars_rejects_holdout_end(self):
+        with pytest.raises(ValueError, match="holdout"):
+            bt._load_one_bars("600000", 500, "2026-08-01", "2026-09-05")
+
+    def test_segment_end_passes_gate(self, monkeypatch):
+        """段末（2026-09-04）与 end=None 是既定豁免——不进 local_tdx 也先过闸。"""
+        from custos.datasource.local_tdx import local_tdx_data
+
+        monkeypatch.setattr(local_tdx_data, "get_ohlcv_table", lambda *a, **k: None)
+        monkeypatch.setattr(local_tdx_data, "reset_qfq_failure_stats", lambda: None)
+        assert bt._load_bars_local(["600000"], 500, "2026-08-01", "2026-09-04") == {}
+        assert bt._load_bars_local(["600000"], 500, "2026-08-01", None) == {}
+
+
+class TestLoaderWarmupBars:
+    """段前预热加载（v0.359，owner review #3）：warmup_bars>0 保留 start 前
+    N 根作指标预热（定案豁免）；0=原行为（R40 兼容）。"""
+
+    DATES = [f"2020-05-{d:02d}" for d in (25, 26, 27, 28, 29)] + [
+        f"2020-06-{d:02d}" for d in (1, 2, 3)
+    ]
+
+    def _stub_tdx(self, monkeypatch):
+        from custos.datasource.local_tdx import local_tdx_data
+
+        monkeypatch.setattr(
+            local_tdx_data,
+            "get_ohlcv_table",
+            lambda *a, **k: pd.DataFrame({"date": list(self.DATES)}),
+        )
+
+    def test_warmup_retains_pre_start_bars(self, monkeypatch):
+        self._stub_tdx(monkeypatch)
+        df = bt._load_one_bars("600000", 0, "2020-06-01", None, warmup_bars=3)
+        assert list(df["date"]) == [
+            "2020-05-27",
+            "2020-05-28",
+            "2020-05-29",
+            "2020-06-01",
+            "2020-06-02",
+            "2020-06-03",
+        ]
+
+    def test_zero_warmup_cuts_at_start(self, monkeypatch):
+        self._stub_tdx(monkeypatch)
+        df = bt._load_one_bars("600000", 0, "2020-06-01", None, warmup_bars=0)
+        assert list(df["date"]) == ["2020-06-01", "2020-06-02", "2020-06-03"]
+
+    def test_warmup_capped_by_available_history(self, monkeypatch):
+        """历史不足 N 根 ⇒ 有多少留多少（次新股不报错）。"""
+        self._stub_tdx(monkeypatch)
+        df = bt._load_one_bars("600000", 0, "2020-05-26", None, warmup_bars=10)
+        assert list(df["date"]) == list(self.DATES)

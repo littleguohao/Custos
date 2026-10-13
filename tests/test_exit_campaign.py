@@ -803,3 +803,58 @@ class TestResumeUniverseGuard:
             self._ledger_with_meta(tmp_path, self.META)
         )
         assert tag == "t"
+
+
+class TestWarmV0WarmupFilter:
+    """warm_v0_signals 预热口径（v0.359，owner review #3）：warmup_bars>0 时
+    指标有预热、**信号只收 date ≥ start**（段起点前的预热 bar 不出信号）。"""
+
+    @staticmethod
+    def _run(monkeypatch, warmup_bars):
+        import pandas as pd
+
+        from custos.research import backtest_factors as bt
+        from custos.research import score_return_study as srs
+
+        df = pd.DataFrame({"date": ["2016-12-01", "2017-01-03", "2017-01-04"]})
+        monkeypatch.setattr(bt, "_load_one_bars", lambda *a, **k: df)
+        seen = {}
+
+        def _eval(bars, **kw):
+            seen["df"] = bars["600000"]
+            kw["signals_out"].extend(
+                [
+                    {"i": 0, "date": "2016-12-01"},
+                    {"i": 1, "date": "2017-01-03"},
+                ]
+            )
+            return []
+
+        monkeypatch.setattr(bt, "evaluate_trades", _eval)
+        monkeypatch.setattr(
+            srs, "asof_technical_score", lambda *a, **k: (50.0, "中", {})
+        )
+        out = ec.warm_v0_signals(
+            ["600000"],
+            {"2017-01-03": "做多", "2017-01-04": "做多"},
+            None,
+            count=500,
+            cost_bps=25.0,
+            start="2017-01-01",
+            end="2017-12-31",
+            warmup_bars=warmup_bars,
+        )
+        return out, seen
+
+    def test_signals_filtered_to_start_when_warmup(self, monkeypatch):
+        out, seen = self._run(monkeypatch, 300)
+        sig_dates = [s["date"] for s in out["600000"]["signals"]]
+        assert sig_dates == ["2017-01-03"]  # 预热 bar 不出信号
+        assert (
+            list(seen["df"]["date"])[0] == "2016-12-01"
+        )  # 但 df 带预热（指标不冷启动）
+
+    def test_no_warmup_keeps_all_signals(self, monkeypatch):
+        out, _seen = self._run(monkeypatch, 0)
+        sig_dates = [s["date"] for s in out["600000"]["signals"]]
+        assert sig_dates == ["2016-12-01", "2017-01-03"]  # 0=原行为不滤

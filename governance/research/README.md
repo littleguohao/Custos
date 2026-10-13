@@ -225,8 +225,11 @@ margin」这个前提，R1 的量级随后按已实现口径重取（只在 0AMV
   | 前向 holdout | ≥ 2026-09-05 | 最后一道关，冻结不变 |
 
   - 段边界设**禁开仓隔离带**（段末单侧 90 自然日 ≈ 最长持有期，owner 拍板；单源
-    `load_window.entry_deadline` / `clip_entries`）：截止后不开仓，防持仓跨段读到判定段结果；
-    指标预热只读价格，不算读判定段。随机臂母体同纪律（bear `_seg_bar_pool_clipped`）。
+    `load_window.entry_deadline` / `clip_entries`）。作用=**防 open_end 强制平仓偏差**
+    （owner review #4 更正）：数据本身已截到段末，持仓本就不可能读到下一段、不存在泄露；
+    段末开仓的交易会在段末 bar 被强制按 open_end 平仓，R11 已证明 open_end 系统性偏正——
+    段末 90 天不开仓即减少这批偏差交易。指标预热只读价格，不算读判定段。
+    随机臂母体同纪律（bear `_seg_bar_pool_clipped`）。
   - 窗口校验单源 `load_window.segment_violation`（须 ⊆ 某段、越段/触 holdout 硬拒绝；
     段内子窗合法——R40 旧窗 ⊆ 挖掘 B 的 legacy 兼容通道）；双窗规则=**不相交**
     （任一序皆可，旧「mining 必在 judgment 之前」退役）。

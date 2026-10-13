@@ -498,12 +498,22 @@ def run_study(
     random_pool = _random_control(args, windows, enriched, baseline)
     filters_out = _filter_grid(args, windows, enriched, baseline, random_pool)
 
-    _wu_k = wu.record_use(
-        "R36-P4",
-        "judgment",
-        args.tag,
-        "P4 判定窗读数",
-        synthetic=(collector is not None or rq_fetcher is not None),
+    from custos.research import load_window as lw  # noqa: PLC0415
+
+    # v2 台账口径（TODO #90）：只有判定窗=受保护段（2017~2021）才登记——
+    # legacy 窗（2024~2026）已并入挖掘 B，读挖掘段不入台账（挖掘数据自由可读）；
+    # 旧键已冻结，无条件写会在生产跑数尾部崩掉（owner review 实锤）。
+    _is_protected_j = (args.judgment_start, args.judgment_end) == lw.SEG_JUDGMENT
+    _wu_k = (
+        wu.record_use(
+            "R36-P4",
+            "judgment_2017_2021",
+            args.tag,
+            "P4 判定窗读数",
+            synthetic=(collector is not None or rq_fetcher is not None),
+        )
+        if _is_protected_j
+        else None
     )
     from custos.research import provenance as pv  # noqa: PLC0415
 
@@ -511,9 +521,13 @@ def run_study(
         "version": 1,
         "tag": args.tag,
         "window_usage": {
-            "window": "judgment",
+            "window": "judgment_2017_2021" if _is_protected_j else "mining_segment",
             "k": _wu_k,
-            "note": wu.usage_note("R36-P4", "judgment", _wu_k),
+            "note": (
+                wu.usage_note("R36-P4", "judgment_2017_2021", _wu_k)
+                if _is_protected_j
+                else "判定窗在挖掘段内（非受保护段 2017~2021）——读挖掘段不入台账（v2 口径）"
+            ),
         },
         "provenance": pv.build(
             args,

@@ -228,3 +228,80 @@ class TestRunStudy:
 class TestVerdictHint:
     def test_no_valid_x(self):
         assert "no_valid_x" in sf._verdict_hint({}, {"best_x": None})
+
+
+class TestProductionRecordUse:
+    """生产方向钉测（v0.359，owner review 实锤：旧键 judgment 无条件写会在
+    生产跑数尾部崩 ValueError——冻结键拒写）。"""
+
+    @staticmethod
+    def _args(js, je):
+        return argparse.Namespace(
+            tag="t1",
+            mining_start="2022-01-01",
+            mining_end="2024-07-31",
+            judgment_start=js,
+            judgment_end=je,
+            codes_file="",
+            count=500,
+            cost_bps=25.0,
+            top_n=20,
+            n_random=2,
+            seed=0,
+        )
+
+    def _run(self, monkeypatch, args):
+        monkeypatch.setattr(
+            sf,
+            "_prepare_inputs",
+            lambda a: (
+                {
+                    "mining": argparse.Namespace(start="2022-01-01", end="2024-07-31"),
+                    "judgment": argparse.Namespace(
+                        start=args.judgment_start, end=args.judgment_end
+                    ),
+                },
+                ["600000"],
+                {},
+            ),
+        )
+        monkeypatch.setattr(
+            sf,
+            "_collect_baselines",
+            lambda *a: (
+                {
+                    "mining": {"reading": {}, "slots": {}},
+                    "judgment": {"reading": {}, "slots": {}},
+                },
+                {
+                    "mining": {"reading": {}, "slots": {}},
+                    "judgment": {"reading": {}, "slots": {}},
+                },
+            ),
+        )
+        monkeypatch.setattr(
+            sf,
+            "_random_control",
+            lambda *a: {"x": {"mining": [0.0] * 20, "judgment": [0.0] * 20}},
+        )
+        monkeypatch.setattr(sf, "_filter_grid", lambda *a: {"filters": {}})
+        calls = []
+        monkeypatch.setattr(
+            sf.wu,
+            "record_use",
+            lambda *a, **kw: calls.append({"args": a, "kwargs": kw}) or 1,
+        )
+        sf.run_study(args)
+        return calls
+
+    def test_protected_judgment_writes_new_key(self, monkeypatch):
+        """judgment==SEG_JUDGMENT ⇒ 生产路径（无注入件）以新键登记 synthetic=False。"""
+        calls = self._run(monkeypatch, self._args("2017-01-01", "2021-12-31"))
+        assert len(calls) == 1
+        assert calls[0]["args"][:2] == ("R36-P4", "judgment_2017_2021")
+        assert calls[0]["kwargs"]["synthetic"] is False
+
+    def test_legacy_judgment_not_registered(self, monkeypatch):
+        """legacy 判定窗（⊆挖掘 B）⇒ 读挖掘段不入台账（零调用）。"""
+        calls = self._run(monkeypatch, self._args("2024-08-01", "2026-09-04"))
+        assert calls == []

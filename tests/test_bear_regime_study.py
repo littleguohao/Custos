@@ -681,9 +681,9 @@ class TestProductionRecordUse:
         monkeypatch.setattr(
             brs,
             "warm_gates",
-            lambda codes, regime, index_df, *, gates, count, cost_bps, start, end: spec[
-                (start, end)
-            ],
+            lambda codes, regime, index_df, *, gates, count, cost_bps, start, end, warmup_bars=0: (
+                spec[(start, end)]
+            ),
         )
         monkeypatch.setattr(
             fes,
@@ -1020,17 +1020,22 @@ class TestV2RandomPoolBuffer:
         assert [t[2] for t in pool] == ["2016-09-01", "2016-10-02"]  # 截止日当日保留
 
     def test_seg_bar_pool_clipped_per_segment_deadlines(self):
-        dates = ["2021-09-01", "2021-10-02", "2021-12-30", "2026-06-06", "2026-08-30"]
+        dates = [
+            "2021-09-01",
+            "2021-10-02",
+            "2021-12-30",
+            "2022-01-04",
+            "2026-06-06",
+            "2026-08-30",
+        ]
         regime = {d: "做多" for d in dates}
         pool_j = brs._seg_bar_pool_clipped(self._pc(dates), regime, "judgment")
         assert [t[2] for t in pool_j] == ["2021-09-01", "2021-10-02"]
         pool_b = brs._seg_bar_pool_clipped(self._pc(dates), regime, "mining_b")
         assert [t[2] for t in pool_b] == [
-            "2021-09-01",
-            "2021-10-02",
-            "2021-12-30",
+            "2022-01-04",
             "2026-06-06",
-        ]
+        ]  # ≥段起点（2022）∧≤截止日
 
     def test_legacy_pool_unclipped(self):
         """legacy 路径不滤（R40 兼容）：bear_bar_pool 原样全收。"""
@@ -1038,3 +1043,41 @@ class TestV2RandomPoolBuffer:
         regime = {d: "做多" for d in dates}
         pool = brs.bear_bar_pool(self._pc(dates), regime)
         assert [t[2] for t in pool] == dates
+
+
+class TestWarmGatesWarmupFilter:
+    """warm_gates 预热口径（v0.359，owner review #3）：各门信号只收 date ≥ start。"""
+
+    def test_gate_signals_filtered_to_start(self, monkeypatch):
+        import pandas as pd
+
+        from custos.research import backtest_factors as bt
+        from custos.research import score_return_study as srs
+
+        df = pd.DataFrame({"date": ["2016-12-01", "2017-01-03"]})
+        monkeypatch.setattr(bt, "_load_one_bars", lambda *a, **k: df)
+
+        def _eval(bars, **kw):
+            kw["signals_out"].extend(
+                [{"i": 0, "date": "2016-12-01"}, {"i": 1, "date": "2017-01-03"}]
+            )
+            return []
+
+        monkeypatch.setattr(bt, "evaluate_trades", _eval)
+        monkeypatch.setattr(
+            srs, "asof_technical_score", lambda *a, **k: (50.0, "中", {})
+        )
+        out = brs.warm_gates(
+            ["600000"],
+            {"2017-01-03": "做多"},
+            None,
+            gates=["j_low"],
+            count=500,
+            cost_bps=25.0,
+            start="2017-01-01",
+            end="2017-12-31",
+            warmup_bars=300,
+        )
+        assert [s["date"] for s in out["600000"]["gate_signals"]["j_low"]] == [
+            "2017-01-03"
+        ]

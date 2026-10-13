@@ -898,12 +898,16 @@ def warm_v0_signals(
     cost_bps: float,
     start: str,
     end: str,
+    warmup_bars: int = 0,
 ) -> dict[str, dict]:
     """V0 重放信号预热：逐股加载 → j_low+0AMV 信号扫描 → as-of V0 技术分。
 
     信号与分数都与出场参数无关，每（窗, 宇宙）只算一次——评估器闭包的
     模块级复用（factor_exit_study 等同引擎工具共用；逻辑自
     make_v0_replay_evaluator._warm 原样上移，逐位不变）。
+    ``warmup_bars``（v0.359，owner review #3）：>0 时加载侧保留 start 前
+    N 根作指标预热（预热只读价格，定案豁免——指标不在段起点冷启动），
+    **信号仍只收 date ≥ start**（v2 段起点前的预热 bar 不出信号）。
     """
     from custos.research import backtest_factors as bt  # noqa: PLC0415
     from custos.research import score_return_study as srs  # noqa: PLC0415
@@ -912,7 +916,7 @@ def warm_v0_signals(
     for i, code in enumerate(codes, 1):
         if i % 200 == 0:
             print(f"[warmup] {start}~{end} {i}/{len(codes)}", file=sys.stderr)
-        df = bt._load_one_bars(code, count, start, end)
+        df = bt._load_one_bars(code, count, start, end, warmup_bars=warmup_bars)
         if df is None or not len(df):
             continue
         sigs: list[dict] = []
@@ -925,6 +929,8 @@ def warm_v0_signals(
             collect_all=True,
             signals_out=sigs,
         )
+        if warmup_bars > 0:
+            sigs = [s for s in sigs if str(s.get("date") or "")[:10] >= start]
         if not sigs:
             continue
         scores: dict[str, float] = {}

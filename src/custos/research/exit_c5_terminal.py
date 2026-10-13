@@ -623,7 +623,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     ap = _build_parser()
     args = ap.parse_args(argv)
-    args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])
+    ap.error(
+        "C5 pre2019 终审已退役（v0.356，TODO #90）——终审=判定段 2017~2021 "
+        "批量只读一次 + holdout；本工具仅供复现 R36/R37 旧结论的内部函数，"
+        "不接受新跑数"
+    )
     _check_pre2019(args, ap)
     try:
         args.count = resolve_count(args.count, args.start)

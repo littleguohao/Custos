@@ -382,6 +382,8 @@ def run_study(
                 cost_bps=args.cost_bps,
                 start=start,
                 end=end,
+                # v2 段前预热 300 根（v0.359，owner review #3）；legacy 0 根
+                warmup_bars=300 if layout == "v2" else 0,
             )
 
     # ── 逐段 warm →（v2）段末隔离带 clip → attach 配对剔除 ──

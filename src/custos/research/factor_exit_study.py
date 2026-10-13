@@ -545,6 +545,9 @@ def _production_warm_fn(
             cost_bps=args.cost_bps,
             start=start,
             end=end,
+            # v2 段前预热 300 根（v0.359，owner review #3——指标不冷启动，
+            # 信号仍 ≥段起点）；legacy 0 根（R40 兼容逐位不变）
+            warmup_bars=300 if len(mining_segs) >= 2 else 0,
         )
 
     return warm_fn, regime
@@ -558,7 +561,7 @@ def _segment_signals(
 ) -> tuple[dict[str, dict[str, dict]], dict[str, list[dict]], dict[str, dict]]:
     """逐段预热并收集逐段信号；v2（clip=True）在各段末打隔离带一刀
     （``load_window.clip_entries`` 单源，入场日 > 段末−90 自然日剔除——
-    持仓不跨段读下一段结果），剔除数入段块在案（报告 segments 块）。
+    持仓不再于段末强平（防 open_end 偏差，owner review #4），剔除数入段块在案（报告 segments 块）。
     返回 (逐段 per_code, 逐段信号, 报告用段块)。"""
     from custos.research.load_window import clip_entries  # noqa: PLC0415
 

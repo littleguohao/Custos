@@ -1443,3 +1443,44 @@ class TestV0LatticeAddonCliGuards:
         self._expect_error(
             _argv_v0l(tmp_path, "--addon-leg", ADDON_EXPR, "--addon-levels", "abc")
         )
+
+
+class TestProductionRecordUse:
+    """生产方向钉测（v0.359，owner review 实锤：旧键 judgment 在判定窗非 None
+    时无条件写——生产跑数尾部崩 ValueError；合成注入路径提前 return 拦不到）。"""
+
+    def _run_production(self, tmp_path, monkeypatch, js, je):
+        calls = []
+        monkeypatch.setattr(
+            ses.wu,
+            "record_use",
+            lambda *a, **kw: calls.append({"args": a, "kwargs": kw}) or 1,
+        )
+        monkeypatch.setattr(ses, "_resolve_universe", lambda a, ap: ["600000"])
+        monkeypatch.setattr(ses, "_make_cell_runner", lambda *a, **k: object())
+        monkeypatch.setattr(
+            ses, "_run_study", lambda *a, **k: {"ok": True, "config": {}}
+        )
+        monkeypatch.setattr(ses, "_print_summary", lambda rep: None)
+        argv = _argv(
+            tmp_path,
+            "--judgment-start",
+            js,
+            "--judgment-end",
+            je,
+        )
+        rc = ses.main(argv)
+        assert rc == 0
+        return calls
+
+    def test_protected_judgment_writes_new_key(self, tmp_path, monkeypatch):
+        """judgment==SEG_JUDGMENT ⇒ 生产路径（注入件全 None）以新键登记 synthetic=False。"""
+        calls = self._run_production(tmp_path, monkeypatch, "2017-01-01", "2021-12-31")
+        assert len(calls) == 1
+        assert calls[0]["args"][:2] == ("R34", "judgment_2017_2021")
+        assert calls[0]["kwargs"]["synthetic"] is False
+
+    def test_legacy_judgment_not_registered(self, tmp_path, monkeypatch):
+        """legacy 判定窗（⊆挖掘 B）⇒ 读挖掘段不入台账（零调用）。"""
+        calls = self._run_production(tmp_path, monkeypatch, "2024-08-01", "2026-09-04")
+        assert calls == []

@@ -105,6 +105,7 @@ def warm_gates(
     cost_bps: float,
     start: str,
     end: str,
+    warmup_bars: int = 0,
 ) -> dict[str, dict]:
     """R40 预热：逐股加载一次 → 逐门扫信号（门在内层 ⇒ df 只加载一次）→
     as-of V0 分（与门无关，按 (code, date) 去重）。
@@ -112,6 +113,8 @@ def warm_gates(
     与 ``exit_campaign.warm_v0_signals`` 同引擎同调用序（baseline scorer +
     entry_gate + amv + collect_all），差异只在循环嵌套。df 加载成功的票
     即使 0 信号也保留（随机臂母体=全宇宙空头日 bar，不是门信号集）。
+    ``warmup_bars``（v0.359，owner review #3）：>0 时加载侧保留 start 前
+    N 根作指标预热（定案豁免），**各门信号仍只收 date ≥ start**。
     """
     from custos.research import backtest_factors as bt  # noqa: PLC0415
     from custos.research import score_return_study as srs  # noqa: PLC0415
@@ -120,7 +123,7 @@ def warm_gates(
     for i, code in enumerate(codes, 1):
         if i % 200 == 0:
             print(f"[warmup] {start}~{end} {i}/{len(codes)}", file=sys.stderr)
-        df = bt._load_one_bars(code, count, start, end)
+        df = bt._load_one_bars(code, count, start, end, warmup_bars=warmup_bars)
         if df is None or not len(df):
             continue
         gate_signals: dict[str, list] = {}
@@ -136,6 +139,8 @@ def warm_gates(
                 collect_all=True,
                 signals_out=sigs,
             )
+            if warmup_bars > 0:
+                sigs = [s for s in sigs if str(s.get("date") or "")[:10] >= start]
             if sigs:
                 gate_signals[g] = sigs
             for s in sigs:
@@ -216,15 +221,24 @@ _V2_SEG_END = {
     "mining_b": lw.SEG_MINING_B[1],
 }
 
+_V2_SEG_START = {
+    "mining_a": lw.SEG_MINING_A[0],
+    "judgment": lw.SEG_JUDGMENT[0],
+    "mining_b": lw.SEG_MINING_B[0],
+}
+
 
 def _seg_bar_pool_clipped(
     per_code: dict[str, dict], regime_bear: dict[str, str], seg: str
 ) -> list[tuple[str, int, str]]:
     """v2 段空头日母体（滤到段末隔离带截止日）：随机臂零假设与门信号
-    同纪律——候选信号三段末各一刀（``lw.clip_entries``），随机入场的
-    母体也按同一截止日滤，跨段持仓在两侧都不产生（v0.356 定案补齐）。"""
+    同纪律——候选信号三段末各一刀（``lw.clip_entries``，防 open_end 强制
+    平仓偏差，owner review #4 更正口径），随机入场的母体按同一截止日滤。
+    v0.359 段前预热后 df 带 start 前 bar：母体同步只收 ≥段起点
+    （预热 bar 只作指标预热，不出随机入场——与门信号同口径）。"""
     dl = lw.entry_deadline(_V2_SEG_END[seg])
-    return [t for t in bear_bar_pool(per_code, regime_bear) if t[2] <= dl]
+    lo = _V2_SEG_START[seg]
+    return [t for t in bear_bar_pool(per_code, regime_bear) if lo <= t[2] <= dl]
 
 
 def random_entries(
@@ -501,6 +515,7 @@ def _resolve_warm(
         )
 
         def warm_fn(start: str, end: str) -> dict[str, dict]:  # noqa: F811
+            _sw, _ms, _is_v2 = _resolve_layout(args)
             return warm_gates(
                 codes,
                 regime_bear,
@@ -510,6 +525,8 @@ def _resolve_warm(
                 cost_bps=args.cost_bps,
                 start=start,
                 end=end,
+                # v2 段前预热 300 根（v0.359，owner review #3）；legacy 0 根
+                warmup_bars=300 if _is_v2 else 0,
             )
 
     return regime_bear, index_df, warm_fn
