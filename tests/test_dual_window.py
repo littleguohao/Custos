@@ -83,8 +83,9 @@ def test_judgment_before_mining_accepted():
 
 
 def test_cross_segment_rejected():
-    """段检查（v0.358）：越段窗口即拒（mining 跨挖掘 A↔判定边界）。"""
-    with pytest.raises(ValueError, match="研究段"):
+    """段检查（v0.358）：越段窗口即拒（mining 跨挖掘 A↔判定边界——
+    v0.361 起 mining 侧走 mining_violation：与判定段相交的文案）。"""
+    with pytest.raises(ValueError, match="判定段"):
         dw.validate_windows(
             Window("2016-06-01", "2017-06-01"), Window("2018-01-01", "2019-01-01")
         )

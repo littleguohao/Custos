@@ -1187,16 +1187,16 @@ class TestSegmentGuard:
             "--direction",
             "动量",
             "--mining-start",
-            "2020-01-01",
+            "2022-01-01",
             "--mining-end",
-            "2021-12-31",
+            "2024-07-31",
             "--final-judge",
             "--judgment-start",
-            "2022-01-01",
+            "2024-08-01",
             "--judgment-end",
-            "2022-12-31",
+            "2026-09-04",
         )
-        el._validate_args(args, ap)  # 不抛即通过
+        el._validate_args(args, ap)  # 不抛即通过（R40 形状：两窗 ⊆B 且不相交）
 
 
 class TestStalePoolGuard:
@@ -2110,3 +2110,27 @@ class TestResumeObjectiveGuardCLI:
                 TestCLI._argv(tmp_path, codes_file, "--mock-llm"),
                 loader=TestCLI._loader(bars, []),
             )
+
+
+class TestMiningInJudgmentSegmentRejected:
+    """挖掘窗 ∩ 判定段 ⇒ 拒绝（v0.361 owner review——绕开「只读一次」的后门）。"""
+
+    def test_mining_inside_judgment_segment(self):
+        ap = el._build_parser()
+        args = ap.parse_args(
+            [
+                "--direction",
+                "动量",
+                "--mining-start",
+                "2017-01-01",
+                "--mining-end",
+                "2019-06-30",
+                "--final-judge",
+                "--judgment-start",
+                "2022-01-01",
+                "--judgment-end",
+                "2024-07-31",
+            ]
+        )
+        with pytest.raises(SystemExit):
+            el._validate_args(args, ap)

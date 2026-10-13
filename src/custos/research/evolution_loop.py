@@ -318,7 +318,11 @@ def _check_windows(args: Any, ap: argparse.ArgumentParser) -> None:
     ):
         if wname == "judgment" and not args.final_judge:
             continue
-        msg = _lw.segment_violation(s, e)
+        msg = (
+            _lw.mining_violation(s, e)
+            if wname == "mining"
+            else _lw.segment_violation(s, e)
+        )
         if msg:
             ap.error(f"{wname} {msg}")
     if args.final_judge:
@@ -915,7 +919,13 @@ def _prepare(
         loader
         if loader is not None
         else functools.partial(
-            bt._load_bars_local, start=None, end=None, allow_tail_clip=False
+            # 判定窗尾随执行豁免（v0.361 owner 拍板）：挖掘侧另有 clip_tail 物理
+            # 隔离，判定窗评估的出场尾随需读 holdout 后 bar（既定口径注记）
+            bt._load_bars_local,
+            start=None,
+            end=None,
+            allow_tail_clip=False,
+            allow_holdout=True,
         )
     )
     return _Prepared(llm, codes, load, load(codes, args.count))

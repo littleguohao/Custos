@@ -86,6 +86,41 @@ def segment_violation(start: str, end: str) -> Optional[str]:
     )
 
 
+def touches_judgment(start: str, end: str) -> bool:
+    """窗口与**受保护判定段**（2017~2021）有任何交集 ⇒ True（单源）。
+
+    台账登记的判定口径（owner review：精确相等 == SEG_JUDGMENT 会把判定
+    **子窗**放成漏网——子窗同样读了受保护段，必须登记；与段完全无交的
+    legacy 窗（⊆挖掘 B）⇒ False 不登记——读挖掘段不入台账）。"""
+    s, e = str(start)[:10], str(end)[:10]
+    return s <= SEG_JUDGMENT[1] and e >= SEG_JUDGMENT[0]
+
+
+def mining_violation(start: str, end: str) -> Optional[str]:
+    """挖掘窗专用段检查（owner review）：须完整落在**挖掘 A 或挖掘 B** 内，
+    且与受保护判定段**零交集**（挖掘直接打在判定段上是绕开「只读一次」
+    纪律的后门——segment_violation 只查「落在某段内」，不拦这个）。"""
+    s, e = str(start)[:10], str(end)[:10]
+    if e < s:
+        return f"窗口 {s}~{e} 起终颠倒"
+    msg = forward_holdout_violation(s, e)
+    if msg:
+        return msg
+    if touches_judgment(s, e):
+        return (
+            f"挖掘窗 {s}~{e} 与受保护判定段（{SEG_JUDGMENT[0]}~{SEG_JUDGMENT[1]}）"
+            "相交——在判定段上挖掘绕开「只读一次」纪律，硬拒绝（owner review）"
+        )
+    for ss, ee in (SEG_MINING_A, SEG_MINING_B):
+        if ss <= s and e <= ee:
+            return None
+    return (
+        f"挖掘窗 {s}~{e} 不在挖掘段内"
+        f"（挖掘 A {SEG_MINING_A[0]}~{SEG_MINING_A[1]} /"
+        f" 挖掘 B {SEG_MINING_B[0]}~{SEG_MINING_B[1]}）"
+    )
+
+
 #: 出场落 holdout 的口径注记（owner review #2②：判定窗末尾前进场的交易，
 #: 出场会落到 holdout 区间的 bar 上）。选择**注记**而非截数据：截到 09-04
 #: 会把窗口末段持仓强平在最后 bar，改变出场语义、读数失真。泄漏是
@@ -100,9 +135,10 @@ EXIT_BARS_HOLDOUT_NOTE = (
 def forward_holdout_violation(start: str, end: str) -> Optional[str]:
     """窗口触及前向 holdout 冻结段 ⇒ 错误文案；否则 None。
 
-    空 end（不限）⇒ None：引擎类 CLI（backtest_factors/strategy_grid）的
-    默认形态就是不限终点，是否吃进 holdout 数据取决于本机数据末日——
-    由调用方自行决定是否对空 end 另立纪律；研究终端的窗口都是显式的。
+    空 end（不限）⇒ None：不定界请求的纪律已由加载层接管（v0.361——
+    ``_load_one_bars``/``_load_bars_local`` 对 end=None 默认截到
+    2026-09-04，``allow_holdout=True`` 为显式豁免通道）；本函数只负责
+    显式窗口的校验。
     """
     e = str(end)[:10]
     if e and e >= FORWARD_HOLDOUT_START:

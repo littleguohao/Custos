@@ -854,7 +854,7 @@ def _assemble_report(
     # v2 台账口径（TODO #90，与 exit_campaign 同语义）：只有判定窗=受保护段
     # （2017~2021）才登记 judgment_2017_2021——legacy 判定窗（2024~2026）已
     # 并入挖掘 B，读挖掘段不入台账（挖掘数据自由可读）。
-    _is_protected_judgment = windows["judgment"] == lw.SEG_JUDGMENT
+    _is_protected_judgment = lw.touches_judgment(*windows["judgment"])
     _wu_k = (
         wu.record_use(
             "R39",
@@ -1232,6 +1232,7 @@ def _resolve_layout(
         SEG_JUDGMENT,
         SEG_MINING_A,
         SEG_MINING_B,
+        mining_violation,
         segment_violation,
     )
 
@@ -1253,7 +1254,7 @@ def _resolve_layout(
         _err("窗口四参须全给（legacy 单段双窗）或全不给（v2 三段布局）——不许半截布局")
     ms, me, js, je = (str(v) for v in vals)  # 上半截已拒 None
     for wname, s, e in (("mining", ms, me), ("judgment", js, je)):
-        msg = segment_violation(s, e)
+        msg = mining_violation(s, e) if wname == "mining" else segment_violation(s, e)
         if msg:
             _err(f"{wname} {msg}")
     if not (me < js or je < ms):

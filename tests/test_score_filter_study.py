@@ -305,3 +305,48 @@ class TestProductionRecordUse:
         """legacy 判定窗（⊆挖掘 B）⇒ 读挖掘段不入台账（零调用）。"""
         calls = self._run(monkeypatch, self._args("2024-08-01", "2026-09-04"))
         assert calls == []
+
+    def test_legacy_judgment_subwindow_registered(self, monkeypatch):
+        """判定**子窗**（2018~2020 ⊆ 判定段）⇒ 相交即登记（v0.361 owner review）。"""
+        calls = self._run(monkeypatch, self._args("2018-01-01", "2020-12-31"))
+        assert len(calls) == 1
+        assert calls[0]["args"][:2] == ("R36-P4", "judgment_2017_2021")
+        assert calls[0]["kwargs"]["synthetic"] is False
+
+
+class TestMiningInJudgmentSegmentRejected:
+    """挖掘窗 ∩ 判定段 ⇒ 拒绝（v0.361 owner review）。"""
+
+    def test_mining_inside_judgment_segment(self, tmp_path):
+        f = tmp_path / "c.txt"
+        f.write_text("600000\n", encoding="utf-8")
+        ap = sf._build_parser()
+        args = ap.parse_args(
+            [
+                "--codes-file",
+                str(f),
+                "--mining-start",
+                "2017-01-01",
+                "--mining-end",
+                "2019-06-30",
+                "--judgment-start",
+                "2022-01-01",
+                "--judgment-end",
+                "2024-07-31",
+            ]
+        )
+        with pytest.raises(SystemExit):
+            sf.main(
+                [
+                    "--codes-file",
+                    str(f),
+                    "--mining-start",
+                    "2017-01-01",
+                    "--mining-end",
+                    "2019-06-30",
+                    "--judgment-start",
+                    "2022-01-01",
+                    "--judgment-end",
+                    "2024-07-31",
+                ]
+            )

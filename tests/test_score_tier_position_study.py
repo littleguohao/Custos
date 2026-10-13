@@ -726,6 +726,36 @@ class TestProductionRecordUse:
         assert rep["window_usage"]["k"] is None
         assert "不入台账" in rep["window_usage"]["note"]
 
+    def test_legacy_judgment_subwindow_registered(self, monkeypatch):
+        """判定**子窗**（2018~2020 ⊆ 判定段）⇒ 相交即登记（v0.361 owner
+        review——精确相等会把判定子窗放成漏网，7 入口统一 touches_judgment）。"""
+        calls = _wu_spy(monkeypatch)
+        spec = {
+            ("2022-01-01", "2024-07-31"): _mk_seg_per_code(
+                lambda k: f"2023-{(k % 12) + 1:02d}-{(k % 28) + 1:02d}", i0=10
+            ),
+            ("2018-01-01", "2020-12-31"): _mk_seg_per_code(
+                lambda k: f"2019-{(k % 12) + 1:02d}-{(k % 28) + 1:02d}", i0=5000
+            ),
+        }
+        rep = self._production_run(
+            monkeypatch,
+            spec,
+            _args(
+                mining_start="2022-01-01",
+                mining_end="2024-07-31",
+                judgment_start="2018-01-01",
+                judgment_end="2020-12-31",
+                n_random=2,
+                c4_min_pool=2,
+            ),
+        )
+        assert len(calls) == 1
+        assert calls[0]["unit"] == "R42"
+        assert calls[0]["window"] == "judgment_2017_2021"
+        assert calls[0]["synthetic"] is False
+        assert rep["window_usage"]["window"] == "judgment_2017_2021"
+
     def test_injected_still_synthetic(self, monkeypatch):
         """对照钉：同一 v2 夹具走注入路径 ⇒ synthetic=True（双向钉死）。"""
         calls = _wu_spy(monkeypatch)
@@ -1035,3 +1065,26 @@ class TestRecordUseKeys:
         assert rep["window_usage"]["window"] == "mining_segment"
         assert rep["window_usage"]["k"] is None
         assert "不入台账" in rep["window_usage"]["note"]
+
+
+class TestMiningInJudgmentSegmentRejected:
+    """挖掘窗 ∩ 判定段 ⇒ 拒绝（v0.361 owner review）。"""
+
+    def test_mining_inside_judgment_segment(self):
+        ap = stp._build_parser()
+        args = ap.parse_args(
+            [
+                "--tag",
+                "t",
+                "--mining-start",
+                "2017-01-01",
+                "--mining-end",
+                "2019-06-30",
+                "--judgment-start",
+                "2022-01-01",
+                "--judgment-end",
+                "2024-07-31",
+            ]
+        )
+        with pytest.raises(SystemExit):
+            stp._check_windows(args, ap)

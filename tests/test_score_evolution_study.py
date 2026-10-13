@@ -1484,3 +1484,10 @@ class TestProductionRecordUse:
         """legacy 判定窗（⊆挖掘 B）⇒ 读挖掘段不入台账（零调用）。"""
         calls = self._run_production(tmp_path, monkeypatch, "2024-08-01", "2026-09-04")
         assert calls == []
+
+    def test_legacy_judgment_subwindow_registered(self, tmp_path, monkeypatch):
+        """判定**子窗**（2018~2020 ⊆ 判定段）⇒ 相交即登记（v0.361 owner review）。"""
+        calls = self._run_production(tmp_path, monkeypatch, "2018-01-01", "2020-12-31")
+        assert len(calls) == 1
+        assert calls[0]["args"][:2] == ("R34", "judgment_2017_2021")
+        assert calls[0]["kwargs"]["synthetic"] is False

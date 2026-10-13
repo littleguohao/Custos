@@ -318,7 +318,11 @@ def _check_windows(args: Any, ap: argparse.ArgumentParser) -> None:
     _, ms, me = mining_segs[0]
     js, je = judgment
     for wname, s, e in (("mining", ms, me), ("judgment", js, je)):
-        msg = lw.segment_violation(s, e)
+        msg = (
+            lw.mining_violation(s, e)
+            if wname == "mining"
+            else lw.segment_violation(s, e)
+        )
         if msg:
             ap.error(f"{wname} {msg}")
     if not (me < js or je < ms):
@@ -547,7 +551,7 @@ def run_study(
     # 判定窗台账 v2 口径（TODO #90，同 exit_campaign）：只有判定窗=受保护段
     # （2017~2021）才登记——legacy 判定窗已并入挖掘 B，读挖掘段不入台账
     # （挖掘数据自由可读）；冻结键 judgment/pre2019 永不新写。
-    _is_protected_judgment = judgment_span == lw.SEG_JUDGMENT
+    _is_protected_judgment = lw.touches_judgment(*judgment_span)
     _wu_k = (
         wu.record_use(
             "R41",

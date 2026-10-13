@@ -653,10 +653,84 @@ class TestProductionRecordUse:
             "note": "判定窗在挖掘段内（非受保护段 2017~2021）——读挖掘段不入台账（v2 口径）",
         }
 
+    # ---------------------------------------------------------------------------
+    # v2 窗口布局钉测（TODO #90，owner 2026-10-13 拍板）
+    # ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# v2 窗口布局钉测（TODO #90，owner 2026-10-13 拍板）
-# ---------------------------------------------------------------------------
+    def test_legacy_judgment_subwindow_registered(self, monkeypatch):
+        """判定**子窗**（2018~2020 ⊆ 判定段）⇒ 相交即登记（v0.361 owner
+        review——精确相等会把判定子窗放成漏网，7 入口统一 touches_judgment）。"""
+        import pandas as pd
+
+        from custos.datasource.local_tdx import local_tdx_data
+        from custos.research import backtest_factors as bt
+        from custos.research import exit_campaign as ec
+
+        _patch_adx(monkeypatch)
+        calls = _wu_spy(monkeypatch)
+        def _mk_pc(year, off):
+            d = {}
+            for k in range(60):
+                code = f"{k % 30:06d}"
+                day = f"{year}-{(k % 12) + 1:02d}-{(k % 28) + 1:02d}"
+                d.setdefault(code, []).append((day, off + k, 50.0, k % 3))
+            return _per_code(d)
+
+        spec = {
+            ("2022-01-01", "2024-07-31"): _mk_pc(2023, 0),
+            ("2018-01-01", "2020-12-31"): _mk_pc(2019, 10000),
+        }
+
+        def _resolve_fake(ns, ap):
+            ns.universe_meta = {
+                "universe_rule": "test_rule",
+                "n_codes": 1,
+                "universe_sha256": "deadbeef01234567",
+            }
+            return ["000000"]
+
+        monkeypatch.setattr(bt, "_resolve_universe", _resolve_fake)
+        monkeypatch.setattr(bt, "load_amv_regime", lambda since: {"2019-01-03": "做多"})
+        monkeypatch.setattr(
+            local_tdx_data,
+            "get_ohlcv_table",
+            lambda code, count: pd.DataFrame({"date": ["2019-01-03"]}),
+        )
+        monkeypatch.setattr(
+            ec,
+            "warm_v0_signals",
+            lambda codes, regime, index_df, *, count, cost_bps, start, end, warmup_bars=0: (
+                spec[(start, end)]
+            ),
+        )
+        monkeypatch.setattr(
+            fes,
+            "replay_signals",
+            lambda per_code, subset, params, regime, cost_bps: _scripted_replay(
+                subset, params
+            ),
+        )
+        rep = fes.run_study(
+            _args(
+                judgment_start="2018-01-01",
+                judgment_end="2020-12-31",
+                n_random=2,
+                c4_min_pool=2,
+                codes="",
+                codes_file="",
+                universe_local=False,
+                universe_sample=0,
+                universe_seed=42,
+                count=2000,
+            ),
+            warm_fn=None,
+            replay_fn=None,
+        )
+        assert len(calls) == 1
+        assert calls[0]["unit"] == "R39"
+        assert calls[0]["window"] == "judgment_2017_2021"
+        assert calls[0]["synthetic"] is False
+        assert rep["window_usage"]["window"] == "judgment_2017_2021"
 
 
 class TestV2Layout:
@@ -967,3 +1041,26 @@ class TestLegacyR40BitIdentical:
             "k": None,
             "note": "判定窗在挖掘段内（非受保护段 2017~2021）——读挖掘段不入台账（v2 口径）",
         }
+
+
+class TestMiningInJudgmentSegmentRejected:
+    """挖掘窗 ∩ 判定段 ⇒ 拒绝（v0.361 owner review——绕开「只读一次」的后门）。"""
+
+    def test_mining_inside_judgment_segment(self):
+        ap = fes._build_parser()
+        args = ap.parse_args(
+            [
+                "--tag",
+                "t",
+                "--mining-start",
+                "2017-01-01",
+                "--mining-end",
+                "2019-06-30",
+                "--judgment-start",
+                "2022-01-01",
+                "--judgment-end",
+                "2024-07-31",
+            ]
+        )
+        with pytest.raises(SystemExit):
+            fes._check_windows(args, ap)

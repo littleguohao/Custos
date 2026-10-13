@@ -1012,6 +1012,28 @@ class TestProductionRecordUse:
             "note": "判定窗在挖掘段内——不入台账（v2 口径）",
         }
 
+    def test_legacy_judgment_subwindow_registered(self, monkeypatch):
+        """判定**子窗**（2018~2020 ⊆ 判定段）⇒ 相交即登记（v0.361 owner
+        review——精确相等会把判定子窗放成漏网，7 入口统一 touches_judgment）。"""
+        calls = _wu_spy(monkeypatch)
+        windows = (("2022-01-01", "2024-07-31"), ("2018-01-01", "2020-12-31"))
+        self._monkeypatch_production(monkeypatch, {w: _mk_per_code() for w in windows})
+        rep = prr.run_study(
+            _args(
+                judgment_start="2018-01-01",
+                judgment_end="2020-12-31",
+                n_random=2,
+                c4_min_pool=2,
+            ),
+            warm_fn=None,
+            replay_fn=None,
+        )
+        assert len(calls) == 1
+        assert calls[0]["unit"] == "R41"
+        assert calls[0]["window"] == "judgment_2017_2021"
+        assert calls[0]["synthetic"] is False
+        assert rep["window_usage"]["window"] == "judgment_2017_2021"
+
     def test_injected_still_synthetic(self, monkeypatch):
         """对照钉：v2 受保护判定窗走注入路径 ⇒ synthetic=True（双向钉死）。"""
         calls = _wu_spy(monkeypatch)
@@ -1020,3 +1042,26 @@ class TestProductionRecordUse:
         assert calls[0]["window"] == "judgment_2017_2021"
         assert calls[0]["synthetic"] is True
         assert rep["window_usage"]["k"] == 7
+
+
+class TestMiningInJudgmentSegmentRejected:
+    """挖掘窗 ∩ 判定段 ⇒ 拒绝（v0.361 owner review）。"""
+
+    def test_mining_inside_judgment_segment(self):
+        ap = prr._build_parser()
+        args = ap.parse_args(
+            [
+                "--tag",
+                "t",
+                "--mining-start",
+                "2017-01-01",
+                "--mining-end",
+                "2019-06-30",
+                "--judgment-start",
+                "2022-01-01",
+                "--judgment-end",
+                "2024-07-31",
+            ]
+        )
+        with pytest.raises(SystemExit):
+            prr._check_windows(args, ap)

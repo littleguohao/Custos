@@ -2675,7 +2675,7 @@ def main(
         # v2 台账口径（TODO #90）：只有判定窗=受保护段（2017~2021）才登记；
         # legacy 窗已并入挖掘 B，读挖掘段不入台账；旧键已冻结，无条件写会
         # 在生产跑数尾部崩掉（owner review 实锤）。
-        _is_protected_j = (judgment.start, judgment.end) == lw.SEG_JUDGMENT
+        _is_protected_j = lw.touches_judgment(judgment.start, judgment.end)
         _wu_k = (
             wu.record_use(
                 "R34",

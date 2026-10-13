@@ -503,7 +503,7 @@ def run_study(
     # v2 台账口径（TODO #90）：只有判定窗=受保护段（2017~2021）才登记——
     # legacy 窗（2024~2026）已并入挖掘 B，读挖掘段不入台账（挖掘数据自由可读）；
     # 旧键已冻结，无条件写会在生产跑数尾部崩掉（owner review 实锤）。
-    _is_protected_j = (args.judgment_start, args.judgment_end) == lw.SEG_JUDGMENT
+    _is_protected_j = lw.touches_judgment(args.judgment_start, args.judgment_end)
     _wu_k = (
         wu.record_use(
             "R36-P4",
@@ -608,14 +608,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap = _build_parser()
     args = ap.parse_args(argv)
     args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])
-    from custos.research.load_window import segment_violation  # noqa: PLC0415
+    from custos.research.load_window import (  # noqa: PLC0415
+        mining_violation,
+        segment_violation,
+    )
 
     for name, s, e in (
         ("mining", args.mining_start, args.mining_end),
         ("judgment", args.judgment_start, args.judgment_end),
     ):
-        _sv = segment_violation(
-            s, e
+        _sv = (
+            mining_violation(s, e) if name == "mining" else segment_violation(s, e)
         )  # v0.358 段检查单源（含 holdout；pre2019 拒绝已退役）
         if _sv:
             ap.error(f"{name} {_sv}")

@@ -814,7 +814,7 @@ def run_campaign(
 
     # v2 台账口径（TODO #90）：只有判定窗=受保护段（2017~2021）才登记——
     # legacy 窗（2024~2026）已并入挖掘 B，读挖掘段不入台账（挖掘数据自由可读）。
-    _is_protected_judgment = (cfg.judgment_start, cfg.judgment_end) == lw.SEG_JUDGMENT
+    _is_protected_judgment = lw.touches_judgment(cfg.judgment_start, cfg.judgment_end)
     _wu_k = (
         wu.record_use(
             "R37", "judgment_2017_2021", tag, "战役判定窗读数", synthetic=synthetic
@@ -1186,14 +1186,20 @@ def main(
     except ValueError as exc:
         ap.error(str(exc))
     # 窗口段检查（v0.358 单源=load_window.segment_violation，含 holdout——
-    # 战役壳此前漏守被 owner review #2② 抓出；判定∩挖掘不相交，v2 口径）
-    from custos.research.load_window import segment_violation  # noqa: PLC0415
+    # 战役壳此前漏守被 owner review #2② 抓出；判定∩挖掘不相交，v2 口径；
+    # 挖掘窗用 mining_violation——禁打判定段，owner review）
+    from custos.research.load_window import (  # noqa: PLC0415
+        mining_violation,
+        segment_violation,
+    )
 
     for _wn, _s, _e in (
         ("mining", args.mining_start, args.mining_end),
         ("judgment", args.judgment_start, args.judgment_end),
     ):
-        _msg = segment_violation(_s, _e)
+        _msg = (
+            mining_violation(_s, _e) if _wn == "mining" else segment_violation(_s, _e)
+        )
         if _msg:
             ap.error(f"{_wn} {_msg}")
     if not (

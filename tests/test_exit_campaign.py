@@ -858,3 +858,54 @@ class TestWarmV0WarmupFilter:
         out, _seen = self._run(monkeypatch, 0)
         sig_dates = [s["date"] for s in out["600000"]["signals"]]
         assert sig_dates == ["2016-12-01", "2017-01-03"]  # 0=原行为不滤
+
+
+class TestMiningInJudgmentSegmentRejected:
+    """挖掘窗 ∩ 判定段 ⇒ 拒绝（v0.361 owner review）。"""
+
+    def test_mining_inside_judgment_segment(self):
+        ap = ec._build_parser()
+        with pytest.raises(SystemExit):
+            ap.parse_args(
+                [
+                    "--mining-start",
+                    "2017-01-01",
+                    "--mining-end",
+                    "2019-06-30",
+                    "--judgment-start",
+                    "2022-01-01",
+                    "--judgment-end",
+                    "2024-07-31",
+                ]
+            )
+            ec.main(
+                [
+                    "--mining-start",
+                    "2017-01-01",
+                    "--mining-end",
+                    "2019-06-30",
+                    "--judgment-start",
+                    "2022-01-01",
+                    "--judgment-end",
+                    "2024-07-31",
+                ]
+            )
+
+
+class TestJudgmentSubwindowRegistered:
+    """判定**子窗**（2018~2020 ⊆ 判定段）⇒ 相交即登记（v0.361 owner review——
+    精确相等会把判定子窗放成漏网；cfg 判定窗触及判定段即以新键登记）。"""
+
+    def test_subwindow_records_new_key(self, tmp_path):
+        ledger = tmp_path / "t" / "campaign_ledger.json"
+        cfg = ec.CampaignConfig(
+            batch_size=2,
+            n_random=1,
+            seed=5,
+            max_batches=1,
+            judgment_start="2018-01-01",
+            judgment_end="2020-12-31",
+        )
+        rep = ec.run_campaign(cfg, _fake_all_lose, ledger, tag="t")
+        assert rep["window_usage"]["window"] == "judgment_2017_2021"
+        assert rep["window_usage"]["k"] == 1  # k 走 redirect 的 tmp 台账

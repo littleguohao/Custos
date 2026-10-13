@@ -55,7 +55,12 @@ def validate_windows(mining: Window, judgment: Window) -> None:
             raise ValueError(f"窗口日期须为 YYYY-MM-DD: {w}") from exc
         if s > e:
             raise ValueError(f"窗口起止倒挂: start={w.start} > end={w.end}")
-        msg = _lw.segment_violation(w.start, w.end)
+        # 挖掘窗用 mining_violation（禁打判定段，owner review）；判定窗用 segment_violation
+        msg = (
+            _lw.mining_violation(w.start, w.end)
+            if w is mining
+            else _lw.segment_violation(w.start, w.end)
+        )
         if msg:
             raise ValueError(msg)
     if not (mining.end < judgment.start or judgment.end < mining.start):

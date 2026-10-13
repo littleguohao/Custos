@@ -81,3 +81,58 @@ class TestEntryBuffer:
         recs = [{"date": d} for d in ("2016-09-30", "2016-11-30", "2016-12-30")]
         kept = lw.clip_entries(recs, "2016-12-31")
         assert len(recs) - len(kept) == 2  # 报告记隔离带剔除数的口径
+
+
+class TestMiningViolation:
+    """挖掘窗专用段检查（owner review：segment_violation 不拦「挖掘打判定段」）。"""
+
+    @pytest.mark.parametrize(
+        "s,e",
+        [
+            ("2000-01-01", "2016-12-31"),  # 挖掘 A 整段
+            ("2022-01-01", "2024-07-31"),  # R40 旧挖掘窗 ⊆ B（兼容通道）
+            ("2022-01-01", "2026-09-04"),  # 挖掘 B 整段
+            ("2005-01-01", "2010-12-31"),  # A 内子窗
+        ],
+    )
+    def test_legal(self, s, e):
+        assert lw.mining_violation(s, e) is None
+
+    @pytest.mark.parametrize(
+        "s,e",
+        [
+            ("2017-01-01", "2019-06-30"),  # 挖掘直接打判定段（owner 实测 case）
+            ("2018-01-01", "2020-12-31"),  # 判定子窗当挖掘窗
+            ("2016-06-01", "2017-06-01"),  # 擦边相交
+            ("2021-12-01", "2022-06-01"),  # 擦右缘相交
+            ("2015-01-01", "2024-07-31"),  # 跨三段
+            ("2026-09-01", "2026-09-05"),  # 触 holdout
+        ],
+    )
+    def test_rejected(self, s, e):
+        assert lw.mining_violation(s, e) is not None
+
+    def test_judgment_mining_wording(self):
+        assert "判定段" in lw.mining_violation("2017-01-01", "2019-06-30")
+
+
+class TestTouchesJudgment:
+    """台账登记判定（owner review：精确相等会把判定子窗放成漏网）。"""
+
+    @pytest.mark.parametrize(
+        "s,e,want",
+        [
+            ("2017-01-01", "2021-12-31", True),  # 整段
+            ("2018-01-01", "2020-12-31", True),  # 子窗（owner 实测 case）
+            (
+                "2021-06-01",
+                "2022-06-01",
+                True,
+            ),  # 擦右缘（上游段检查会另拒，登记语义仍 True）
+            ("2016-06-01", "2017-01-03", True),  # 擦左缘
+            ("2022-01-01", "2026-09-04", False),  # 挖掘 B（legacy 判定窗——不登记）
+            ("2000-01-01", "2016-12-31", False),  # 挖掘 A（不登记）
+        ],
+    )
+    def test_matrix(self, s, e, want):
+        assert lw.touches_judgment(s, e) is want

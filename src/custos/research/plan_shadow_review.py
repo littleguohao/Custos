@@ -358,7 +358,12 @@ def main(
         raise SystemExit("--horizons 为空")
     if bars_loader is None:
         bars_loader = functools.partial(
-            bt._load_one_bars, count=2000, start=None, end=None
+            # 复盘 live 影子台账=读近期数据（holdout 豁免在案，v0.361 owner 拍板）
+            bt._load_one_bars,
+            count=2000,
+            start=None,
+            end=None,
+            allow_holdout=True,
         )
 
     n_rows, rows, n_continuation = load_ledger_events(

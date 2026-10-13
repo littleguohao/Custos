@@ -1046,3 +1046,35 @@ class TestLoaderWarmupBars:
         self._stub_tdx(monkeypatch)
         df = bt._load_one_bars("600000", 0, "2020-05-26", None, warmup_bars=10)
         assert list(df["date"]) == list(self.DATES)
+
+
+class TestLoaderEndNoneClamp:
+    """end=None 默认截到 2026-09-04（v0.361，owner review——自切片调用方
+    不能再读到 holdout）；allow_holdout=True 显式豁免。"""
+
+    DATES = ["2026-08-30", "2026-09-04", "2026-09-05", "2026-09-08"]
+
+    def _stub(self, monkeypatch):
+        from custos.datasource.local_tdx import local_tdx_data
+
+        monkeypatch.setattr(
+            local_tdx_data,
+            "get_ohlcv_table",
+            lambda *a, **k: pd.DataFrame({"date": list(self.DATES)}),
+        )
+        monkeypatch.setattr(local_tdx_data, "reset_qfq_failure_stats", lambda: None)
+
+    def test_end_none_clamps_at_last_legal_day(self, monkeypatch):
+        self._stub(monkeypatch)
+        df = bt._load_one_bars("600000", 0, None, None)
+        assert list(df["date"]) == ["2026-08-30", "2026-09-04"]
+
+    def test_allow_holdout_keeps_unbounded(self, monkeypatch):
+        self._stub(monkeypatch)
+        df = bt._load_one_bars("600000", 0, None, None, allow_holdout=True)
+        assert list(df["date"]) == list(self.DATES)
+
+    def test_batch_loader_same_clamp(self, monkeypatch):
+        self._stub(monkeypatch)
+        out = bt._load_bars_local(["600000"], 0, None, None)
+        assert list(out["600000"]["date"]) == ["2026-08-30", "2026-09-04"]

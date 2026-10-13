@@ -752,6 +752,89 @@ class TestProductionRecordUse:
         assert calls[0]["synthetic"] is True
         assert rep["window_usage"]["k"] == 7
 
+    def test_legacy_judgment_subwindow_registered(self, monkeypatch):
+        """判定**子窗**（2018~2020 ⊆ 判定段）⇒ 相交即登记（v0.361 owner
+        review——精确相等会把判定子窗放成漏网，7 入口统一 touches_judgment）。"""
+        import pandas as pd
+
+        from custos.datasource.local_tdx import local_tdx_data
+
+        calls = _wu_spy(monkeypatch)
+
+        def _mk_legacy_pc(dates):
+            per_code = {}
+            for k, d in enumerate(dates):
+                code = f"{(k % 30):06d}"
+                pack = per_code.setdefault(
+                    code, {"df": None, "gate_signals": {}, "scores": {}}
+                )
+                pack["gate_signals"].setdefault("j_low", []).append({"i": k, "date": d})
+                pack["scores"][d] = 50.0
+            return per_code
+
+        spec = {
+            ("2022-01-01", "2024-07-31"): _mk_legacy_pc(
+                [f"2023-{m:02d}-15" for m in range(1, 13)]
+            ),
+            ("2018-01-01", "2020-12-31"): _mk_legacy_pc(
+                [f"2019-{m:02d}-15" for m in range(1, 13)]
+            ),
+        }
+
+        def _fake_resolve(ns, ap):
+            ns.universe_meta = {
+                "universe_rule": "vipdoc_default",
+                "n_codes": 1,
+                "universe_sha256": "0123456789abcdef",
+            }
+            return ["000000"]
+
+        monkeypatch.setattr(bt, "_resolve_universe", _fake_resolve)
+        monkeypatch.setattr(bt, "load_amv_regime", lambda since: {"2022-01-03": "空头"})
+        monkeypatch.setattr(
+            local_tdx_data,
+            "get_ohlcv_table",
+            lambda code, count: pd.DataFrame({"date": ["2022-01-03"]}),
+        )
+        monkeypatch.setattr(
+            brs,
+            "warm_gates",
+            lambda codes, regime, index_df, *, gates, count, cost_bps, start, end, warmup_bars=0: (
+                spec[(start, end)]
+            ),
+        )
+        monkeypatch.setattr(
+            fes,
+            "replay_signals",
+            lambda view, subset, params, regime, cost_bps: _replay_winner_gate(
+                subset, params
+            ),
+        )
+        monkeypatch.setattr(brs, "run_arm", lambda *a, **kw: {"mining": None})
+        rep = brs.run_study(
+            _args(
+                gates="j_low",
+                judgment_start="2018-01-01",
+                judgment_end="2020-12-31",
+                n_random=2,
+                c4_min_pool=2,
+                codes="",
+                codes_file="",
+                universe_local=False,
+                universe_sample=0,
+                universe_seed=42,
+                count=2000,
+            ),
+            warm_fn=None,
+            replay_fn=None,
+            random_entry_fn=None,
+        )
+        assert len(calls) == 1
+        assert calls[0]["unit"] == "R40"
+        assert calls[0]["window"] == "judgment_2017_2021"
+        assert calls[0]["synthetic"] is False
+        assert rep["window_usage"]["window"] == "judgment_2017_2021"
+
     def test_injected_legacy_not_recorded(self, monkeypatch):
         """legacy 判定窗（2024~2026 ⊆ 挖掘 B）⇒ **不登记**（读挖掘段自由，
         v2 口径）——record_use 零调用，报告写死「不入台账」注记。"""
@@ -1076,3 +1159,26 @@ class TestWarmGatesWarmupFilter:
         assert [s["date"] for s in out["600000"]["gate_signals"]["j_low"]] == [
             "2017-01-03"
         ]
+
+
+class TestMiningInJudgmentSegmentRejected:
+    """挖掘窗 ∩ 判定段 ⇒ 拒绝（v0.361 owner review）。"""
+
+    def test_mining_inside_judgment_segment(self):
+        ap = brs._build_parser()
+        args = ap.parse_args(
+            [
+                "--tag",
+                "t",
+                "--mining-start",
+                "2017-01-01",
+                "--mining-end",
+                "2019-06-30",
+                "--judgment-start",
+                "2022-01-01",
+                "--judgment-end",
+                "2024-07-31",
+            ]
+        )
+        with pytest.raises(SystemExit):
+            brs._check_windows(args, ap)

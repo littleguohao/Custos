@@ -825,7 +825,7 @@ def _build_report(
     2017~2021 才登记** ``judgment_2017_2021``，本报告=该窗第 k 次被读；
     legacy 判定窗已并入挖掘 B，读挖掘段不入台账，照 exit_campaign 条件
     登记语义接线）+ provenance + 自含产物块。"""
-    _is_protected_judgment = tuple(windows["judgment"]) == lw.SEG_JUDGMENT
+    _is_protected_judgment = lw.touches_judgment(*windows["judgment"])
     _wu_k = (
         wu.record_use(
             "R40",
@@ -1214,7 +1214,11 @@ def _check_windows(args: Any, ap: argparse.ArgumentParser) -> None:
             "判定 2017~2021 / 挖掘 B 2022~2026-09-04）——只给一部分是半截布局"
         )
     for wname, s, e in (("mining", ms, me), ("judgment", js, je)):
-        msg = lw.segment_violation(s, e)
+        msg = (
+            lw.mining_violation(s, e)
+            if wname == "mining"
+            else lw.segment_violation(s, e)
+        )
         if msg:
             ap.error(f"{wname} {msg}")
     if max(ms, js) <= min(me, je):

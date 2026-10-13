@@ -4935,29 +4935,40 @@ def _tail_clip_msg(first_dates: list[str], start: str, count: int) -> str:
 
 
 def _load_one_bars(
-    c: str, count: int, start: Optional[str], end: Optional[str], warmup_bars: int = 0
+    c: str,
+    count: int,
+    start: Optional[str],
+    end: Optional[str],
+    warmup_bars: int = 0,
+    allow_holdout: bool = False,
 ) -> Optional[pd.DataFrame]:
     """单票加载 + start/end 窗口裁剪（``_load_bars_local`` 的逐股循环体，v0.189 提取块）。
 
     start/end(YYYY-MM-DD)在 count 之前应用(此前 tdx 路径静默忽略 --start/--end,
     导致指定窗口无效、实际跑全历史)。异常 WARN 后返 None（调用方跳过该票）。
     **前向 holdout 硬拒绝下沉**（v0.359，owner review #2）：显式 end ≥
-    2026-09-05 一律 ValueError——所有研究工具读数据必经此处，任何入口不漏
-    （end=None 保持既定豁免：出场尾随执行与即席分析的不定界加载）。
+    2026-09-05 一律 ValueError——所有研究工具读数据必经此处，任何入口不漏。
+    **end=None 默认截到 2026-09-04**（v0.361，owner review——绕开显式 end
+    的后路：自切片的调用方（factor_ic_profile 等）不能再读到 holdout）；
+    真正需要近期数据的调用方显式 ``allow_holdout=True`` 豁免（目前仅
+    plan_shadow_review 复盘 live 影子台账 / evolution_loop 判定窗尾随执行）。
     ``warmup_bars``（v0.359，owner review #3）：>0 时**保留 start 前最多
     N 根作指标预热**（预热只读价格，定案豁免——KDJ/MA 不在段起点冷启动）；
     信号侧仍按 start 过滤（warm_v0_signals/warm_gates 调用方负责）。
     """
     from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
-    from custos.research.load_window import forward_holdout_violation  # noqa: PLC0415
+    from custos.research import load_window as _lw  # noqa: PLC0415
 
-    _fh = forward_holdout_violation(str(start or ""), str(end or ""))
+    eff_end = str(end or "")[:10]
+    if not eff_end and not allow_holdout:
+        eff_end = _lw.SEG_MINING_B[1]  # 2026-09-04：end=None 默认截到 holdout 前
+    _fh = _lw.forward_holdout_violation(str(start or ""), eff_end)
     if _fh:
         raise ValueError(f"数据加载前向 holdout 硬拒绝（load_window 单源下沉）：{_fh}")
 
     try:
         df = local_tdx_data.get_ohlcv_table(c, count=count or 2000)
-        if df is not None and len(df) and (start or end):
+        if df is not None and len(df) and (start or eff_end):
             df = df.copy()
             df["date"] = df["date"].astype(str).str[:10]
             if start:
@@ -4966,8 +4977,8 @@ def _load_one_bars(
                     df = df.iloc[max(0, pos - warmup_bars) :]
                 else:
                     df = df[df["date"] >= start]
-            if end:
-                df = df[df["date"] <= end]
+            if eff_end:
+                df = df[df["date"] <= eff_end]
             df = (
                 df.tail(count).reset_index(drop=True)
                 if count
@@ -4986,6 +4997,7 @@ def _load_bars_local(
     end: Optional[str] = None,
     allow_tail_clip: bool = False,
     warmup_bars: int = 0,
+    allow_holdout: bool = False,
 ) -> dict[str, pd.DataFrame]:
     """CLI 用：经 local_tdx 读取本地日线（需通达信数据；单测走注入不经此）。
     start/end(YYYY-MM-DD)在 count 之前应用(此前 tdx 路径静默忽略 --start/--end,
@@ -4994,18 +5006,24 @@ def _load_bars_local(
     早期 --start 会合法误触，v0.187）——开则 WARN 放行，默认 fail-closed。
     **前向 holdout 硬拒绝下沉**（v0.359，owner review #2）：显式 end ≥
     2026-09-05 一律 ValueError（批级先判一次，`_load_one_bars` 逐股同守）。
+    **end=None 默认截到 2026-09-04**（v0.361，owner review）；``allow_holdout``
+    为显式豁免（plan_shadow_review / evolution_loop 尾随执行在案）。
     ``warmup_bars`` 透传 `_load_one_bars`（v0.359；默认 0=原行为）。"""
     from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
-    from custos.research.load_window import forward_holdout_violation  # noqa: PLC0415
+    from custos.research import load_window as _lw  # noqa: PLC0415
 
-    _fh = forward_holdout_violation(str(start or ""), str(end or ""))
+    _fh = _lw.forward_holdout_violation(
+        str(start or ""), str(end or "") or _lw.SEG_MINING_B[1]
+    )
     if _fh:
         raise ValueError(f"数据加载前向 holdout 硬拒绝（load_window 单源下沉）：{_fh}")
 
     local_tdx_data.reset_qfq_failure_stats()  # 计数限定本轮加载，见下方汇总
     out: dict[str, pd.DataFrame] = {}
     for c in codes:
-        df = _load_one_bars(c, count, start, end, warmup_bars=warmup_bars)
+        df = _load_one_bars(
+            c, count, start, end, warmup_bars=warmup_bars, allow_holdout=allow_holdout
+        )
         if df is not None and len(df):
             out[c] = df
     # 滚动尾部截断护栏（2026-09-05 RSI 家族跨窗跑废 6 格的教训）：count 是
