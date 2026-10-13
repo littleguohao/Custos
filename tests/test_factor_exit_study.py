@@ -21,6 +21,7 @@ import json
 import pandas as pd
 import pytest
 
+from helpers_golden import canon_json
 from custos.research import factor_exit_study as fes
 from custos.research.evolution import exit_genome as eg
 
@@ -956,8 +957,10 @@ class TestLegacyR40BitIdentical:
         got = dict(rep)
         wu_blk = got.pop("window_usage")
         got.pop("provenance")
-        canon = json.dumps(got, ensure_ascii=False, sort_keys=True, allow_nan=True)
-        assert canon == _golden_r40(), "legacy R40 报告必须与 v2 切换前逐位同一"
+        # 浮点归一化比对（helpers_golden——CI 异构 CPU 浮点末位差，v0.359）
+        assert canon_json(got) == canon_json(json.loads(_golden_r40())), (
+            "legacy R40 报告必须与 v2 切换前同一（浮点归一 1e-12）"
+        )
         # 唯二定案变更：window_usage 块改 v2 口径（判定窗在挖掘段内不登记）
         assert wu_blk == {
             "window": "mining_segment",

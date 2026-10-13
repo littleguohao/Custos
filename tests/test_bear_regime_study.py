@@ -23,6 +23,7 @@ import argparse
 
 import pytest
 
+from helpers_golden import canon_json
 from custos.research import backtest_factors as bt
 from custos.research import bear_regime_study as brs
 from custos.research import factor_exit_study as fes
@@ -954,15 +955,9 @@ class TestLegacyBitIdentical:
             gates="j_low,j_low_adx25",
         )
         masked = {**rep, "provenance": None, "window_usage": None}
-        got = _json.dumps(
-            masked,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=True,
-        )
-        assert got == _LEGACY_REPORT_BLOB, (
-            "legacy 报告偏离 v2 切换前基准（除 window_usage/provenance 外逐位应同）"
+        assert canon_json(masked) == canon_json(_json.loads(_LEGACY_REPORT_BLOB)), (
+            "legacy 报告偏离 v2 切换前基准（除 window_usage/provenance 外应同；"
+            "浮点归一 1e-12——CI 异构 CPU 末位差，v0.359）"
         )
         assert rep["window_usage"] == {
             "window": "mining_segment",

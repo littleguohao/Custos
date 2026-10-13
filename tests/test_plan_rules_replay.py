@@ -24,6 +24,7 @@ import json
 import pandas as pd
 import pytest
 
+from helpers_golden import norm_floats
 from custos.core.factors.b1_structure import STOP_LOOKBACK, _stop_ref
 from custos.research import backtest_factors as bt
 from custos.research import factor_exit_study as fes
@@ -799,16 +800,17 @@ class TestLegacyR40Compat:
     不登记）与易变字段（generated_at/git/版本串，两侧同步剔除后比较）。
     """
 
-    #: 改前（v0.356 代码）同夹具同参数报告的金样哈希（_normalize_volatile 后）
+    #: 改前（v0.356 代码）同夹具同参数报告的金样哈希（_normalize_volatile 后；
+    #: v0.359 按浮点归一化口径重捕——CI 异构 CPU 浮点末位差会让全精度哈希必挂）
     _GOLDEN_SHA256 = {
-        "<full>": "82e04211ffdb8ca9a89a032fec63508bc6bfc0851ed1e7f7b0dcd025dce90dab",
-        "accounting": "e77ba530c815a533343022c856e57ed1c03e538452d4f3b59be28c9e4006722f",
-        "cost_sensitivity": "64cc191e73b6e44c42a0b30ffee9792ae632f643a7703bec0a13fd9d5d646d38",
-        "criteria": "85f8868c78fb4524467a6ddc0b91955955d25185c9f96146af76e7610ff328a3",
+        "<full>": "dbeb0870ab5dc357d53cda0feafe58ddd5c2d1a53a390d54d239a378c33fe5c6",
+        "accounting": "f4e5b0b6f8aa6ab614fd26ecc1f46a54782e5ef7f8842a3243c7f83b728131a8",
+        "cost_sensitivity": "7bb383079ec9f41adcd638cecc948686239e657f51a07bc2bfa9caef86f79f23",
+        "criteria": "95aa950228677312ce3cf8102a2e826d0c221221563fd8ae8b8a8cdec7c9c299",
         "forward_holdout_note": "3f7068aca87896dac440f9b7b068f1907e8e94112691bfd04a7f21789211d806",
         "params": "7b09f04841885b622f44ca879278673efb011f9a5ed922359407ddf992685ee0",
         "provenance": "a7f1a851100f6c5a33b6b2aa0a98502d5baa96bb2ce6269067531f165a0ceab7",
-        "readings": "39dac50c357154dbe7ea2ba5e77a0fbbbf5911243fcf8bb90f051bd45e202125",
+        "readings": "a302357b9318316585328456cec037750adff2e53d7203aa59c7d9457f078679",
         "schema": "afdee52e747ec0df67de16b0e1f7b1353a70365707656551874a088391854830",
         "tag": "8ca5d81566f88badd698137ac629cbf93ccc107c0cd967b7964f7d82088f6ebf",
         "verdict": "6201e275c993fded1b6a1b7b64f106686c702d9fdff8af32b560aad5d781015c",
@@ -817,10 +819,12 @@ class TestLegacyR40Compat:
 
     @staticmethod
     def _canon_sha256(obj):
+        # 浮点归一化后哈希（helpers_golden——CI 异构 CPU 浮点末位差会让
+        # 全精度哈希必挂，v0.359；金样哈希已按本口径重捕）
         return hashlib.sha256(
-            json.dumps(obj, ensure_ascii=False, sort_keys=True, allow_nan=True).encode(
-                "utf-8"
-            )
+            json.dumps(
+                norm_floats(obj), ensure_ascii=False, sort_keys=True, allow_nan=True
+            ).encode("utf-8")
         ).hexdigest()
 
     @staticmethod
