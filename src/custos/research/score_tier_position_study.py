@@ -52,6 +52,17 @@ expectancy_R=Σw·R/Σw）对比等权基准是否有增量。单调性不成立
   C2 False 或 C4 confirmed_fail=falsified——预注册四态写死 falsified 只
   来自 C2/C4，故 C3 不过只放行 None=provisional 不判死）。**不建 C5**
   （pre2019 终审只能杀不能确认——C2 和 C3 都过线才由 owner 拍板发令）。
+
+窗口布局（TODO #90 owner 定案，v2 三段）：窗口四参缺省（全 None）⇒
+**v2 布局**——挖掘 = 挖掘 A（2000~2016）∪ 挖掘 B（2022~2026-09-04）
+两段各 warm/collect 后**合并一池**算挖掘读数（C1~C4 判据形态不变），
+判定 = 受保护段 2017~2021（``load_window`` 段常量单源；台账键
+judgment_2017_2021 单独记）；三段末各吃 ``clip_entries`` 隔离带一刀
+（段末 90 自然日截止开仓，在 replay/判据之前，剔除数入 segments 块）。
+四参全显式 ⇒ **legacy 单段**（逐窗 segment_violation + 双窗不相交——
+取代旧「挖掘终 < 判定始」次序规则：v2 判定段天然夹在挖掘 A/B 之间，
+旧规则作废；无隔离带，行为与切换前逐位一致）。只给一部分 ⇒ 非法
+（半截布局，CLI ap.error / 直调 ValueError）。
 """
 
 from __future__ import annotations
@@ -66,6 +77,7 @@ from typing import Any, Callable, Optional
 from custos.core.paths import LOGS, RESEARCH_DIR, cn_now  # noqa: E402
 from custos.research import criteria_kit as kit  # noqa: E402
 from custos.research import factor_exit_study as fes  # noqa: E402
+from custos.research import load_window as lw  # noqa: E402
 from custos.research import strategy_grid as sg  # noqa: E402
 from custos.research import window_usage as wu  # noqa: E402
 
@@ -395,21 +407,51 @@ def judge_c3(readings: dict[str, dict[str, Any]]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _layout_of(args: Any) -> tuple[str, list[tuple[str, str, str]], tuple[str, str]]:
+    """窗口四参 ⇒ (layout, [(挖掘段名, start, end)…], (判定 start, end))。
+
+    全 None ⇒ **v2 布局**（挖掘=段并集 A∪B，判定=受保护段 2017~2021——
+    load_window 段常量单源）；四个都显式 ⇒ **legacy 单段**（R40 兼容通道，
+    段内子窗）；只给一部分 ⇒ ValueError（不许半截布局，TODO #90）。
+    """
+    quad = (args.mining_start, args.mining_end, args.judgment_start, args.judgment_end)
+    n_given = sum(v is not None for v in quad)
+    if n_given == 0:
+        return (
+            "v2",
+            [("mining_a", *lw.SEG_MINING_A), ("mining_b", *lw.SEG_MINING_B)],
+            lw.SEG_JUDGMENT,
+        )
+    if n_given == 4:
+        return (
+            "legacy",
+            [("mining", str(args.mining_start), str(args.mining_end))],
+            (str(args.judgment_start), str(args.judgment_end)),
+        )
+    raise ValueError(
+        "窗口四参（--mining-start/end 与 --judgment-start/end）须全给或全不给"
+        "（全不给=v2 布局：挖掘 A∪B / 判定 2017~2021）——不许半截布局（TODO #90）"
+    )
+
+
 def run_study(
     args: Any,
     *,
     warm_fn: Optional[Callable[[str, str], dict[str, dict]]] = None,
     replay_fn: Optional[Callable[[list[dict], dict[str, Any]], list[dict]]] = None,
 ) -> dict[str, Any]:
-    """双窗研究：预热 → 挖掘窗分位切档 → collect_all 分档重放 → C1~C4 → 四态。"""
+    """双窗研究：预热 → 挖掘窗分位切档 → collect_all 分档重放 → C1~C4 → 四态。
+
+    v2 布局：挖掘 A/B 两段各 warm/collect、（v2）段末隔离带 clip（在
+    replay/判据之前，剔除数入报告 segments 块）后 A∪B **合并一池**算挖掘
+    读数，判定段单独读数；legacy：单段挖掘窗不 clip（R40 兼容通道，行为
+    与切换前逐位一致）。"""
     # 合成守卫在入口快照：下方生产分支会把 warm_fn 重绑成真实闭包
     # （noqa: F811），事后再判恒 True ⇒ 生产跑被误判合成、判定窗读取
     # 不入台账（r42_probe 事故根因，v0.338 排查的实锤答案）。
     injected = warm_fn is not None or replay_fn is not None
-    windows = {
-        "mining": (args.mining_start, args.mining_end),
-        "judgment": (args.judgment_start, args.judgment_end),
-    }
+    layout, mining_segs, judgment_span = _layout_of(args)
+    earliest_start = min(s for _name, s, _e in mining_segs)
     regime: dict[str, str] = {}
     if warm_fn is None:
         from custos.research import backtest_factors as bt  # noqa: PLC0415
@@ -424,7 +466,10 @@ def run_study(
             codes=args.codes,
         )
         codes = bt._resolve_universe(ns, _build_parser())
-        regime = bt.load_amv_regime(since=args.mining_start)
+        args.universe_meta = getattr(
+            ns, "universe_meta", None
+        )  # 回塞：provenance 三件套（v0.356 族）
+        regime = bt.load_amv_regime(since=earliest_start)
         if not regime:
             raise RuntimeError("0AMV regime 读不到（compass_amv）——本机无数据？")
         from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
@@ -446,44 +491,72 @@ def run_study(
                 end=end,
             )
 
-    per_code = {w: warm_fn(*se) for w, se in windows.items()}
-    subsets: dict[str, list[dict]] = {}
-    accounting: dict[str, Any] = {}
-    for w, pc in per_code.items():
-        subsets[w], accounting[w] = collect_scored(pc)
-    if not subsets["mining"] or not subsets["judgment"]:
+    # ── 逐段 warm/collect →（v2）段末隔离带 clip（段末 SEGMENT_BUFFER_DAYS
+    # 自然日截止开仓——持仓不跨段读下一段的结果；在 replay/判据之前；剔除数
+    # 入报告 segments 块；legacy 兼容通道不 clip，逐位保真）──
+    segments: dict[str, dict[str, Any]] = {}
+    for name, s, e in [*mining_segs, ("judgment", *judgment_span)]:
+        pc = warm_fn(s, e)
+        n_signals = sum(len(pack["signals"]) for pack in pc.values())
+        subset, acc = collect_scored(pc)
+        n_clipped = 0
+        if layout == "v2":
+            clipped_subset = lw.clip_entries(subset, e, key="date")
+            n_clipped = len(subset) - len(clipped_subset)
+            subset = clipped_subset
+        segments[name] = {
+            "span": (s, e),
+            "per_code": pc,
+            "subset": subset,
+            "accounting": acc,
+            "n_signals": n_signals,
+            "n_clipped": n_clipped,
+        }
+
+    # ── 读数池分组：v2 挖掘 = A∪B 合并一池（判据形态不变）；legacy 单段 ──
+    mining_groups = [segments[name] for name, _s, _e in mining_segs]
+    groups = {"mining": mining_groups, "judgment": [segments["judgment"]]}
+    pools = {w: [r for g in gs for r in g["subset"]] for w, gs in groups.items()}
+    if not pools["mining"] or not pools["judgment"]:
         raise RuntimeError(
-            f"空结果护栏：挖掘 {len(subsets['mining'])} / 判定 "
-            f"{len(subsets['judgment'])} 信号——不落盘（宇宙/窗口/数据有问题？）"
+            f"空结果护栏：挖掘 {len(pools['mining'])} / 判定 "
+            f"{len(pools['judgment'])} 信号——不落盘（宇宙/窗口/数据有问题？）"
         )
 
     # ── 分档切点只在挖掘窗估计（双窗硬隔离——判定窗泄漏是死罪）──
-    cuts = fes.quantile_cuts([r["score"] for r in subsets["mining"]], TIER_QS)
+    cuts = fes.quantile_cuts([r["score"] for r in pools["mining"]], TIER_QS)
 
     # ── 簇划分（kit.cluster_ids 单源，v0.335）：(code, date)→簇 id——
     # 交易经 (code, entry_date) 回挂信号所属簇（信号⇄交易一一对应）──
     cluster_maps = {
         w: {
             (r["code"], r["date"]): cid
-            for r, cid in zip(subsets[w], kit.cluster_ids(subsets[w]))
+            for r, cid in zip(pools[w], kit.cluster_ids(pools[w]))
         }
-        for w in windows
+        for w in ("mining", "judgment")
     }
 
-    # ── 双窗各重放一次（钉死档 collect_all）→ 按切点归档出读数 ──
+    # ── 各读数池重放（钉死档 collect_all；v2 挖掘池逐段重放后合并一池）→
+    # 按切点归档出读数 ──
     readings = {
         w: window_readings(
-            _replay(per_code[w], subsets[w], regime, args.cost_bps, replay_fn),
+            [
+                t
+                for g in gs
+                for t in _replay(
+                    g["per_code"], g["subset"], regime, args.cost_bps, replay_fn
+                )
+            ],
             cuts,
             cluster_of=cluster_maps[w],
         )
-        for w in windows
+        for w, gs in groups.items()
     }
 
     # ── 簇映射命中率护栏（v0.336，owner review）：映射缺失 ⇒ 交易被当
     # 单元素簇 ⇒ C4 静默退回逐笔打乱（v0.335 修掉的 bug）——fail-closed
     # 不落盘（口径缺陷不猜，同空结果护栏哲学）──
-    for w in windows:
+    for w in ("mining", "judgment"):
         cm = readings[w]["cluster_map"]
         if cm["rate"] < CLUSTER_MAP_MIN_RATE:
             raise RuntimeError(
@@ -548,32 +621,48 @@ def run_study(
     cost_sens = cost_side_block(
         {
             f"{tier}_{w}": readings[w]["tiered"][tier]
-            for w in windows
+            for w in ("mining", "judgment")
             for tier in ("high", "low")
         },
         base_bps=args.cost_bps,
-        deltas={f"d_margin_high_low_{w}": (f"high_{w}", f"low_{w}") for w in windows},
+        deltas={
+            f"d_margin_high_low_{w}": (f"high_{w}", f"low_{w}")
+            for w in ("mining", "judgment")
+        },
     )
 
-    # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读
-    _wu_k = wu.record_use(
-        "R42",
-        "judgment",
-        args.tag,
-        "C1~C4 判定窗读数",
-        synthetic=injected,
+    # 判定窗台账 v2 口径（TODO #90，同 exit_campaign/plan_rules_replay）：
+    # 只有判定窗=受保护段（SEG_JUDGMENT 2017~2021）才登记（新键
+    # judgment_2017_2021——旧键 judgment/pre2019 已冻结，永不新写）；legacy
+    # 判定窗已并入挖掘 B，读挖掘段不入台账（挖掘数据自由可读）。
+    _is_protected_judgment = judgment_span == lw.SEG_JUDGMENT
+    _wu_k = (
+        wu.record_use(
+            "R42",
+            "judgment_2017_2021",
+            args.tag,
+            "C1~C4 判定窗读数",
+            synthetic=injected,
+        )
+        if _is_protected_judgment
+        else None
     )
     from custos.research import provenance as pv  # noqa: PLC0415
-    from custos.research.load_window import EXIT_BARS_HOLDOUT_NOTE  # noqa: PLC0415
 
-    return {
+    report = {
         "schema": "score_tier_position/v1",
         "tag": args.tag,
         "verdict": verdict,
         "window_usage": {
-            "window": "judgment",
+            "window": (
+                "judgment_2017_2021" if _is_protected_judgment else "mining_segment"
+            ),
             "k": _wu_k,
-            "note": wu.usage_note("R42", "judgment", _wu_k),
+            "note": (
+                wu.usage_note("R42", "judgment_2017_2021", _wu_k)
+                if _is_protected_judgment
+                else "判定窗在挖掘段内——不入台账（v2 口径）"
+            ),
         },
         "provenance": pv.build(
             args,
@@ -581,11 +670,17 @@ def run_study(
             criteria_version="v0.312/v0.326",
             pre_reg_doc=RESEARCH_DIR / "R42_score_tier_position.md",
             data_last_date=max(
-                filter(None, (pv.last_date_of(per_code[w]) for w in windows)),
+                filter(
+                    None,
+                    (pv.last_date_of(seg["per_code"]) for seg in segments.values()),
+                ),
                 default=None,
             ),
         ),
-        "windows": {w: {"start": se[0], "end": se[1]} for w, se in windows.items()},
+        "windows": {
+            "mining": {"start": mining_segs[0][1], "end": mining_segs[-1][2]},
+            "judgment": {"start": judgment_span[0], "end": judgment_span[1]},
+        },
         "params": {
             "exit": {"name": EXIT_NAME, "params": EXIT_PARAMS},
             "tier_qs": list(TIER_QS),
@@ -603,9 +698,9 @@ def run_study(
             "values_mining_estimated": cuts,
             "note": "切点只在挖掘窗估计——判定窗直接应用（判定窗泄漏=死罪，双窗纪律）",
         },
-        "accounting": accounting,
+        "accounting": {name: seg["accounting"] for name, seg in segments.items()},
         "cluster_map": {
-            **{w: readings[w]["cluster_map"] for w in windows},
+            **{w: readings[w]["cluster_map"] for w in ("mining", "judgment")},
             "min_rate": CLUSTER_MAP_MIN_RATE,
             "note": "簇映射命中率（v0.336）：交易经 (code, entry_date) 回挂信号"
             "所属簇——低于 min_rate fail-closed 不落盘（映射缺失 ⇒ C4 静默退回"
@@ -619,7 +714,7 @@ def run_study(
             for w, rd in readings.items()
         },
         "cost_sensitivity": cost_sens,
-        "forward_holdout_note": EXIT_BARS_HOLDOUT_NOTE,
+        "forward_holdout_note": lw.EXIT_BARS_HOLDOUT_NOTE,
         "criteria": {
             "C1": c1,
             "C2": c2,
@@ -633,6 +728,29 @@ def run_study(
         "notes": [W2_NOTE, PORTFOLIO_NOTE],
         "generated_at": cn_now().isoformat(timespec="seconds"),
     }
+    if layout == "v2":
+        report["layout"] = "v2"
+        report["segments"] = {
+            **{
+                name: {
+                    "start": seg["span"][0],
+                    "end": seg["span"][1],
+                    "entry_deadline": lw.entry_deadline(seg["span"][1]),
+                    "n_signals": seg["n_signals"],
+                    "n_clipped": seg["n_clipped"],
+                }
+                for name, seg in segments.items()
+            },
+            "mining_total": {
+                "n_signals": sum(g["n_signals"] for g in mining_groups),
+                "n_clipped": sum(g["n_clipped"] for g in mining_groups),
+                "n_pooled": len(pools["mining"]),
+                "note": "挖掘读数=A∪B 合并一池（判定段独立；段末 90 天隔离带"
+                "禁开仓——entry_deadline 为各段入场截止日，n_signals 为隔离带"
+                "前收集数，n_pooled 为合并入池数）",
+            },
+        }
+    return report
 
 
 # ---------------------------------------------------------------------------
@@ -644,10 +762,15 @@ def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description="R42 打分→仓位分层 Phase 1：V0 分数挖掘窗分位切 3 档 + collect_all 全候选分档（pct5_trail08 钉死）+ C1~C4 机械读数"
     )
-    ap.add_argument("--mining-start", required=True)
-    ap.add_argument("--mining-end", required=True)
-    ap.add_argument("--judgment-start", required=True)
-    ap.add_argument("--judgment-end", required=True)
+    ap.add_argument(
+        "--mining-start",
+        default=None,
+        help="挖掘窗起点（四窗参全缺省 ⇒ v2 布局：挖掘 A 2000~2016 ∪ B "
+        "2022~2026-09-04 合并池 / 判定 2017~2021；全显式=legacy 单段）",
+    )
+    ap.add_argument("--mining-end", default=None)
+    ap.add_argument("--judgment-start", default=None)
+    ap.add_argument("--judgment-end", default=None)
     ap.add_argument("--codes", default="")
     ap.add_argument("--codes-file", default="")
     ap.add_argument("--universe-sample", type=int, default=0)
@@ -657,7 +780,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--count",
         type=int,
         default=None,
-        help="每股回溯 K 线根数（缺省=按挖掘窗起点自动推算，显式值覆盖）",
+        help="每股回溯 K 线根数（缺省=按最早挖掘段起点自动推算，显式值覆盖）",
     )
     ap.add_argument(
         "--top-n",
@@ -674,6 +797,31 @@ def _build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _check_windows(args: Any, ap: argparse.ArgumentParser) -> None:
+    """legacy 显式四窗校验：逐窗段检查（load_window.segment_violation 单源——
+    越段/触 holdout 硬拒绝）+ 判定窗∩挖掘窗**不相交**（取代旧
+    mining_end<judgment_start 次序规则：v2 判定段天然夹在挖掘 A/B 之间，
+    旧规则作废，owner 2026-10-13 定案 TODO #90）。v2 缺省布局=段常量，
+    天然合法；半截布局硬拒绝。"""
+    try:
+        layout, mining_segs, judgment = _layout_of(args)
+    except ValueError as exc:
+        ap.error(str(exc))
+    if layout == "v2":
+        return
+    _, ms, me = mining_segs[0]
+    js, je = judgment
+    for wname, s, e in (("mining", ms, me), ("judgment", js, je)):
+        msg = lw.segment_violation(s, e)
+        if msg:
+            ap.error(f"{wname} {msg}")
+    if not (me < js or je < ms):
+        ap.error(
+            f"挖掘窗 {ms}~{me} 与判定窗 {js}~{je} 相交——双窗硬隔离"
+            "（v2 口径：不相交即可，不再要求 mining_end < judgment_start 次序）"
+        )
+
+
 def main(
     argv: Optional[list[str]] = None,
     *,
@@ -686,17 +834,17 @@ def main(
     ap = _build_parser()
     args = ap.parse_args(argv)
     args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])
-    fes._check_windows(args, ap)  # pre2019 硬拒绝 + 双窗次序 + 前向 holdout（同族单源）
+    _check_windows(args, ap)  # legacy 显式四窗：段检查 + 双窗不相交（v2 口径）
     if warm_fn is None:  # 生产路径才做加载到达校验（注入路径无真实加载）
         from custos.research.exit_c5_terminal import check_reach  # noqa: PLC0415
         from custos.research.load_window import resolve_count  # noqa: PLC0415
 
     try:
         if warm_fn is None:
-            args.count = resolve_count(  # v0.328 缺省自动推算
-                args.count, args.mining_start
-            )
-            check_reach(args.count, args.mining_start)
+            # --count 缺省按最早挖掘段起点推算（v2=2000-01-01 全历史量级）
+            earliest = min(s for _n, s, _e in _layout_of(args)[1])
+            args.count = resolve_count(args.count, earliest)  # v0.328 缺省自动推算
+            check_reach(args.count, earliest)
         rep = run_study(args, warm_fn=warm_fn, replay_fn=replay_fn)
     except (RuntimeError, ValueError) as exc:
         print(f"[score_tier_position] {exc}", file=sys.stderr)

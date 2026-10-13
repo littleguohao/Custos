@@ -8,6 +8,13 @@
 非单抽一个 n × 5 档）、C1 不过=untested、C2 三态（池未建=None⇒
 provisional 不 falsified）、C3 无可扰参数轴=not_applicable 不空转
 不放行（v0.307）、CLI 护栏、产物自含。全合成注入，不发真实加载。
+
+v2 窗口布局（TODO #90，owner 2026-10-13 拍板）：四参全 None ⇒ 三段
+（挖掘 A 2000~2016 / 判定 2017~2021 / 挖掘 B 2022~2026-09-04，挖掘读数
+= A∪B 合并一池；三段末各 clip_entries 一刀 = 90 自然日隔离带，剔除数
+入 segments 块）；四参全显式 ⇒ legacy 单段（逐窗段校验 + 双窗不相交——
+旧次序规则作废），行为与改前**逐位一致**（唯 window_usage 按 v2 口径：
+判定窗在挖掘段内 ⇒ 不入台账——硬钉测 TestLegacyBitIdentical）。
 """
 
 from __future__ import annotations
@@ -153,6 +160,58 @@ def _run(spec, replay, n_random=4, c4_min_pool=3, **kw):
     )
 
 
+#: v2 三段布局段区间（与 load_window 段常量同值，测试内独立写死防漂移）
+SEGS_V2 = {
+    "mining_a": ("2000-01-01", "2016-12-31"),
+    "judgment": ("2017-01-01", "2021-12-31"),
+    "mining_b": ("2022-01-01", "2026-09-04"),
+}
+
+
+def _mk_per_code_v2(gate_dates):
+    """{seg: {gate: [date, ...]}} → {(start, end): per_code} 三段合成夹具
+    （i 段内递增生成；df 占位 None——注入 replay 时不用）。"""
+    out = {}
+    for seg, (s, e) in SEGS_V2.items():
+        per_code = {}
+        k = 0
+        for gate, dates in gate_dates.get(seg, {}).items():
+            for d in dates:
+                code = f"{(k % 30):06d}"
+                pack = per_code.setdefault(
+                    code, {"df": None, "gate_signals": {}, "scores": {}}
+                )
+                pack["gate_signals"].setdefault(gate, []).append({"i": k, "date": d})
+                pack["scores"][d] = 50.0
+                k += 1
+        out[(s, e)] = per_code
+    return out
+
+
+def _args_v2(**kw):
+    """v2 布局参数（四参全 None ⇒ 三段）。"""
+    return _args(
+        mining_start=None, mining_end=None, judgment_start=None, judgment_end=None, **kw
+    )
+
+
+def _run_v2(spec, replay, n_random=4, c4_min_pool=3, warm_spy=None, **kw):
+    warm_fn = lambda s, e: spec[(s, e)]  # noqa: E731
+    if warm_spy is not None:
+        orig = warm_fn
+
+        def warm_fn(s, e):  # noqa: F811
+            warm_spy.append((s, e))
+            return orig(s, e)
+
+    return brs.run_study(
+        _args_v2(n_random=n_random, c4_min_pool=c4_min_pool, **kw),
+        warm_fn=warm_fn,
+        replay_fn=replay,
+        random_entry_fn=_rand_flat,
+    )
+
+
 class TestInvertRegime:
     def test_mapping(self):
         got = brs.invert_regime_bearish(
@@ -189,8 +248,12 @@ class TestGridAndVerdicts:
         assert c["C3"]["ok"] is True and len(c["C3"]["draws"]) == brs.C3_DRAWS
         assert c["C4"]["state"] == "confirmed_pass"
         assert rep["verdict"] == "candidate"
-        assert rep["window_usage"]["k"] is None  # 合成运行不入台账（v0.334 守卫）
-        assert "未入台账" in rep["window_usage"]["note"]
+        # v2 口径：legacy 判定窗（2024~2026 ⊆ 挖掘 B）⇒ 不入台账（TODO #90）
+        assert rep["window_usage"] == {
+            "window": "mining_segment",
+            "k": None,
+            "note": "判定窗在挖掘段内（非受保护段 2017~2021）——读挖掘段不入台账（v2 口径）",
+        }
 
     def test_c3_not_applicable_for_base_low(self):
         """top 落在无可扰参数轴的出场（base_low params={}）⇒ C3 =
@@ -401,13 +464,138 @@ class TestC3Perturb:
         assert moved is False and out == {}, "base_low 原样留痕"
 
 
-class TestCliAndProduct:
-    def test_pre2019_overlap_rejected(self):
-        ap = brs._build_parser()
-        args = ap.parse_args(["--tag", "t", "--mining-start", "2015-01-01"])
-        with pytest.raises(SystemExit):
-            fes._check_windows(args, ap)
+class TestCliWindowGuards:
+    """v2 布局 CLI 护栏（TODO #90）：越段/触 holdout/相交/半截 ⇒ SystemExit；
+    R40 legacy 参数（⊆B 且不相交）合法；旧次序规则作废（判定窗早于挖掘窗
+    但不相交 ⇒ 合法）；pre2019 交集不再是拒绝理由（段内子窗合法）。"""
 
+    def _parse(self, *argv):
+        ap = brs._build_parser()
+        return ap, ap.parse_args(list(argv))
+
+    def test_r40_legacy_params_accepted(self):
+        ap, args = self._parse(
+            "--tag",
+            "t",
+            "--mining-start",
+            "2022-01-01",
+            "--mining-end",
+            "2024-07-31",
+            "--judgment-start",
+            "2024-08-01",
+            "--judgment-end",
+            "2026-09-04",
+        )
+        brs._check_windows(args, ap)  # 不拒即合法
+
+    def test_cross_segment_window_rejected(self):
+        ap, args = self._parse(
+            "--tag",
+            "t",
+            "--mining-start",
+            "2010-01-01",  # 越段（跨挖掘 A/判定）
+            "--mining-end",
+            "2020-12-31",
+            "--judgment-start",
+            "2024-08-01",
+            "--judgment-end",
+            "2026-09-04",
+        )
+        with pytest.raises(SystemExit):
+            brs._check_windows(args, ap)
+
+    def test_holdout_touch_rejected(self):
+        ap, args = self._parse(
+            "--tag",
+            "t",
+            "--mining-start",
+            "2022-01-01",
+            "--mining-end",
+            "2024-07-31",
+            "--judgment-start",
+            "2024-08-01",
+            "--judgment-end",
+            "2026-10-08",  # 触前向 holdout 冻结段
+        )
+        with pytest.raises(SystemExit):
+            brs._check_windows(args, ap)
+
+    def test_intersecting_windows_rejected(self):
+        """双窗均 ⊆ 挖掘 B 但相交 ⇒ 拒（不相交规则取代旧次序规则）。"""
+        ap, args = self._parse(
+            "--tag",
+            "t",
+            "--mining-start",
+            "2022-01-01",
+            "--mining-end",
+            "2024-07-31",
+            "--judgment-start",
+            "2024-07-01",  # 与挖掘窗相交
+            "--judgment-end",
+            "2026-09-04",
+        )
+        with pytest.raises(SystemExit):
+            brs._check_windows(args, ap)
+
+    def test_order_rule_abolished_for_disjoint_windows(self):
+        """判定窗**早于**挖掘窗但不相交（均 ⊆B）⇒ 合法（旧
+        ``mining_end < judgment_start`` 次序规则作废——v2 判定段天然
+        夹在挖掘 A/B 之间，次序约束已无意义）。"""
+        ap, args = self._parse(
+            "--tag",
+            "t",
+            "--mining-start",
+            "2024-01-01",
+            "--mining-end",
+            "2024-07-31",
+            "--judgment-start",
+            "2022-01-01",
+            "--judgment-end",
+            "2023-12-31",
+        )
+        brs._check_windows(args, ap)  # 不拒即合法
+
+    def test_pre2019_subwindow_no_longer_rejected(self):
+        """⊆ 挖掘 A 的子窗（旧 pre2019 段）合法——v0.356 起 pre2019 交集
+        硬拒绝已拆除（C5 退役、挖掘 A 与该段天然重叠）。"""
+        ap, args = self._parse(
+            "--tag",
+            "t",
+            "--mining-start",
+            "2010-01-01",
+            "--mining-end",
+            "2016-12-31",
+            "--judgment-start",
+            "2017-01-01",
+            "--judgment-end",
+            "2021-12-31",
+        )
+        brs._check_windows(args, ap)  # 不拒即合法
+
+    def test_partial_window_params_rejected(self):
+        """只给一部分 ⇒ 半截布局拒绝（全 None=v2 三段才合法）。"""
+        ap, args = self._parse("--tag", "t", "--mining-start", "2015-01-01")
+        with pytest.raises(SystemExit):
+            brs._check_windows(args, ap)
+
+    def test_main_partial_exits_2(self):
+        with pytest.raises(SystemExit) as exc:
+            brs.main(["--tag", "t", "--mining-start", "2015-01-01"])
+        assert exc.value.code == 2
+
+    def test_run_study_partial_raises(self):
+        """run_study 直调（绕过 CLI）的半截布局 ⇒ ValueError（兜底分支）。"""
+        spec = _mk_per_code({"j_low": 10})
+        warm_fn = lambda s, e: spec[(s, e)]  # noqa: E731
+        with pytest.raises(ValueError, match="半截布局"):
+            brs.run_study(
+                _args(mining_start=None),
+                warm_fn=warm_fn,
+                replay_fn=_replay_winner_gate,
+            )
+
+
+class TestCliAndProduct:
     def test_self_contained(self):
         spec = _mk_per_code({"j_low": 120, "j_low_adx25": 4})
         rep = _run(spec, _replay_winner_gate)
@@ -456,18 +644,34 @@ def _wu_spy(monkeypatch):
 
 class TestProductionRecordUse:
     """run_study 传 warm_fn=None（**生产路径**）+ 生产依赖全 monkeypatch 成
-    合成 ⇒ record_use 必须以 ``synthetic=False`` 被调且 k 直通报告。防回归：
-    生产分支重绑注入参数 ⇒ 入口快照 ``injected`` 变 True ⇒ 立刻红。
-    随机臂的生产路径（bear_bar_pool/random_entries 需真 df）由 run_arm
-    最小桩旁路——本测试目标是 record_use 接线，不是臂逻辑。"""
+    合成 ⇒ v2 布局下 record_use 必须以 ``synthetic=False`` + 新键
+    ``judgment_2017_2021`` 被调且 k 直通报告。防回归：生产分支重绑注入
+    参数 ⇒ 入口快照 ``injected`` 变 True ⇒ 立刻红。随机臂的生产路径
+    （bear_bar_pool/random_entries 需真 df）由 run_arm 最小桩旁路——
+    本测试目标是 record_use/宇宙 meta 接线，不是臂逻辑。"""
 
     def _production_run(self, monkeypatch):
         import pandas as pd
 
         from custos.datasource.local_tdx import local_tdx_data
 
-        spec = _mk_per_code({"j_low": 60})
-        monkeypatch.setattr(bt, "_resolve_universe", lambda ns, ap: ["000000"])
+        spec = _mk_per_code_v2(
+            {
+                "mining_a": {"j_low": [f"2015-{m:02d}-15" for m in range(1, 13)]},
+                "judgment": {"j_low": [f"2019-{m:02d}-15" for m in range(1, 13)]},
+                "mining_b": {"j_low": [f"2023-{m:02d}-15" for m in range(1, 13)]},
+            }
+        )
+
+        def _fake_resolve(ns, ap):
+            ns.universe_meta = {
+                "universe_rule": "vipdoc_default",
+                "n_codes": 1,
+                "universe_sha256": "0123456789abcdef",
+            }
+            return ["000000"]
+
+        monkeypatch.setattr(bt, "_resolve_universe", _fake_resolve)
         monkeypatch.setattr(bt, "load_amv_regime", lambda since: {"2022-01-03": "空头"})
         monkeypatch.setattr(
             local_tdx_data,
@@ -492,7 +696,7 @@ class TestProductionRecordUse:
         monkeypatch.setattr(brs, "run_arm", lambda *a, **kw: {"mining": None})
         # brs._args 无宇宙/count 字段（注入路径用不到）——生产分支要读
         return brs.run_study(
-            _args(
+            _args_v2(
                 gates="j_low",
                 n_random=2,
                 c4_min_pool=2,
@@ -512,15 +716,325 @@ class TestProductionRecordUse:
         calls = _wu_spy(monkeypatch)
         rep = self._production_run(monkeypatch)
         assert len(calls) == 1
-        assert calls[0]["unit"] == "R40" and calls[0]["window"] == "judgment"
+        assert calls[0]["unit"] == "R40"
+        assert calls[0]["window"] == "judgment_2017_2021", "v2 判定段用新键登记"
         assert calls[0]["synthetic"] is False, "生产路径必须按 synthetic=False 登记"
+        assert rep["window_usage"]["window"] == "judgment_2017_2021"
         assert rep["window_usage"]["k"] == 7, "生产口径 k 直通报告"
         assert "第 7 次被读" in rep["window_usage"]["note"]
 
-    def test_injected_still_synthetic(self, monkeypatch):
-        """对照钉：同一夹具走注入路径 ⇒ synthetic=True（双向钉死）。"""
+    def test_universe_meta_wired_to_provenance(self, monkeypatch):
+        """宇宙 meta 回塞（v0.356 同族）：生产分支解析 codes 后
+        ``args.universe_meta = ns.universe_meta`` ⇒ provenance 读到三件套。"""
+        _wu_spy(monkeypatch)
+        rep = self._production_run(monkeypatch)
+        pv = rep["provenance"]
+        assert pv["universe_rule"] == "vipdoc_default"
+        assert pv["n_codes"] == 1
+        assert pv["universe_sha256"] == "0123456789abcdef"
+
+    def test_injected_v2_records_new_key_synthetic(self, monkeypatch):
+        """v2 注入路径：判定窗=受保护段 ⇒ 新键登记 + synthetic=True（双向钉死）。"""
         calls = _wu_spy(monkeypatch)
-        rep = _run(_mk_per_code({"j_low": 60}), _replay_winner_gate, n_random=2)
+        spec = _mk_per_code_v2(
+            {
+                "mining_a": {"j_low": [f"2015-{m:02d}-15" for m in range(1, 13)]},
+                "judgment": {"j_low": [f"2019-{m:02d}-15" for m in range(1, 13)]},
+                "mining_b": {"j_low": [f"2023-{m:02d}-15" for m in range(1, 13)]},
+            }
+        )
+        rep = _run_v2(
+            spec, _replay_winner_gate, n_random=2, c4_min_pool=2, gates="j_low"
+        )
         assert len(calls) == 1
+        assert calls[0]["window"] == "judgment_2017_2021"
         assert calls[0]["synthetic"] is True
         assert rep["window_usage"]["k"] == 7
+
+    def test_injected_legacy_not_recorded(self, monkeypatch):
+        """legacy 判定窗（2024~2026 ⊆ 挖掘 B）⇒ **不登记**（读挖掘段自由，
+        v2 口径）——record_use 零调用，报告写死「不入台账」注记。"""
+        calls = _wu_spy(monkeypatch)
+        rep = _run(_mk_per_code({"j_low": 60}), _replay_winner_gate, n_random=2)
+        assert calls == [], "legacy 判定窗在挖掘段内——record_use 不得被调"
+        assert rep["window_usage"] == {
+            "window": "mining_segment",
+            "k": None,
+            "note": "判定窗在挖掘段内（非受保护段 2017~2021）——读挖掘段不入台账（v2 口径）",
+        }
+
+
+# ---------------------------------------------------------------------------
+# v2 窗口布局（TODO #90，owner 2026-10-13 拍板）
+# ---------------------------------------------------------------------------
+
+
+class TestV2Layout:
+    """(a) 四参全 None ⇒ v2 三段：段区间正确 + warm 逐段调用（A/判定/B）。"""
+
+    def test_default_three_segments_and_warm_sequence(self):
+        from custos.research import load_window as lw
+
+        warm_calls: list = []
+        spec = _mk_per_code_v2(
+            {
+                "mining_a": {"j_low": ["2015-06-15", "2015-07-15"]},
+                "judgment": {"j_low": ["2019-06-15", "2019-07-15"]},
+                "mining_b": {"j_low": ["2023-06-15", "2023-07-15"]},
+            }
+        )
+        rep = _run_v2(
+            spec,
+            _replay_winner_gate,
+            n_random=2,
+            c4_min_pool=2,
+            gates="j_low",
+            warm_spy=warm_calls,
+        )
+        assert warm_calls == [
+            SEGS_V2["mining_a"],
+            SEGS_V2["judgment"],
+            SEGS_V2["mining_b"],
+        ], "mining 逐段 warm（A、B 各一次）+ 判定段，段序=A/判定/B"
+        assert rep["windows"] == {
+            "mining": {"start": "2000-01-01", "end": "2026-09-04"},
+            "judgment": {"start": "2017-01-01", "end": "2021-12-31"},
+        }
+        segs = rep["segments"]
+        for name, const in (
+            ("mining_a", lw.SEG_MINING_A),
+            ("judgment", lw.SEG_JUDGMENT),
+            ("mining_b", lw.SEG_MINING_B),
+        ):
+            assert (segs[name]["start"], segs[name]["end"]) == const == SEGS_V2[name], (
+                f"{name} 段区间与 load_window 段常量同源"
+            )
+        assert segs["mining_merged_n_signals"] == 4  # A 2 + B 2（判定不计入挖掘池）
+
+
+class TestV2MergedPool:
+    """(b) A∪B 合并一池：挖掘读数 == 手工合并两段信号（各自过隔离带）重算
+    （逐位）；判定段读数 == 单段重算。"""
+
+    def _spec(self):
+        return _mk_per_code_v2(
+            {
+                "mining_a": {
+                    "j_low": ["2016-09-30", "2016-12-15"]
+                    + [f"2015-{m:02d}-15" for m in range(1, 13)] * 10
+                },
+                "judgment": {
+                    "j_low": ["2021-09-30", "2021-12-15"]
+                    + [f"2019-{m:02d}-15" for m in range(1, 13)] * 10
+                },
+                "mining_b": {
+                    "j_low": ["2026-06-05", "2026-08-20"]
+                    + [f"2023-{m:02d}-15" for m in range(1, 13)] * 10
+                },
+            }
+        )
+
+    def test_merged_mining_reading_matches_manual(self):
+        from custos.research import strategy_grid as sg
+        from custos.research.load_window import clip_entries
+
+        spec = self._spec()
+        rep = _run_v2(
+            spec, _replay_winner_gate, n_random=2, c4_min_pool=2, gates="j_low"
+        )
+        row = next(
+            c
+            for c in rep["configs"]
+            if c["gate"] == "j_low" and c["exit"] == "pct5_trail08"
+        )
+        trail = next(
+            e["params"] for e in sg.DEFAULT_EXIT_GRID if e["name"] == "pct5_trail08"
+        )
+        # 手工合并：逐段 collect → 逐段隔离带 → 拼接（与 run_study 内部同构造）
+        merged = clip_entries(
+            brs.collect_gate_signals(spec[SEGS_V2["mining_a"]], "j_low"),
+            SEGS_V2["mining_a"][1],
+            key="date",
+        ) + clip_entries(
+            brs.collect_gate_signals(spec[SEGS_V2["mining_b"]], "j_low"),
+            SEGS_V2["mining_b"][1],
+            key="date",
+        )
+        exp_m = fes.combine_readings(_replay_winner_gate(merged, trail), 20, ref="self")
+        exp_m.pop("taken")
+        assert row["mining"] == exp_m, "A∪B 合并挖掘读数与手工合并重算逐位一致"
+        jrecs = clip_entries(
+            brs.collect_gate_signals(spec[SEGS_V2["judgment"]], "j_low"),
+            SEGS_V2["judgment"][1],
+            key="date",
+        )
+        exp_j = fes.combine_readings(_replay_winner_gate(jrecs, trail), 20, ref="self")
+        exp_j.pop("taken")
+        assert row["judgment"] == exp_j, "判定段读数与单段重算逐位一致"
+        # 合并计数口径：mining = A 保留 + B 保留（121+121），judgment=121
+        assert rep["n_signals_by_gate"] == {
+            "mining": {"j_low": 242},
+            "judgment": {"j_low": 121},
+        }
+
+
+class TestV2SegmentBuffer:
+    """(c) 段末 90 自然日隔离带三刀：A→2016-10-02 / 判定→2021-10-02 /
+    B→2026-06-06；剔除数入 segments 块；被剔信号永不进 replay/判据。"""
+
+    def test_buffer_clips_three_segments_and_reported(self):
+        seen_dates: set = set()
+
+        def replay_spy(subset, params):
+            for r in subset:
+                seen_dates.add(r["date"])
+            return _replay_winner_gate(subset, params)
+
+        spec = _mk_per_code_v2(
+            {
+                "mining_a": {"j_low": ["2016-09-30", "2016-12-15"]},  # 保留/剔除
+                "judgment": {"j_low": ["2021-08-15", "2021-09-30", "2021-12-15"]},
+                "mining_b": {"j_low": ["2026-06-05", "2026-08-20"]},
+            }
+        )
+        rep = _run_v2(spec, replay_spy, n_random=2, c4_min_pool=2, gates="j_low")
+        segs = rep["segments"]
+        assert segs["mining_a"] == {
+            "start": "2000-01-01",
+            "end": "2016-12-31",
+            "entry_deadline": "2016-10-02",
+            "n_signals": 1,
+            "n_clipped": 1,
+        }
+        assert segs["judgment"] == {
+            "start": "2017-01-01",
+            "end": "2021-12-31",
+            "entry_deadline": "2021-10-02",
+            "n_signals": 2,
+            "n_clipped": 1,
+        }
+        assert segs["mining_b"] == {
+            "start": "2022-01-01",
+            "end": "2026-09-04",
+            "entry_deadline": "2026-06-06",
+            "n_signals": 1,
+            "n_clipped": 1,
+        }
+        assert segs["mining_merged_n_signals"] == 2
+        # 被剔信号（隔离带内）永不进 replay；截止前信号照常进
+        assert "2016-12-15" not in seen_dates
+        assert "2021-12-15" not in seen_dates
+        assert "2026-08-20" not in seen_dates
+        assert {"2016-09-30", "2021-08-15", "2021-09-30", "2026-06-05"} <= seen_dates
+
+
+#: (d) 硬钉测基准：v2 切换**前**同夹具（legacy R40 参数 + _replay_winner_gate
+#: + _rand_flat + n_random=3/c4_min_pool=2/gates=j_low,j_low_adx25/seed=7）
+#: 实测报告 JSON（provenance/window_usage 剔除——前者环境相关，后者是
+#: 唯一受命变更面）。json.dumps(..., sort_keys=True, separators=(",",":"),
+#: allow_nan=True) 口径。
+_LEGACY_REPORT_BLOB = '{"amv_mode":"bearish（invert_regime_bearish：仅空头日放行，无映射不放行）","configs":[{"exit":"base_low","gate":"j_low","judgment":{"expectancy_R":-0.05,"margin":-0.16666666666666663,"n":120,"n_taken":120,"objective":null,"objective_version":"v2.1-margin-rddref","payoff_ratio":0.5,"rdd_gate":false,"ret_over_dd":-0.86,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5},"mining":{"expectancy_R":-0.05,"margin":-0.16666666666666663,"n":120,"n_taken":120,"objective":null,"objective_version":"v2.1-margin-rddref","payoff_ratio":0.5,"rdd_gate":false,"ret_over_dd":-0.86,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5}},{"exit":"pct5","gate":"j_low","judgment":{"expectancy_R":-0.05,"margin":-0.16666666666666663,"n":120,"n_taken":120,"objective":null,"objective_version":"v2.1-margin-rddref","payoff_ratio":0.5,"rdd_gate":false,"ret_over_dd":-0.86,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5},"mining":{"expectancy_R":-0.05,"margin":-0.16666666666666663,"n":120,"n_taken":120,"objective":null,"objective_version":"v2.1-margin-rddref","payoff_ratio":0.5,"rdd_gate":false,"ret_over_dd":-0.86,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5}},{"exit":"pct5_trail08","gate":"j_low","judgment":{"expectancy_R":0.6,"margin":0.3,"n":120,"n_taken":120,"objective":0.3,"objective_version":"v2.1-margin-rddref","payoff_ratio":4.0,"rdd_gate":true,"ret_over_dd":26.14,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5},"mining":{"expectancy_R":0.6,"margin":0.3,"n":120,"n_taken":120,"objective":0.3,"objective_version":"v2.1-margin-rddref","payoff_ratio":4.0,"rdd_gate":true,"ret_over_dd":26.14,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5}},{"exit":"pct5_be05","gate":"j_low","judgment":{"expectancy_R":-0.05,"margin":-0.16666666666666663,"n":120,"n_taken":120,"objective":null,"objective_version":"v2.1-margin-rddref","payoff_ratio":0.5,"rdd_gate":false,"ret_over_dd":-0.86,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5},"mining":{"expectancy_R":-0.05,"margin":-0.16666666666666663,"n":120,"n_taken":120,"objective":null,"objective_version":"v2.1-margin-rddref","payoff_ratio":0.5,"rdd_gate":false,"ret_over_dd":-0.86,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5}},{"exit":"pct5_cz3","gate":"j_low","judgment":{"expectancy_R":-0.05,"margin":-0.16666666666666663,"n":120,"n_taken":120,"objective":null,"objective_version":"v2.1-margin-rddref","payoff_ratio":0.5,"rdd_gate":false,"ret_over_dd":-0.86,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5},"mining":{"expectancy_R":-0.05,"margin":-0.16666666666666663,"n":120,"n_taken":120,"objective":null,"objective_version":"v2.1-margin-rddref","payoff_ratio":0.5,"rdd_gate":false,"ret_over_dd":-0.86,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5}},{"exit":"base_low","gate":"j_low_adx25","judgment":{"expectancy_R":-0.05,"margin":-0.16666666666666663,"n":4,"n_taken":4,"objective":-0.16666666666666663,"objective_version":"v2.1-margin-rddref","payoff_ratio":0.5,"rdd_gate":true,"ret_over_dd":-0.67,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5},"mining":{"expectancy_R":-0.05,"margin":-0.16666666666666663,"n":4,"n_taken":4,"objective":-0.16666666666666663,"objective_version":"v2.1-margin-rddref","payoff_ratio":0.5,"rdd_gate":true,"ret_over_dd":-0.67,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5}},{"exit":"pct5","gate":"j_low_adx25","judgment":{"expectancy_R":-0.05,"margin":-0.16666666666666663,"n":4,"n_taken":4,"objective":-0.16666666666666663,"objective_version":"v2.1-margin-rddref","payoff_ratio":0.5,"rdd_gate":true,"ret_over_dd":-0.67,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5},"mining":{"expectancy_R":-0.05,"margin":-0.16666666666666663,"n":4,"n_taken":4,"objective":-0.16666666666666663,"objective_version":"v2.1-margin-rddref","payoff_ratio":0.5,"rdd_gate":true,"ret_over_dd":-0.67,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5}},{"exit":"pct5_trail08","gate":"j_low_adx25","judgment":{"expectancy_R":-0.05,"margin":-0.16666666666666663,"n":4,"n_taken":4,"objective":-0.16666666666666663,"objective_version":"v2.1-margin-rddref","payoff_ratio":0.5,"rdd_gate":true,"ret_over_dd":-0.67,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5},"mining":{"expectancy_R":-0.05,"margin":-0.16666666666666663,"n":4,"n_taken":4,"objective":-0.16666666666666663,"objective_version":"v2.1-margin-rddref","payoff_ratio":0.5,"rdd_gate":true,"ret_over_dd":-0.67,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5}},{"exit":"pct5_be05","gate":"j_low_adx25","judgment":{"expectancy_R":-0.05,"margin":-0.16666666666666663,"n":4,"n_taken":4,"objective":-0.16666666666666663,"objective_version":"v2.1-margin-rddref","payoff_ratio":0.5,"rdd_gate":true,"ret_over_dd":-0.67,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5},"mining":{"expectancy_R":-0.05,"margin":-0.16666666666666663,"n":4,"n_taken":4,"objective":-0.16666666666666663,"objective_version":"v2.1-margin-rddref","payoff_ratio":0.5,"rdd_gate":true,"ret_over_dd":-0.67,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5}},{"exit":"pct5_cz3","gate":"j_low_adx25","judgment":{"expectancy_R":-0.05,"margin":-0.16666666666666663,"n":4,"n_taken":4,"objective":-0.16666666666666663,"objective_version":"v2.1-margin-rddref","payoff_ratio":0.5,"rdd_gate":true,"ret_over_dd":-0.67,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5},"mining":{"expectancy_R":-0.05,"margin":-0.16666666666666663,"n":4,"n_taken":4,"objective":-0.16666666666666663,"objective_version":"v2.1-margin-rddref","payoff_ratio":0.5,"rdd_gate":true,"ret_over_dd":-0.67,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5}}],"cost_sensitivity":{"arms":{"judgment":{"margin":0.274977497749775,"n":120,"payoff_ratio":3.444,"win_rate":0.5},"mining":{"margin":0.274977497749775,"n":120,"payoff_ratio":3.444,"win_rate":0.5}},"base_bps":25.0,"deltas":{"top_margin_vs_0_judgment":{"base":0.3,"flip":false,"side":0.274977497749775},"top_margin_vs_0_mining":{"base":0.3,"flip":false,"side":0.274977497749775}},"note":"成本副读数（review #6）：side 档=逐笔 ret 平移 (side−base)/1e4 解析重算（不重跑引擎）；flip=True ⇒ 结论成本敏感、判读降权","side_bps":50.0},"criteria":{"C1":{"judgment":{"n_taken":120,"ok":true},"min_n_taken":100,"mining":{"n_taken":120,"ok":true},"ok":true},"C2":{"margin_judgment":0.3,"margin_mining":0.3,"ok":true,"pool_ok_judgment":true,"pool_ok_mining":true,"pools_available":true,"pos_ok":true,"q95_judgment":0.16666666666666669,"q95_mining":0.16666666666666669,"rule":"margin 双窗同向为正 且 双窗>随机臂对应窗池 q95（基准=随机臂非空仓）"},"C3":{"draws":[{"c2_holds":true,"draw":0,"params_perturbed":{"stop_mode":"pct","stop_pct":4.0,"trail_pct":0.06},"perturbable":true},{"c2_holds":true,"draw":1,"params_perturbed":{"stop_mode":"pct","stop_pct":6.0,"trail_pct":0.06},"perturbable":true},{"c2_holds":true,"draw":2,"params_perturbed":{"stop_mode":"pct","stop_pct":6.0,"trail_pct":0.06},"perturbable":true},{"c2_holds":true,"draw":3,"params_perturbed":{"stop_mode":"pct","stop_pct":4.0,"trail_pct":0.1},"perturbable":true}],"n_flips":0,"ok":true,"rule":"出场参数 ±50% ×4 扰动 C2 结论零翻转（池固定）"},"C4":{"evaluated":3,"gate_pass":3,"gate_pass_rate":1.0,"min_pool":2,"note":"与 C2 挖掘半窗同池（重合是设计使然——R40 量级线与选择效应对的是同一个零假设）","pool_size":3,"q95":0.16666666666666669,"state":"confirmed_pass"},"rule_note":"R40-C1~C4 跑数前写死（v0.301/v0.302/v0.307 修订在案——v0.307：随机臂预算对等 max-of-230 镜像；C3 无可扰参数轴=not_applicable 不空转不放行）；C5（pre2019 同段随机池标尺）= C2 过线才启动，owner 拍板发令"},"exit_grid":["base_low","pct5","pct5_trail08","pct5_be05","pct5_cz3"],"forward_holdout_note":"判定窗末尾前进场的交易，出场执行会用到前向 holdout 区间的 bar（单侧机械泄漏：holdout 数据不参与选型/判据，只执行既定持仓的出场；截数据会把末段持仓强平失真——owner review #2② 注记在案）","gates":["j_low","j_low_adx25"],"n_signals_by_gate":{"judgment":{"j_low":120,"j_low_adx25":4},"mining":{"j_low":120,"j_low_adx25":4}},"notes":["目标函数 v2.1（margin 单量 + rdd 相对门：候选≥同窗 trail08 参照档）只相对排序；幸存者宇宙抬高绝对 margin 读数（退市票不在宇宙里）——相对结论才有效，绝对读数不进 live 决策"],"objective_version":"v2.1-margin-rddref","pools":{"arm_construction":"对等纪律（v0.302）+ 预算对等（v0.307）：每臂完整复刻 top 的 46 门 × 5 档 max-of-230 选型（逐门 n_g 对齐抽样，0 信号门跳过），冻结（n_g, 出场配置）进判定窗，禁每窗重新取 max","entry_accounting":{"judgment":{"requested":360,"returned":360},"mining":{"requested":372,"returned":372}},"judgment":[0.16666666666666669,0.16666666666666669,0.16666666666666669],"mining":[0.16666666666666669,0.16666666666666669,0.16666666666666669],"q95_judgment":0.16666666666666669,"q95_mining":0.16666666666666669,"score_cache_size":{"judgment":0,"mining":0}},"provenance":null,"schema":"bear_regime_report/v1","tag":"t","top":{"exit":"pct5_trail08","gate":"j_low","judgment":{"expectancy_R":0.6,"margin":0.3,"n":120,"n_taken":120,"objective":0.3,"objective_version":"v2.1-margin-rddref","payoff_ratio":4.0,"rdd_gate":true,"ret_over_dd":26.14,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5},"mining":{"expectancy_R":0.6,"margin":0.3,"n":120,"n_taken":120,"objective":0.3,"objective_version":"v2.1-margin-rddref","payoff_ratio":4.0,"rdd_gate":true,"ret_over_dd":26.14,"trade_set_note":"margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）","win_rate":0.5}},"verdict":"candidate","window_usage":null,"windows":{"judgment":{"end":"2026-09-04","start":"2024-08-01"},"mining":{"end":"2024-07-31","start":"2022-01-01"}}}'
+
+
+class TestLegacyBitIdentical:
+    """(d) 硬钉测：legacy R40 参数（2022-01-01~2024-07-31 /
+    2024-08-01~2026-09-04，均 ⊆ 挖掘 B 且互不相交）被接受，且合成数据
+    报告与 v2 切换前**逐位一致**——唯一受命变更面 = window_usage
+    （v2 口径：判定窗在挖掘段内不入台账）；legacy 不加 segments 块。"""
+
+    def test_report_bit_identical_to_pre_v2(self):
+        import json as _json
+
+        spec = _mk_per_code({"j_low": 120, "j_low_adx25": 4})
+        rep = _run(
+            spec,
+            _replay_winner_gate,
+            n_random=3,
+            c4_min_pool=2,
+            gates="j_low,j_low_adx25",
+        )
+        masked = {**rep, "provenance": None, "window_usage": None}
+        got = _json.dumps(
+            masked,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=True,
+        )
+        assert got == _LEGACY_REPORT_BLOB, (
+            "legacy 报告偏离 v2 切换前基准（除 window_usage/provenance 外逐位应同）"
+        )
+        assert rep["window_usage"] == {
+            "window": "mining_segment",
+            "k": None,
+            "note": "判定窗在挖掘段内（非受保护段 2017~2021）——读挖掘段不入台账（v2 口径）",
+        }, "唯一受命变更面：legacy 判定窗 ⊆ 挖掘 B ⇒ 不入台账"
+        assert "segments" not in rep, "legacy 兼容通道不加 segments 块"
+        assert set(rep) == {
+            "schema",
+            "tag",
+            "verdict",
+            "window_usage",
+            "provenance",
+            "gates",
+            "exit_grid",
+            "cost_sensitivity",
+            "forward_holdout_note",
+            "windows",
+            "amv_mode",
+            "n_signals_by_gate",
+            "top",
+            "configs",
+            "pools",
+            "criteria",
+            "objective_version",
+            "notes",
+        }, "legacy 顶层键集与切换前一致"
+
+    def test_legacy_run_deterministic(self):
+        """对照钉：同夹具两跑逐位同一（blob 比对的确定性前提）。"""
+        import json as _json
+
+        spec = _mk_per_code({"j_low": 120, "j_low_adx25": 4})
+        kw = dict(n_random=3, c4_min_pool=2, gates="j_low,j_low_adx25")
+        r1 = _run(spec, _replay_winner_gate, **kw)
+        r2 = _run(spec, _replay_winner_gate, **kw)
+        assert _json.dumps(r1, sort_keys=True, allow_nan=True) == _json.dumps(
+            r2, sort_keys=True, allow_nan=True
+        )
+
+
+class TestV2RandomPoolBuffer:
+    """v2 随机臂母体隔离带（v0.357 补齐：零假设与门信号同纪律）。"""
+
+    @staticmethod
+    def _pc(dates):
+        import pandas as pd
+
+        return {"600000": {"df": pd.DataFrame({"date": dates})}}
+
+    def test_seg_bar_pool_clipped_mining_a(self):
+        dates = ["2016-09-01", "2016-10-02", "2016-10-03", "2016-12-30"]
+        regime = {d: "做多" for d in dates}
+        pool = brs._seg_bar_pool_clipped(self._pc(dates), regime, "mining_a")
+        assert [t[2] for t in pool] == ["2016-09-01", "2016-10-02"]  # 截止日当日保留
+
+    def test_seg_bar_pool_clipped_per_segment_deadlines(self):
+        dates = ["2021-09-01", "2021-10-02", "2021-12-30", "2026-06-06", "2026-08-30"]
+        regime = {d: "做多" for d in dates}
+        pool_j = brs._seg_bar_pool_clipped(self._pc(dates), regime, "judgment")
+        assert [t[2] for t in pool_j] == ["2021-09-01", "2021-10-02"]
+        pool_b = brs._seg_bar_pool_clipped(self._pc(dates), regime, "mining_b")
+        assert [t[2] for t in pool_b] == [
+            "2021-09-01",
+            "2021-10-02",
+            "2021-12-30",
+            "2026-06-06",
+        ]
+
+    def test_legacy_pool_unclipped(self):
+        """legacy 路径不滤（R40 兼容）：bear_bar_pool 原样全收。"""
+        dates = ["2024-08-01", "2026-08-30"]
+        regime = {d: "做多" for d in dates}
+        pool = brs.bear_bar_pool(self._pc(dates), regime)
+        assert [t[2] for t in pool] == dates

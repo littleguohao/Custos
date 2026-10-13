@@ -6,12 +6,19 @@
 只读 ≤ 信号日；③剔除记账两版同子集；④C1 不过=untested 优先；⑤rdd 门
 不过 ⇒ C2 False；⑥C3 新子集两版重跑（配对重对齐）；⑦C4 臂种子独立
 可复现/池空=indeterminate/池未满=provisional；⑧纯噪声零假设不系统性
-偏高；⑨CLI pre2019 拒绝 + 空结果非零退出不落盘。
+偏高；⑨CLI 越段/相交/holdout/半截窗拒绝 + 空结果非零退出不落盘。
+
+v2 窗口布局切换（owner 2026-10-13 定案 TODO #90）新增：⑩缺省=v2 三段
+区间正确 + 段末隔离带三刀剔除数入报告；⑪A∪B 合并池读数=手工分段重放
+拼接逐位一致；⑫legacy R40 参数报告与改前逐位同一（canonical JSON 的
+sha256 钉；window_usage 块=定案语义变更单独断言）；⑬台账只登记
+judgment_2017_2021、legacy 不登记；⑭宇宙三件套回塞 provenance。
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 
 import pandas as pd
@@ -19,6 +26,8 @@ import pytest
 
 from custos.core.factors.b1_structure import STOP_LOOKBACK, _stop_ref
 from custos.research import backtest_factors as bt
+from custos.research import factor_exit_study as fes
+from custos.research import load_window as lw
 from custos.research import plan_rules_replay as prr
 
 
@@ -121,6 +130,49 @@ def _run(per_code, replay, **kw):
     spec = {w: per_code for w in windows}
     warm_fn = lambda s, e: spec[(s, e)]  # noqa: E731
     return prr.run_study(_args(**kw), warm_fn=warm_fn, replay_fn=replay)
+
+
+# ---------------------------------------------------------------------------
+# v2 布局夹具（TODO #90）：段常量复用 load_window 单源，禁止自抄区间
+# ---------------------------------------------------------------------------
+
+#: (挖掘 A, 判定, 挖掘 B) 三段区间——run_study v2 的 warm 顺序（A、B、判定）
+V2_SPANS = (lw.SEG_MINING_A, lw.SEG_JUDGMENT, lw.SEG_MINING_B)
+
+
+def _args_v2(**kw):
+    """四窗参全 None ⇒ v2 缺省布局（其余参数同 _args）。"""
+    return _args(
+        mining_start=None, mining_end=None, judgment_start=None, judgment_end=None, **kw
+    )
+
+
+def _rebase_year(per_code, year):
+    """把夹具信号/分数的日期整体改到 ``year`` 年（v2 三段各自需要段内日期——
+    2023 年的原夹具落在挖掘 B；df 不动：注入 replay 不读 df 日期）。"""
+    out = {}
+    for code, pack in per_code.items():
+        sigs = [{**s, "date": f"{year}-{s['date'][5:]}"} for s in pack["signals"]]
+        scores = {f"{year}-{d[5:]}": v for d, v in pack["scores"].items()}
+        out[code] = {**pack, "signals": sigs, "scores": scores}
+    return out
+
+
+def _v2_spec(per_code):
+    """三段 warm 取数表：A→2015 年 / 判定→2020 年 / B→原 2023 年（均远离
+    段末 90 天隔离带 ⇒ clip 对基础夹具是空操作）。"""
+    return {
+        V2_SPANS[0]: _rebase_year(per_code, "2015"),
+        V2_SPANS[1]: _rebase_year(per_code, "2020"),
+        V2_SPANS[2]: per_code,
+    }
+
+
+def _run_v2(per_code, replay, **kw):
+    spec = _v2_spec(per_code)
+    return prr.run_study(
+        _args_v2(**kw), warm_fn=lambda s, e: spec[(s, e)], replay_fn=replay
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -259,8 +311,12 @@ class TestCriteria:
         assert c["C2"]["rdd_gate_fail"] is None
         assert c["C4"]["state"] == "confirmed_pass"
         assert rep["verdict"] == "candidate"
-        assert rep["window_usage"]["k"] is None  # 合成运行不入台账（v0.334 守卫）
-        assert "未入台账" in rep["window_usage"]["note"]
+        # legacy R40 窗（判定已并入挖掘 B）⇒ 不入台账（v2 口径，TODO #90）
+        assert rep["window_usage"] == {
+            "window": "mining_segment",
+            "k": None,
+            "note": "判定窗在挖掘段内——不入台账（v2 口径）",
+        }
         # 副读数 pct7 自含；现行版读数两窗在
         assert rep["readings"]["mining"]["live_alt_pct7"] is not None
 
@@ -458,7 +514,8 @@ class TestC4:
 
 
 class TestCli:
-    def test_pre2019_overlap_rejected(self):
+    def test_cross_segment_mining_rejected(self):
+        """越段硬拒绝（v2 段检查）：2015（挖掘 A）~2024（挖掘 B）跨段。"""
         with pytest.raises(SystemExit):
             prr.main(
                 [
@@ -474,6 +531,88 @@ class TestCli:
                     "t",
                 ]
             )
+
+    def test_cross_segment_judgment_rejected(self):
+        """判定窗 2016-06（A 内）~2021-12（判定段内）越段 ⇒ 拒绝。"""
+        with pytest.raises(SystemExit):
+            prr.main(
+                [
+                    "--mining-start",
+                    "2022-01-01",
+                    "--mining-end",
+                    "2024-07-31",
+                    "--judgment-start",
+                    "2016-06-01",
+                    "--judgment-end",
+                    "2021-12-31",
+                    "--tag",
+                    "t",
+                ]
+            )
+
+    def test_intersecting_windows_rejected(self):
+        """判定窗∩挖掘窗相交 ⇒ 拒绝（v2 口径：不相交即可，取代旧次序规则）。"""
+        with pytest.raises(SystemExit):
+            prr.main(
+                [
+                    "--mining-start",
+                    "2022-01-01",
+                    "--mining-end",
+                    "2024-07-31",
+                    "--judgment-start",
+                    "2024-06-01",
+                    "--judgment-end",
+                    "2026-09-04",
+                    "--tag",
+                    "t",
+                ]
+            )
+
+    def test_holdout_touched_rejected(self):
+        with pytest.raises(SystemExit):
+            prr.main(
+                [
+                    "--mining-start",
+                    "2022-01-01",
+                    "--mining-end",
+                    "2024-07-31",
+                    "--judgment-start",
+                    "2024-08-01",
+                    "--judgment-end",
+                    "2026-09-05",
+                    "--tag",
+                    "t",
+                ]
+            )
+
+    def test_partial_windows_rejected(self):
+        """只给一部分窗参 ⇒ 半截布局硬拒绝（全给=legacy / 全不给=v2）。"""
+        with pytest.raises(SystemExit):
+            prr.main(["--mining-start", "2022-01-01", "--tag", "t"])
+        with pytest.raises(SystemExit):
+            prr.main(
+                [
+                    "--mining-start",
+                    "2022-01-01",
+                    "--mining-end",
+                    "2024-07-31",
+                    "--judgment-start",
+                    "2024-08-01",
+                    "--tag",
+                    "t",
+                ]
+            )
+
+    def test_window_defaults_are_none(self):
+        """v2 布局入口：四窗参缺省全 None（test_count_for_start 族回归钉）。"""
+        args = prr._build_parser().parse_args(["--tag", "t"])
+        assert (
+            args.mining_start
+            is args.mining_end
+            is args.judgment_start
+            is args.judgment_end
+            is None
+        )
 
     def test_empty_guard_no_artifact(self, tmp_path):
         per_code = _mk_per_code(n_codes=1, sigs_per_code=1)
@@ -504,7 +643,275 @@ class TestCli:
 
 
 # ---------------------------------------------------------------------------
-# ⑩ 台账生产方向钉（v0.343，owner——r42_probe 漏登根因）
+# ⑩ v2 窗口布局（owner 2026-10-13 定案 TODO #90）
+# ---------------------------------------------------------------------------
+
+
+class TestV2Layout:
+    """(a) 缺省=v2：三段区间正确（段常量=load_window 单源）+ 报告 segments 块。"""
+
+    def test_default_v2_segments(self, tmp_path):
+        per_code = _mk_per_code()
+        spec = _v2_spec(per_code)
+        rc = prr.main(
+            ["--tag", "v2a", "--out-dir", str(tmp_path)],
+            warm_fn=lambda s, e: spec[(s, e)],
+            replay_fn=_replay_candidate,
+        )
+        assert rc == 0
+        rep = json.loads(
+            (tmp_path / "v2a" / "_plan_rules_replay__v2a.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert rep["layout"] == "v2"
+        segs = rep["segments"]
+        assert (segs["mining_a"]["start"], segs["mining_a"]["end"]) == lw.SEG_MINING_A
+        assert (segs["judgment"]["start"], segs["judgment"]["end"]) == lw.SEG_JUDGMENT
+        assert (segs["mining_b"]["start"], segs["mining_b"]["end"]) == lw.SEG_MINING_B
+        # 逻辑窗：挖掘=A 起点~B 终点（并集），判定=受保护段
+        assert rep["windows"]["mining"] == {
+            "start": lw.SEG_MINING_A[0],
+            "end": lw.SEG_MINING_B[1],
+        }
+        assert rep["windows"]["judgment"] == {
+            "start": lw.SEG_JUDGMENT[0],
+            "end": lw.SEG_JUDGMENT[1],
+        }
+        # 基础夹具日期远离隔离带 ⇒ 零剔除；三段各 120 信号、合并 240
+        for name in ("mining_a", "judgment", "mining_b"):
+            assert segs[name]["n_signals"] == 120 and segs[name]["n_clipped"] == 0
+        assert segs["mining_total"]["n_signals"] == 240
+        # 判定=受保护段 ⇒ 合成运行走 synthetic 守卫（k=None 未入台账）
+        assert rep["window_usage"]["window"] == "judgment_2017_2021"
+        assert rep["window_usage"]["k"] is None
+        assert "未入台账" in rep["window_usage"]["note"]
+
+    def test_run_study_v2_accounting_keys(self):
+        rep = _run_v2(_mk_per_code(), _replay_candidate, n_random=2, c4_min_pool=2)
+        assert set(rep["accounting"]) == {"mining_a", "mining_b", "judgment"}
+        # 成本副读数臂名不变（逻辑双窗：mining=合并池 / judgment）
+        assert set(rep["cost_sensitivity"]["arms"]) == {
+            "plan_mining",
+            "live_mining",
+            "plan_judgment",
+            "live_judgment",
+        }
+
+
+class TestV2MergedPool:
+    """(b) A∪B 合并一池读数 = 手工分段重放拼接重算（逐位一致）。"""
+
+    def test_merged_mining_readings_bitwise(self):
+        per_code = _mk_per_code()
+        spec = _v2_spec(per_code)
+        rep = prr.run_study(
+            _args_v2(n_random=4, c4_min_pool=3),
+            warm_fn=lambda s, e: spec[(s, e)],
+            replay_fn=_replay_candidate,
+        )
+        sub_a = prr.attach_plan_stops(spec[V2_SPANS[0]], STOP_LOOKBACK)[0]
+        sub_j = prr.attach_plan_stops(spec[V2_SPANS[1]], STOP_LOOKBACK)[0]
+        sub_b = prr.attach_plan_stops(spec[V2_SPANS[2]], STOP_LOOKBACK)[0]
+
+        def build(subset, plan):
+            if plan:
+                return [prr._sig_with_stop(r, r["plan_stop"]) for r in subset]
+            return [dict(r) for r in subset]
+
+        def trades(subs, plan, params):
+            return [
+                t for sub in subs for t in _replay_candidate(build(sub, plan), params)
+            ]
+
+        live = fes.combine_readings(
+            trades((sub_a, sub_b), False, prr.LIVE_PARAMS), 20, ref="self"
+        )
+        plan = fes.combine_readings(
+            trades((sub_a, sub_b), True, prr.PLAN_PARAMS), 20, ref=live
+        )
+        alt = fes.combine_readings(
+            trades((sub_a, sub_b), False, prr.LIVE_ALT_PARAMS), 20, ref="self"
+        )
+        assert rep["readings"]["mining"]["live"] == live
+        assert rep["readings"]["mining"]["plan"] == plan
+        assert rep["readings"]["mining"]["live_alt_pct7"] == alt
+        live_j = fes.combine_readings(
+            trades((sub_j,), False, prr.LIVE_PARAMS), 20, ref="self"
+        )
+        plan_j = fes.combine_readings(
+            trades((sub_j,), True, prr.PLAN_PARAMS), 20, ref=live_j
+        )
+        assert rep["readings"]["judgment"]["live"] == live_j
+        assert rep["readings"]["judgment"]["plan"] == plan_j
+        # 合并池规模 = A+B 之和（判据形态不变：C1 看的仍是 mining/judgment 两键）
+        assert rep["accounting"]["mining_a"]["n_subset"] == 120
+        assert rep["accounting"]["mining_b"]["n_subset"] == 120
+        assert rep["criteria"]["C1"]["n_taken"] == {"mining": 240, "judgment": 120}
+
+
+class TestV2SegmentBuffer:
+    """(c) 段末 90 天隔离带三刀生效且剔除数入报告（≤ 截止日保留、> 剔除）。"""
+
+    def test_buffer_clip_counted(self):
+        def seg_pack(year, kept_boundary, dropped):
+            pc = _rebase_year(_mk_per_code(n_codes=2, sigs_per_code=4), year)
+            pack = pc["000000"]
+            for d in [kept_boundary, *dropped]:
+                pack["signals"].append({"i": 10, "date": d, "score": 50.0})
+                pack["scores"][d] = 50.0
+            return pc
+
+        spec = {
+            # A 段末 2016-12-31 ⇒ 入场截止 2016-10-02
+            V2_SPANS[0]: seg_pack("2015", "2016-10-02", ["2016-10-03", "2016-12-30"]),
+            # 判定段末 2021-12-31 ⇒ 入场截止 2021-10-02
+            V2_SPANS[1]: seg_pack("2020", "2021-10-02", ["2021-10-03", "2021-12-31"]),
+            # B 段末 2026-09-04 ⇒ 入场截止 2026-06-06
+            V2_SPANS[2]: seg_pack("2023", "2026-06-06", ["2026-06-07", "2026-09-04"]),
+        }
+        rep = prr.run_study(
+            _args_v2(n_random=2, c4_min_pool=2),
+            warm_fn=lambda s, e: spec[(s, e)],
+            replay_fn=_replay_flat,
+        )
+        segs = rep["segments"]
+        for name in ("mining_a", "judgment", "mining_b"):
+            assert segs[name]["n_signals"] == 11  # 8 段内 + 1 边界保留 + 2 隔离带
+            assert segs[name]["n_clipped"] == 2
+            # 隔离带信号不进 attach 子集（9=8+1 边界保留）
+            assert rep["accounting"][name]["n_signals"] == 9
+            assert rep["accounting"][name]["n_subset"] == 9
+        assert segs["mining_total"]["n_signals"] == 22
+        assert segs["mining_total"]["n_clipped"] == 4
+        # clip 不污染注入夹具（副本来回：原 signals 仍在——4 基础 + 3 加注）
+        assert len(spec[V2_SPANS[0]]["000000"]["signals"]) == 7
+        assert sum(len(p["signals"]) for p in spec[V2_SPANS[0]].values()) == 11
+
+
+class TestLegacyR40Compat:
+    """(d) legacy R40 参数（2022-01-01~2024-07-31 / 2024-08-01~2026-09-04，
+    均 ⊆ 挖掘 B 且互不相交）：接受 + 合成数据报告与改前**逐位同一**。
+
+    逐位口径：report 各顶层块 canonical JSON（sort_keys）的 sha256 与改前
+    金样一致（全量 139KB 金样不落测试文件，块级哈希可定位差异块）。
+    定案语义变更只两处，单独断言：window_usage 块（判定窗已并入挖掘 B ⇒
+    不登记）与易变字段（generated_at/git/版本串，两侧同步剔除后比较）。
+    """
+
+    #: 改前（v0.356 代码）同夹具同参数报告的金样哈希（_normalize_volatile 后）
+    _GOLDEN_SHA256 = {
+        "<full>": "82e04211ffdb8ca9a89a032fec63508bc6bfc0851ed1e7f7b0dcd025dce90dab",
+        "accounting": "e77ba530c815a533343022c856e57ed1c03e538452d4f3b59be28c9e4006722f",
+        "cost_sensitivity": "64cc191e73b6e44c42a0b30ffee9792ae632f643a7703bec0a13fd9d5d646d38",
+        "criteria": "85f8868c78fb4524467a6ddc0b91955955d25185c9f96146af76e7610ff328a3",
+        "forward_holdout_note": "3f7068aca87896dac440f9b7b068f1907e8e94112691bfd04a7f21789211d806",
+        "params": "7b09f04841885b622f44ca879278673efb011f9a5ed922359407ddf992685ee0",
+        "provenance": "a7f1a851100f6c5a33b6b2aa0a98502d5baa96bb2ce6269067531f165a0ceab7",
+        "readings": "39dac50c357154dbe7ea2ba5e77a0fbbbf5911243fcf8bb90f051bd45e202125",
+        "schema": "afdee52e747ec0df67de16b0e1f7b1353a70365707656551874a088391854830",
+        "tag": "8ca5d81566f88badd698137ac629cbf93ccc107c0cd967b7964f7d82088f6ebf",
+        "verdict": "6201e275c993fded1b6a1b7b64f106686c702d9fdff8af32b560aad5d781015c",
+        "windows": "e7dbd9a5de5f7efb589285c9faf75b18dbaee6e8122a4f9b5a8a98b0ce30f6c0",
+    }
+
+    @staticmethod
+    def _canon_sha256(obj):
+        return hashlib.sha256(
+            json.dumps(obj, ensure_ascii=False, sort_keys=True, allow_nan=True).encode(
+                "utf-8"
+            )
+        ).hexdigest()
+
+    @staticmethod
+    def _normalize_volatile(rep):
+        rep = dict(rep)
+        for k in (
+            "generated_at",
+            "objective_version",
+            "window_usage",
+            "layout",
+            "segments",
+        ):
+            rep.pop(k, None)
+        prov = dict(rep["provenance"])
+        for k in ("git_sha", "git_dirty", "pre_reg_blob_hash", "objective_version"):
+            prov.pop(k, None)
+        rep["provenance"] = prov
+        return rep
+
+    def test_report_bit_identical_to_pre_switch(self):
+        rep = _run(_mk_per_code(), _replay_candidate, n_random=4, c4_min_pool=3)
+        # 定案语义变更①：legacy ⇒ 判定窗已在挖掘 B 内，不入台账（v2 口径）
+        assert rep["window_usage"] == {
+            "window": "mining_segment",
+            "k": None,
+            "note": "判定窗在挖掘段内——不入台账（v2 口径）",
+        }
+        # legacy 不带 v2 专有块
+        assert "segments" not in rep and "layout" not in rep
+        norm = self._normalize_volatile(rep)
+        bad = [
+            name
+            for name, want in self._GOLDEN_SHA256.items()
+            if self._canon_sha256(norm if name == "<full>" else norm[name]) != want
+        ]
+        assert not bad, f"legacy R40 报告与改前不逐位一致（块级定位）: {bad}"
+
+    def test_legacy_r40_cli_accepted(self, tmp_path):
+        per_code = _mk_per_code()
+        windows = (("2022-01-01", "2024-07-31"), ("2024-08-01", "2026-09-04"))
+        spec = {w: per_code for w in windows}
+        rc = prr.main(
+            [
+                "--mining-start",
+                "2022-01-01",
+                "--mining-end",
+                "2024-07-31",
+                "--judgment-start",
+                "2024-08-01",
+                "--judgment-end",
+                "2026-09-04",
+                "--tag",
+                "r40ok",
+                "--out-dir",
+                str(tmp_path),
+            ],
+            warm_fn=lambda s, e: spec[(s, e)],
+            replay_fn=_replay_candidate,
+        )
+        assert rc == 0
+        assert (tmp_path / "r40ok" / "_plan_rules_replay__r40ok.json").exists()
+
+    def test_judgment_before_mining_accepted(self, tmp_path):
+        """旧次序规则（mining_end < judgment_start）作废：互不相交即合法——
+        判定窗在挖掘窗之前的 legacy 组合也接受（v2 口径只验不相交）。"""
+        per_code = _mk_per_code()
+        windows = (("2024-08-01", "2026-09-04"), ("2022-01-01", "2024-07-31"))
+        spec = {w: per_code for w in windows}
+        rc = prr.main(
+            [
+                "--mining-start",
+                "2024-08-01",
+                "--mining-end",
+                "2026-09-04",
+                "--judgment-start",
+                "2022-01-01",
+                "--judgment-end",
+                "2024-07-31",
+                "--tag",
+                "rev",
+                "--out-dir",
+                str(tmp_path),
+            ],
+            warm_fn=lambda s, e: spec[(s, e)],
+            replay_fn=_replay_candidate,
+        )
+        assert rc == 0
+
+
+# ---------------------------------------------------------------------------
+# ⑪ 台账生产方向钉（v0.343，owner——r42_probe 漏登根因；v2 口径 TODO #90）
 # ---------------------------------------------------------------------------
 
 
@@ -524,22 +931,29 @@ def _wu_spy(monkeypatch):
 
 class TestProductionRecordUse:
     """run_study 传 warm_fn=None（**生产路径**）+ 生产依赖全 monkeypatch 成
-    合成 ⇒ record_use 必须以 ``synthetic=False`` 被调且 k 直通报告。防回归：
+    合成 ⇒ v2 缺省（判定=受保护段 2017~2021）record_use 必须以
+    ``synthetic=False``、键 ``judgment_2017_2021`` 被调且 k 直通报告；legacy
+    R40 窗（判定已并入挖掘 B）⇒ **完全不登记**（v2 口径，TODO #90）。防回归：
     生产分支重绑注入参数 ⇒ 入口快照 ``injected`` 变 True ⇒ 立刻红。
     attach_plan_stops 走真 `_stop_ref`（夹具 df 是真 df）——只桩掉数据
     加载与重放。"""
 
-    def _production_run(self, monkeypatch):
-        import pandas as pd
-
+    def _monkeypatch_production(self, monkeypatch, spec):
         from custos.datasource.local_tdx import local_tdx_data
         from custos.research import backtest_factors as bt
         from custos.research import exit_campaign as ec
         from custos.research import factor_exit_study as fes
 
-        windows = (("2022-01-01", "2024-07-31"), ("2024-08-01", "2026-09-04"))
-        spec = {w: _mk_per_code() for w in windows}
-        monkeypatch.setattr(bt, "_resolve_universe", lambda ns, ap: ["000000"])
+        def _fake_resolve(ns, ap):
+            # universe.resolve 副作用（v0.356 单源）：宇宙三件套
+            ns.universe_meta = {
+                "universe_rule": "local_vipdoc",
+                "n_codes": 1,
+                "universe_sha256": "0123456789abcdef",
+            }
+            return ["000000"]
+
+        monkeypatch.setattr(bt, "_resolve_universe", _fake_resolve)
         monkeypatch.setattr(bt, "load_amv_regime", lambda since: {"2022-01-03": "做多"})
         monkeypatch.setattr(
             local_tdx_data,
@@ -560,23 +974,45 @@ class TestProductionRecordUse:
                 subset, params
             ),
         )
-        return prr.run_study(
-            _args(n_random=2, c4_min_pool=2), warm_fn=None, replay_fn=None
-        )
 
-    def test_production_records_with_synthetic_false(self, monkeypatch):
+    def test_production_records_protected_judgment(self, monkeypatch):
         calls = _wu_spy(monkeypatch)
-        rep = self._production_run(monkeypatch)
+        self._monkeypatch_production(monkeypatch, _v2_spec(_mk_per_code()))
+        rep = prr.run_study(
+            _args_v2(n_random=2, c4_min_pool=2), warm_fn=None, replay_fn=None
+        )
         assert len(calls) == 1
-        assert calls[0]["unit"] == "R41" and calls[0]["window"] == "judgment"
+        assert calls[0]["unit"] == "R41"
+        assert calls[0]["window"] == "judgment_2017_2021"
         assert calls[0]["synthetic"] is False, "生产路径必须按 synthetic=False 登记"
         assert rep["window_usage"]["k"] == 7, "生产口径 k 直通报告"
         assert "第 7 次被读" in rep["window_usage"]["note"]
+        # 宇宙三件套回塞（⑭）：provenance.build 优先读 args.universe_meta
+        prov = rep["provenance"]
+        assert prov["universe_rule"] == "local_vipdoc"
+        assert prov["n_codes"] == 1
+        assert prov["universe_sha256"] == "0123456789abcdef"
+
+    def test_production_legacy_not_recorded(self, monkeypatch):
+        """legacy R40 窗：判定窗已并入挖掘 B ⇒ record_use 零调用（v2 口径）。"""
+        calls = _wu_spy(monkeypatch)
+        windows = (("2022-01-01", "2024-07-31"), ("2024-08-01", "2026-09-04"))
+        self._monkeypatch_production(monkeypatch, {w: _mk_per_code() for w in windows})
+        rep = prr.run_study(
+            _args(n_random=2, c4_min_pool=2), warm_fn=None, replay_fn=None
+        )
+        assert calls == [], "legacy（判定窗在挖掘段内）⇒ 不入台账（v2 口径）"
+        assert rep["window_usage"] == {
+            "window": "mining_segment",
+            "k": None,
+            "note": "判定窗在挖掘段内——不入台账（v2 口径）",
+        }
 
     def test_injected_still_synthetic(self, monkeypatch):
-        """对照钉：同一夹具走注入路径 ⇒ synthetic=True（双向钉死）。"""
+        """对照钉：v2 受保护判定窗走注入路径 ⇒ synthetic=True（双向钉死）。"""
         calls = _wu_spy(monkeypatch)
-        rep = _run(_mk_per_code(), _replay_candidate, n_random=2, c4_min_pool=2)
+        rep = _run_v2(_mk_per_code(), _replay_candidate, n_random=2, c4_min_pool=2)
         assert len(calls) == 1
+        assert calls[0]["window"] == "judgment_2017_2021"
         assert calls[0]["synthetic"] is True
         assert rep["window_usage"]["k"] == 7

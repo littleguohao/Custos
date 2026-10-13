@@ -3,7 +3,10 @@
 
 锁的契约：档集合法性、枚举 80 格、分位切点只用挖掘窗（双窗硬隔离）、
 top/uniform-best 选择语义（v2 rdd 门 + 只在挖掘窗）、C1 桶级计数、
-C4 随机分桶臂同预算、CLI 窗口护栏（pre2019 硬拒绝镜像）、产物自含。
+C4 随机分桶臂同预算、产物自含；v2 窗口布局（TODO #90）：四参全缺省 =
+三段（挖掘 A/B + 判定 2017~2021，段末 90 日隔离带裁剪、A∪B 合并池）、
+四参全显式 = legacy 单段双窗（R40 报告与切换前**逐位同一**金色快照）、
+越段/相交/半截布局即拒、判定窗=受保护段才登记 judgment_2017_2021。
 全流程用合成数据注入（warm_fn/replay_fn + monkeypatched adx14_series），
 不发真实加载。
 """
@@ -11,6 +14,9 @@ C4 随机分桶臂同预算、CLI 窗口护栏（pre2019 硬拒绝镜像）、�
 from __future__ import annotations
 
 import argparse
+import base64
+import gzip
+import json
 
 import pandas as pd
 import pytest
@@ -34,6 +40,13 @@ def _args(**kw):
     )
     base.update(kw)
     return argparse.Namespace(**base)
+
+
+def _args_v2(**kw):
+    """v2 布局参数（窗口四参全 None ⇒ 三段：挖掘 A/B + 判定 2017~2021）。"""
+    return _args(
+        mining_start=None, mining_end=None, judgment_start=None, judgment_end=None, **kw
+    )
 
 
 def _per_code(spec):
@@ -136,10 +149,44 @@ def _three_level_spec(n_per_window, per_bucket_factor=True):
     }
 
 
+#: v2 三段窗口（= load_window SEG_MINING_A/SEG_JUDGMENT/SEG_MINING_B 的字面值）
+_V2_SEGS = (
+    ("2000-01-01", "2016-12-31"),
+    ("2017-01-01", "2021-12-31"),
+    ("2022-01-01", "2026-09-04"),
+)
+
+
+def _three_level_spec_v2(n_per_seg):
+    """v2 三段三水平因子夹具（与 _three_level_spec 同构；段内年份远离
+    段末隔离带——2005/2019/2023，天然零裁剪）。"""
+
+    def _mk(window_offset, year):
+        spec = {}
+        for k in range(n_per_seg):
+            code = f"{k % 30:06d}"
+            day = f"{year}-{(k % 12) + 1:02d}-{(k % 28) + 1:02d}"
+            i = window_offset + k
+            spec.setdefault(code, []).append((day, i, 50.0, k % 3))
+        return spec
+
+    return {
+        _V2_SEGS[0]: _per_code(_mk(0, 2005)),
+        _V2_SEGS[1]: _per_code(_mk(100000, 2019)),
+        _V2_SEGS[2]: _per_code(_mk(200000, 2023)),
+    }
+
+
 def _run(monkeypatch, spec_by_window, replay_fn, **kw):
     _patch_adx(monkeypatch)
     warm_fn = lambda s, e: spec_by_window[(s, e)]  # noqa: E731
     return fes.run_study(_args(**kw), warm_fn=warm_fn, replay_fn=replay_fn)
+
+
+def _run_v2(monkeypatch, spec_by_seg, replay_fn, **kw):
+    _patch_adx(monkeypatch)
+    warm_fn = lambda s, e: spec_by_seg[(s, e)]  # noqa: E731
+    return fes.run_study(_args_v2(**kw), warm_fn=warm_fn, replay_fn=replay_fn)
 
 
 class TestProfilesAndEnumeration:
@@ -218,8 +265,10 @@ class TestScriptedScenarios:
                 assert abs(qp - q) <= delta + 1e-9, d
         assert c["C4"]["state"] == "confirmed_pass", c["C4"]
         assert rep["verdict"] == "candidate"
-        assert rep["window_usage"]["k"] is None  # 合成运行不入台账（v0.334 守卫）
-        assert "未入台账" in rep["window_usage"]["note"]
+        # legacy 判定窗（⊆挖掘 B）不登记（v2 口径，TODO #90）
+        assert rep["window_usage"]["window"] == "mining_segment"
+        assert rep["window_usage"]["k"] is None
+        assert "判定窗在挖掘段内" in rep["window_usage"]["note"]
 
     def test_cost_sensitivity_block_wired(self, monkeypatch):
         """成本副读数（owner review #6，v0.329）：top/uniform-best 交易集
@@ -390,17 +439,76 @@ class TestJudges:
 
 
 class TestCliGuards:
+    """v2 布局护栏（TODO #90）：越段/相交/半截布局即拒；次序规则作废。"""
+
+    @staticmethod
+    def _parse(ap, ms, me, js, je):
+        return ap.parse_args(
+            [
+                "--tag",
+                "t",
+                "--mining-start",
+                ms,
+                "--mining-end",
+                me,
+                "--judgment-start",
+                js,
+                "--judgment-end",
+                je,
+            ]
+        )
+
     def test_cross_segment_rejected(self):
-        """v2 段检查（TODO #90）：窗口越段即拒（原 pre2019 交集拒绝的接任者——
-        mining-start 2015 ⇒ 窗跨挖掘 A/判定/挖掘 B 三段，不在任何单段内）。"""
+        """越段即拒（v2 段检查单源）：mining 2015~2024 跨挖掘 A/判定/挖掘 B
+        三段，不在任何单段内。"""
         ap = fes._build_parser()
-        args = ap.parse_args(["--tag", "t", "--mining-start", "2015-01-01"])
+        args = self._parse(ap, "2015-01-01", "2024-07-31", "2024-08-01", "2026-09-04")
         with pytest.raises(SystemExit):
             fes._check_windows(args, ap)
 
-    def test_window_order_rejected(self):
+    def test_windows_overlap_rejected(self):
+        """相交即拒：两窗均 ⊆ 挖掘 B（段检查各过）但区间相交——v2 起只查
+        不相交（取代旧 mining_end < judgment_start 次序规则）。"""
         ap = fes._build_parser()
-        args = ap.parse_args(["--tag", "t", "--mining-end", "2025-01-01"])
+        args = self._parse(ap, "2022-01-01", "2025-01-01", "2024-08-01", "2026-09-04")
+        with pytest.raises(SystemExit):
+            fes._check_windows(args, ap)
+
+    def test_judgment_before_mining_accepted(self):
+        """次序规则作废钉：判定窗整段早于挖掘窗（判定段 2017~2021 vs 挖掘 B
+        子窗）⇒ 不相交即合法，不再要求 mining 在前。"""
+        ap = fes._build_parser()
+        args = self._parse(ap, "2022-01-01", "2024-07-31", "2017-01-01", "2021-12-31")
+        fes._check_windows(args, ap)  # 不炸即过
+
+    def test_r40_legacy_windows_accepted(self):
+        """R40 旧窗（均 ⊆ 挖掘 B 且互不相交）= 合法 legacy 兼容通道。"""
+        ap = fes._build_parser()
+        args = self._parse(ap, "2022-01-01", "2024-07-31", "2024-08-01", "2026-09-04")
+        fes._check_windows(args, ap)
+        segs, jwin = fes._resolve_layout(args)
+        assert segs == [("2022-01-01", "2024-07-31")]
+        assert jwin == ("2024-08-01", "2026-09-04")
+
+    @pytest.mark.parametrize(
+        "argv_tail",
+        [
+            ["--mining-start", "2022-01-01"],  # 只给一个
+            ["--mining-start", "2022-01-01", "--mining-end", "2024-07-31"],  # 只给挖掘
+            [  # 给三个
+                "--mining-start",
+                "2022-01-01",
+                "--mining-end",
+                "2024-07-31",
+                "--judgment-start",
+                "2024-08-01",
+            ],
+        ],
+    )
+    def test_partial_layout_rejected(self, argv_tail):
+        """半截布局即拒：四参须全给（legacy）或全不给（v2）。"""
+        ap = fes._build_parser()
+        args = ap.parse_args(["--tag", "t", *argv_tail])
         with pytest.raises(SystemExit):
             fes._check_windows(args, ap)
 
@@ -431,7 +539,9 @@ def _wu_spy(monkeypatch):
 class TestProductionRecordUse:
     """run_study 传 warm_fn=None（**生产路径**）+ 生产依赖全 monkeypatch 成
     合成 ⇒ record_use 必须以 ``synthetic=False`` 被调且 k 直通报告。防回归：
-    生产分支重绑注入参数 ⇒ 入口快照 ``injected`` 变 True ⇒ 立刻红。"""
+    生产分支重绑注入参数 ⇒ 入口快照 ``injected`` 变 True ⇒ 立刻红。
+    v2 台账口径（TODO #90）：判定窗=受保护段（2017~2021）才登记，键
+    ``judgment_2017_2021``；legacy 判定窗（⊆挖掘 B）不登记。"""
 
     def _production_run(self, monkeypatch):
         import pandas as pd
@@ -441,13 +551,23 @@ class TestProductionRecordUse:
         from custos.research import exit_campaign as ec
 
         _patch_adx(monkeypatch)  # df={"fmap"} 替身（与注入路径同夹具口径）
-        spec = _three_level_spec(180)
-        monkeypatch.setattr(bt, "_resolve_universe", lambda ns, ap: ["000000"])
-        monkeypatch.setattr(bt, "load_amv_regime", lambda since: {"2022-01-03": "做多"})
+        spec = _three_level_spec_v2(60)
+
+        def _resolve_fake(ns, ap):
+            # 宇宙解析副作用同 universe.resolve：三件套塞 ns.universe_meta
+            ns.universe_meta = {
+                "universe_rule": "test_rule",
+                "n_codes": 1,
+                "universe_sha256": "deadbeef01234567",
+            }
+            return ["000000"]
+
+        monkeypatch.setattr(bt, "_resolve_universe", _resolve_fake)
+        monkeypatch.setattr(bt, "load_amv_regime", lambda since: {"2019-01-03": "做多"})
         monkeypatch.setattr(
             local_tdx_data,
             "get_ohlcv_table",
-            lambda code, count: pd.DataFrame({"date": ["2022-01-03"]}),
+            lambda code, count: pd.DataFrame({"date": ["2019-01-03"]}),
         )
         monkeypatch.setattr(
             ec,
@@ -463,9 +583,9 @@ class TestProductionRecordUse:
                 subset, params
             ),
         )
-        # fxt._args 无宇宙/count 字段（注入路径用不到）——生产分支要读
+        # fxt._args_v2 无宇宙/count 字段（注入路径用不到）——生产分支要读
         return fes.run_study(
-            _args(
+            _args_v2(
                 n_random=2,
                 c4_min_pool=2,
                 codes="",
@@ -483,21 +603,364 @@ class TestProductionRecordUse:
         calls = _wu_spy(monkeypatch)
         rep = self._production_run(monkeypatch)
         assert len(calls) == 1
-        assert calls[0]["unit"] == "R39" and calls[0]["window"] == "judgment"
+        assert calls[0]["unit"] == "R39"
+        assert calls[0]["window"] == "judgment_2017_2021"
         assert calls[0]["synthetic"] is False, "生产路径必须按 synthetic=False 登记"
         assert rep["window_usage"]["k"] == 7, "生产口径 k 直通报告"
         assert "第 7 次被读" in rep["window_usage"]["note"]
 
+    def test_production_universe_meta_wired(self, monkeypatch):
+        """宇宙三件套回塞（TODO #89 接线确认）：_resolve_universe 的
+        ns.universe_meta ⇒ args.universe_meta ⇒ provenance 三件套。"""
+        _wu_spy(monkeypatch)
+        rep = self._production_run(monkeypatch)
+        pv = rep["provenance"]
+        assert pv["universe_rule"] == "test_rule"
+        assert pv["n_codes"] == 1
+        assert pv["universe_sha256"] == "deadbeef01234567"
+
     def test_injected_still_synthetic(self, monkeypatch):
         """对照钉：同一夹具走注入路径 ⇒ synthetic=True（双向钉死）。"""
         calls = _wu_spy(monkeypatch)
-        rep = _run(
+        rep = _run_v2(
             monkeypatch,
-            _three_level_spec(180),
+            _three_level_spec_v2(60),
             _scripted_replay,
             n_random=2,
             c4_min_pool=2,
         )
         assert len(calls) == 1
+        assert calls[0]["window"] == "judgment_2017_2021"
         assert calls[0]["synthetic"] is True
         assert rep["window_usage"]["k"] == 7
+
+    def test_legacy_judgment_not_registered(self, monkeypatch):
+        """legacy 判定窗（2024~2026，已并入挖掘 B）**不登记**——读挖掘段
+        不入台账（v2 口径）；报告 window_usage 写定案注记。"""
+        calls = _wu_spy(monkeypatch)
+        rep = _run(
+            monkeypatch,
+            _three_level_spec(60),
+            _scripted_replay,
+            n_random=2,
+            c4_min_pool=2,
+        )
+        assert calls == [], "legacy 判定窗在挖掘段内——record_use 不得被调"
+        assert rep["window_usage"] == {
+            "window": "mining_segment",
+            "k": None,
+            "note": "判定窗在挖掘段内（非受保护段 2017~2021）——读挖掘段不入台账（v2 口径）",
+        }
+
+
+# ---------------------------------------------------------------------------
+# v2 窗口布局钉测（TODO #90，owner 2026-10-13 拍板）
+# ---------------------------------------------------------------------------
+
+
+class TestV2Layout:
+    """钉（a）：窗口四参全缺省 ⇒ v2 三段布局（段常量 = load_window 单源）。"""
+
+    def test_v2_defaults_resolve_three_segments(self):
+        from custos.research import load_window as lw
+
+        ap = fes._build_parser()
+        args = ap.parse_args(["--tag", "t"])
+        assert (
+            args.mining_start,
+            args.mining_end,
+            args.judgment_start,
+            args.judgment_end,
+        ) == (None, None, None, None), "窗口四参缺省全 None（v2 触发条件）"
+        fes._check_windows(args, ap)  # 不炸即过
+        segs, jwin = fes._resolve_layout(args)
+        assert segs == [lw.SEG_MINING_A, lw.SEG_MINING_B]
+        assert jwin == lw.SEG_JUDGMENT
+
+    def test_v2_report_windows_and_segments(self, monkeypatch):
+        rep = _run_v2(
+            monkeypatch,
+            _three_level_spec_v2(60),
+            _scripted_replay,
+            n_random=2,
+            c4_min_pool=2,
+        )
+        assert rep["windows"] == {
+            "mining": {"start": "2000-01-01", "end": "2026-09-04"},
+            "judgment": {"start": "2017-01-01", "end": "2021-12-31"},
+        }
+        segs = rep["segments"]
+        assert segs["mining_a"] == {
+            "start": "2000-01-01",
+            "end": "2016-12-31",
+            "n_signals": 60,
+            "n_clipped": 0,
+        }
+        assert segs["judgment"] == {
+            "start": "2017-01-01",
+            "end": "2021-12-31",
+            "n_signals": 60,
+            "n_clipped": 0,
+        }
+        assert segs["mining_b"] == {
+            "start": "2022-01-01",
+            "end": "2026-09-04",
+            "n_signals": 60,
+            "n_clipped": 0,
+        }
+        assert segs["mining_merged"] == {"n_signals": 120}
+        assert rep["n_signals"] == {"mining": 120, "judgment": 60}
+        # v2 判定窗=受保护段 ⇒ 台账窗名换代（合成运行 k=None 未入台账）
+        assert rep["window_usage"]["window"] == "judgment_2017_2021"
+        assert rep["window_usage"]["k"] is None
+
+
+class TestMergedPoolReadings:
+    """钉（b）：v2 A∪B 合并池读数 = 手工合并两段信号重算（逐位）。"""
+
+    def test_merged_pool_matches_manual_recompute(self, monkeypatch):
+        _patch_adx(monkeypatch)
+        spec = _three_level_spec_v2(60)
+        rep = _run_v2(monkeypatch, spec, _scripted_replay, n_random=2, c4_min_pool=2)
+
+        from custos.research.load_window import clip_entries
+
+        # 手工合并：逐段 collect → 段末隔离带裁剪 → A+B 拼接（信号池层合并）
+        merged: list[dict] = []
+        for _name, w in (("mining_a", _V2_SEGS[0]), ("mining_b", _V2_SEGS[2])):
+            merged.extend(clip_entries(fes.collect_signals(spec[w]), w[1], key="date"))
+        assert len(merged) == rep["n_signals"]["mining"]
+
+        for name, qs in fes.BUCKETINGS.items():
+            cuts = fes.quantile_cuts([r["factor"] for r in merged], qs)
+            assert cuts == rep["bucketings"][name]["cuts_mining_estimated"]
+            buckets = fes.buckets_of(merged, cuts)
+            stud = fes.study_window(
+                {}, merged, buckets, {}, 25.0, 20, replay_fn=_scripted_replay
+            )
+            for c in stud["configs"]:
+                want = dict(c["readings"])
+                want.pop("taken")  # 报告 _slim 去掉交易明细
+                got = next(
+                    x["mining"]
+                    for x in rep["configs"]
+                    if x["bucketing"] == name and x["mapping"] == c["mapping"]
+                )
+                assert got == want, f"{name} {c['mapping']}"
+
+
+class TestSegmentBuffer:
+    """钉（c）：v2 三段末隔离带三刀生效（裁剪在 replay/判据之前），剔除数入报告。
+
+    段末入场截止日（load_window.entry_deadline 字面值）：A→2016-10-02、
+    判定→2021-10-02、B→2026-06-06。"""
+
+    @staticmethod
+    def _buffer_spec():
+        """三段各放 截止日前/当日（=截止，保留）/之后（剔除）信号。"""
+
+        def mk(entries):
+            spec: dict[str, list] = {}
+            for idx, (code, day) in enumerate(entries):
+                spec.setdefault(code, []).append((day, idx, 50.0, idx % 3))
+            return _per_code(spec)
+
+        return {
+            _V2_SEGS[0]: mk(
+                [
+                    ("000001", "2016-09-30"),
+                    ("000002", "2016-10-02"),  # =截止日，保留
+                    ("000003", "2016-10-03"),  # 剔除
+                    ("000004", "2016-12-30"),  # 剔除
+                ]
+            ),
+            _V2_SEGS[1]: mk(
+                [
+                    ("000001", "2021-09-01"),
+                    ("000002", "2021-10-02"),
+                    ("000003", "2021-10-03"),
+                    ("000004", "2021-12-31"),
+                ]
+            ),
+            _V2_SEGS[2]: mk(
+                [
+                    ("000001", "2023-05-01"),
+                    ("000002", "2026-06-06"),
+                    ("000003", "2026-06-07"),
+                    ("000004", "2026-09-04"),
+                ]
+            ),
+        }
+
+    def test_buffer_clips_three_segments(self, monkeypatch):
+        seen: list[str] = []
+
+        def spy_replay(subset, params):
+            seen.extend(r["date"] for r in subset)
+            return _scripted_replay(subset, params)
+
+        rep = _run_v2(
+            monkeypatch, self._buffer_spec(), spy_replay, n_random=2, c4_min_pool=2
+        )
+        segs = rep["segments"]
+        assert segs["mining_a"]["n_signals"] == 2
+        assert segs["mining_a"]["n_clipped"] == 2
+        assert segs["judgment"]["n_signals"] == 2
+        assert segs["judgment"]["n_clipped"] == 2
+        assert segs["mining_b"]["n_signals"] == 2
+        assert segs["mining_b"]["n_clipped"] == 2
+        assert segs["mining_merged"] == {"n_signals": 4}
+        assert rep["n_signals"] == {"mining": 4, "judgment": 2}
+        # 裁剪在 replay 之前：隔离带日期从未进重放
+        assert not (
+            set(seen)
+            & {
+                "2016-10-03",
+                "2016-12-30",
+                "2021-10-03",
+                "2021-12-31",
+                "2026-06-07",
+                "2026-09-04",
+            }
+        )
+        # 截止日当日保留（入场日 ≤ entry_deadline）
+        assert {"2016-10-02", "2021-10-02", "2026-06-06"} <= set(seen)
+
+    def test_legacy_never_clips(self, monkeypatch):
+        """对照钉：legacy 单段不裁剪（R40 行为逐位不变）——判定窗尾段
+        （>挖掘 B 截止日 2026-06-06）信号照常进池、报告无 segments 块。"""
+
+        def mk(year, extra):
+            spec: dict[str, list] = {}
+            for k in range(12):
+                code = f"{k % 6:06d}"
+                day = f"{year}-{(k % 12) + 1:02d}-{(k % 28) + 1:02d}"
+                spec.setdefault(code, []).append((day, k, 50.0, k % 3))
+            for j, (code, day) in enumerate(extra):
+                spec.setdefault(code, []).append((day, 100 + j, 50.0, j % 3))
+            return _per_code(spec)
+
+        spec = {
+            ("2022-01-01", "2024-07-31"): mk(2023, []),
+            ("2024-08-01", "2026-09-04"): mk(
+                2025,
+                [
+                    ("000000", "2026-08-10"),  # >2026-06-06（v2 会剔，legacy 不剔）
+                    ("000001", "2026-09-04"),  # 窗末日
+                ],
+            ),
+        }
+        rep = _run(monkeypatch, spec, _scripted_replay, n_random=2, c4_min_pool=2)
+        assert rep["n_signals"] == {"mining": 12, "judgment": 14}
+        assert "segments" not in rep
+
+
+#: legacy R40 金色快照（gzip+base64）：v2 切换**前**代码以同夹具
+#: （_three_level_spec(180) + _scripted_replay + _args(n_random=5)）跑出的
+#: 报告规范化 JSON（sort_keys）。window_usage 块按定案改 v2 口径、
+#: provenance 含环境相关 git 字段——两块比对前剔除，其余逐位同一。
+_GOLDEN_R40_B64 = (
+    "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"
+)
+
+
+def _golden_r40() -> str:
+    return gzip.decompress(base64.b64decode(_GOLDEN_R40_B64)).decode("utf-8")
+
+
+class TestLegacyR40BitIdentical:
+    """钉（d）：legacy R40 参数 ⇒ 接受且合成数据报告与 v2 切换前逐位同一。"""
+
+    def test_legacy_r40_report_bit_identical_to_pre_v2(self, monkeypatch):
+        # R40 参数（2022-01-01~2024-07-31 / 2024-08-01~2026-09-04，
+        # 均 ⊆ 挖掘 B 且互不相交）⇒ 合法 legacy 兼容通道
+        ap = fes._build_parser()
+        args = ap.parse_args(
+            [
+                "--tag",
+                "t",
+                "--mining-start",
+                "2022-01-01",
+                "--mining-end",
+                "2024-07-31",
+                "--judgment-start",
+                "2024-08-01",
+                "--judgment-end",
+                "2026-09-04",
+            ]
+        )
+        fes._check_windows(args, ap)  # 不炸即过（合法）
+
+        rep = _run(monkeypatch, _three_level_spec(180), _scripted_replay, n_random=5)
+        got = dict(rep)
+        wu_blk = got.pop("window_usage")
+        got.pop("provenance")
+        canon = json.dumps(got, ensure_ascii=False, sort_keys=True, allow_nan=True)
+        assert canon == _golden_r40(), "legacy R40 报告必须与 v2 切换前逐位同一"
+        # 唯二定案变更：window_usage 块改 v2 口径（判定窗在挖掘段内不登记）
+        assert wu_blk == {
+            "window": "mining_segment",
+            "k": None,
+            "note": "判定窗在挖掘段内（非受保护段 2017~2021）——读挖掘段不入台账（v2 口径）",
+        }

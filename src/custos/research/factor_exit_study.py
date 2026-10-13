@@ -7,13 +7,14 @@
 增量」与「只是找到了更好的单档」）。
 
 做的事（一次一单）：
-  ① 双窗 V0 重放预热（``exit_campaign.warm_v0_signals`` 同引擎：j_low+0AMV
-     信号 + as-of V0 分，与出场参数无关每窗只算一次）；
+  ① 逐段 V0 重放预热（``exit_campaign.warm_v0_signals`` 同引擎：j_low+0AMV
+     信号 + as-of V0 分，与出场参数无关每段只算一次；v2 布局 = 挖掘 A/判定/
+     挖掘 B 三段，legacy 单段 = 挖掘/判定双窗）；
   ② 首对象（写死）= 信号日 Wilder ADX(14) 连续值
      （``custos.core.indicators.dmi_arrays`` 单一实现；as-of 无未来数据——
      dmi 数组比 df **短 1**，bar i ↔ adx[i-1]，与 _j_low_adx_gate 同偏移）；
-  ③ 分位切点**只在挖掘窗估计**（B2 中位数 / B3 三分位），判定窗直接应用
-     （双窗硬隔离）；
+  ③ 分位切点**只在挖掘段估计**（B2 中位数 / B3 三分位；v2 = A∪B 合并池），
+     判定段直接应用（双窗硬隔离）；
   ④ 档集 K=4（R39 策展：基准/快抽身/慢趋势/保本，qsx 双杀不进），映射
      全枚举 4²+4³=**80 格**；重放优化 = 按（档×桶）预放 12 组交易再按映射
      合并，uniform 档 = 全桶合并 ⇒ 枚举成本 ≈ 每窗 12 组重放而非 80×4；
@@ -30,9 +31,17 @@
   ⑥ 产物自含（因子定义/切点/映射/档集/逐格读数/随机池）——供 C5 终端
      自含读取，禁手工转录。
 
-CLI 护栏：任一窗口与 pre2019 untouched 段（2010-01-01..2016-12-31）有交集
-即拒（与挖掘/判定侧研究工具同族镜像）。LLM 不碰数值；搜索标量 v2 口径
-（margin 单量 + rdd **相对门** v2.1——rdd(候选)≥rdd(参照档 P1_base)，同窗同信号同口径；只相对排序，引用连带 R11 声明）。
+CLI 窗口布局（owner 2026-10-13 拍板，TODO #90，v2 布局）：窗口四参
+（--mining-start/--mining-end/--judgment-start/--judgment-end）**全缺省
+⇒ v2 三段布局**（挖掘 A 2000~2016 + 判定 2017~2021 + 挖掘 B 2022~2026-09-04；
+各段末 90 自然日隔离带禁开仓，A∪B 信号合并一池算挖掘读数）；**四参全显式
+⇒ legacy 单段双窗**（逐窗段检查 + 双窗不相交——取代旧 mining_end <
+judgment_start 次序规则：v2 判定段天然夹在挖掘 A/B 之间，次序规则作废；
+R40 旧窗 ⊆ 挖掘 B 且互不相交 ⇒ 合法兼容通道在案）；只给一部分 ⇒ 拒（不许
+半截布局）。判定窗 == 受保护段（2017~2021）才入使用台账
+（judgment_2017_2021 键），legacy 判定窗已并入挖掘 B 不登记。LLM 不碰数值；
+搜索标量 v2 口径（margin 单量 + rdd **相对门** v2.1——rdd(候选)≥rdd(参照档
+P1_base)，同窗同信号同口径；只相对排序，引用连带 R11 声明）。
 """
 
 from __future__ import annotations
@@ -44,7 +53,7 @@ import json
 import random
 import sys
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, NoReturn, Optional
 
 from custos.core.paths import RESEARCH_DIR
 from custos.research.evolution import exit_genome as eg
@@ -502,6 +511,7 @@ def _production_warm_fn(
     """生产路径预热闭包：解析宇宙 → 0AMV regime → 指数表 → warm_v0_signals 同引擎。
 
     ``bt``/``ec``/``srs`` 由 run_study 透传（局部 import 语句保持在原处原时机）。
+    regime 加载起点 = 最早挖掘段起点（v2 = 挖掘 A 2000-01-01）。
     """
     ns = argparse.Namespace(
         codes_file=args.codes_file,
@@ -511,7 +521,11 @@ def _production_warm_fn(
         codes=args.codes,
     )
     codes = bt._resolve_universe(ns, _build_parser())
-    regime: dict[str, str] = bt.load_amv_regime(since=args.mining_start)
+    # 回塞 CLI args：provenance 宇宙三件套（v0.356，与 exit_campaign 同例；
+    # getattr 对齐 pv.build「字段缺失一律 None」的旁路容错）
+    args.universe_meta = getattr(ns, "universe_meta", None)
+    mining_segs, _judgment_win = _resolve_layout(args)
+    regime: dict[str, str] = bt.load_amv_regime(since=min(s for s, _e in mining_segs))
     if not regime:
         raise RuntimeError("0AMV regime 读不到（compass_amv）——本机无数据？")
     from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
@@ -536,19 +550,34 @@ def _production_warm_fn(
     return warm_fn, regime
 
 
-def _window_signals(
+def _segment_signals(
     warm_fn: Callable[[str, str], dict[str, dict]],
-    windows: dict[str, tuple[str, str]],
-) -> tuple[dict[str, dict[str, dict]], dict[str, list[dict]]]:
-    """双窗预热并收集逐窗信号；任一窗 0 信号即触发空结果护栏（不落盘）。"""
-    per_code = {w: warm_fn(*se) for w, se in windows.items()}
-    signals = {w: collect_signals(pc) for w, pc in per_code.items()}
-    if not signals["mining"] or not signals["judgment"]:
-        raise RuntimeError(
-            f"空结果护栏：挖掘 {len(signals['mining'])} / 判定 "
-            f"{len(signals['judgment'])} 信号（宇宙/窗口/数据有问题？）——不落盘"
-        )
-    return per_code, signals
+    segments: list[tuple[str, tuple[str, str]]],
+    *,
+    clip: bool,
+) -> tuple[dict[str, dict[str, dict]], dict[str, list[dict]], dict[str, dict]]:
+    """逐段预热并收集逐段信号；v2（clip=True）在各段末打隔离带一刀
+    （``load_window.clip_entries`` 单源，入场日 > 段末−90 自然日剔除——
+    持仓不跨段读下一段结果），剔除数入段块在案（报告 segments 块）。
+    返回 (逐段 per_code, 逐段信号, 报告用段块)。"""
+    from custos.research.load_window import clip_entries  # noqa: PLC0415
+
+    per_code: dict[str, dict[str, dict]] = {}
+    signals: dict[str, list[dict]] = {}
+    blocks: dict[str, dict] = {}
+    for name, (s, e) in segments:
+        pc = warm_fn(s, e)
+        sigs = collect_signals(pc)
+        kept = clip_entries(sigs, e, key="date") if clip else sigs
+        per_code[name] = pc
+        signals[name] = kept
+        blocks[name] = {
+            "start": s,
+            "end": e,
+            "n_signals": len(kept),
+            "n_clipped": len(sigs) - len(kept),
+        }
+    return per_code, signals, blocks
 
 
 def _mining_buckets(
@@ -809,15 +838,30 @@ def _assemble_report(
     c4: dict[str, Any],
     pool: list[float],
     sg: Any,
+    segments: Optional[dict] = None,
 ) -> dict[str, Any]:
-    """组装自含报告：判定窗使用台账 + provenance + 档集/分桶/逐格读数 + C1~C4。"""
-    # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读
-    _wu_k = wu.record_use(
-        "R39",
-        "judgment",
-        args.tag,
-        "C1~C4 判定窗读数",
-        synthetic=injected,
+    """组装自含报告：判定窗使用台账 + provenance + 档集/分桶/逐格读数 + C1~C4。
+
+    ``segments``：v2 三段布局的段块（各段区间 + n_signals + n_clipped + 合并
+    总数）；legacy 单段传 None ⇒ 不出 segments 块（报告与改前逐位一致）。
+    """
+    from custos.research import load_window as lw  # noqa: PLC0415
+
+    # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读。
+    # v2 台账口径（TODO #90，与 exit_campaign 同语义）：只有判定窗=受保护段
+    # （2017~2021）才登记 judgment_2017_2021——legacy 判定窗（2024~2026）已
+    # 并入挖掘 B，读挖掘段不入台账（挖掘数据自由可读）。
+    _is_protected_judgment = windows["judgment"] == lw.SEG_JUDGMENT
+    _wu_k = (
+        wu.record_use(
+            "R39",
+            "judgment_2017_2021",
+            args.tag,
+            "C1~C4 判定窗读数",
+            synthetic=injected,
+        )
+        if _is_protected_judgment
+        else None
     )
     from custos.research import provenance as pv  # noqa: PLC0415
     from custos.research.load_window import EXIT_BARS_HOLDOUT_NOTE  # noqa: PLC0415
@@ -827,14 +871,20 @@ def _assemble_report(
             return None
         return {k: v for k, v in rd.items() if k != "taken"}
 
-    return {
+    rep = {
         "schema": "factor_exit_report/v1",
         "tag": args.tag,
         "verdict": verdict,
         "window_usage": {
-            "window": "judgment",
+            "window": (
+                "judgment_2017_2021" if _is_protected_judgment else "mining_segment"
+            ),
             "k": _wu_k,
-            "note": wu.usage_note("R39", "judgment", _wu_k),
+            "note": (
+                wu.usage_note("R39", "judgment_2017_2021", _wu_k)
+                if _is_protected_judgment
+                else "判定窗在挖掘段内（非受保护段 2017~2021）——读挖掘段不入台账（v2 口径）"
+            ),
         },
         "provenance": pv.build(
             args,
@@ -897,6 +947,9 @@ def _assemble_report(
         "objective_version": sg.OBJECTIVE_VERSION,
         "notes": [_R11_NOTE],
     }
+    if segments is not None:
+        rep["segments"] = segments
+    return rep
 
 
 def run_study(
@@ -904,10 +957,13 @@ def run_study(
     warm_fn: Optional[Callable[[str, str], dict[str, dict]]] = None,
     replay_fn: Optional[Callable[[list[dict], dict[str, Any]], list[dict]]] = None,
 ) -> dict[str, Any]:
-    """研究主流程：双窗预热 → 因子/分桶 → 80 格 → uniform → C1~C4 → 报告。
+    """研究主流程：逐段预热 → 因子/分桶 → 80 格 → uniform → C1~C4 → 报告。
 
     ``warm_fn(start, end) → per_code`` 与 ``replay_fn(subset, params)`` 可注入
     （测试合成）；None = 生产路径（exit_campaign 同引擎预热/重放）。
+    窗口布局（``_resolve_layout`` 单源）：四参全缺省 = v2 三段（挖掘 A/B
+    逐段预热、段末隔离带裁剪、A∪B 合并一池算挖掘读数）；四参全显式 =
+    legacy 单段双窗（不裁剪、不合并——R40 旧窗行为与改前逐位一致）。
     """
     # 合成守卫在入口快照：下方生产分支会把 warm_fn 重绑成真实闭包，
     # 事后再判恒 True ⇒ 生产跑被误判合成、判定窗读取
@@ -918,15 +974,71 @@ def run_study(
     from custos.research import score_return_study as srs  # noqa: PLC0415
     from custos.research import strategy_grid as sg  # noqa: PLC0415
 
-    windows = {
-        "mining": (args.mining_start, args.mining_end),
-        "judgment": (args.judgment_start, args.judgment_end),
-    }
+    mining_segs, judgment_win = _resolve_layout(args)
+    v2 = len(mining_segs) > 1
     regime: dict[str, str] = {}
     if warm_fn is None:
         warm_fn, regime = _production_warm_fn(args, bt, ec, srs)
 
-    per_code, signals = _window_signals(warm_fn, windows)
+    # ── 逐段预热/收集/（v2）隔离带裁剪（裁剪在 replay/判据之前）──
+    seg_list: list[tuple[str, tuple[str, str]]] = (
+        [
+            ("mining_a", mining_segs[0]),
+            ("judgment", judgment_win),
+            ("mining_b", mining_segs[1]),
+        ]
+        if v2
+        else [("mining", mining_segs[0]), ("judgment", judgment_win)]
+    )
+    seg_packs, seg_signals, seg_blocks = _segment_signals(warm_fn, seg_list, clip=v2)
+
+    # ── 合并成逻辑双窗：v2 挖掘 = A∪B 一池（信号带 _seg 段标供生产重放
+    # 路由——per_code 的 df 按段裁剪、跨段同码不可合并，合并只在信号池层）──
+    if v2:
+        signals_mining = [
+            {**r, "_seg": name}
+            for name in ("mining_a", "mining_b")
+            for r in seg_signals[name]
+        ]
+        # 合并 per_code 仅供 provenance.data_last_date（重放不走它——
+        # replay_fn 在 v2 下恒有值：注入件或下方 _dispatch）
+        per_code_mining = {**seg_packs["mining_a"], **seg_packs["mining_b"]}
+    else:
+        signals_mining = seg_signals["mining"]
+        per_code_mining = seg_packs["mining"]
+    per_code = {"mining": per_code_mining, "judgment": seg_packs["judgment"]}
+    signals = {"mining": signals_mining, "judgment": seg_signals["judgment"]}
+    if not signals["mining"] or not signals["judgment"]:
+        raise RuntimeError(
+            f"空结果护栏：挖掘 {len(signals['mining'])} / 判定 "
+            f"{len(signals['judgment'])} 信号（宇宙/窗口/数据有问题？）——不落盘"
+        )
+    windows = {
+        "mining": (
+            mining_segs[0][0],
+            mining_segs[-1][1],
+        ),  # 包络（段明细见 segments 块）
+        "judgment": judgment_win,
+    }
+
+    # v2 生产路径的重放分发：按信号 _seg 路由回各段 pack 重放后拼接
+    # （段序确定 ⇒ 逐位可复现；注入 replay_fn 时本分发不生效）
+    replay_fn_eff = replay_fn
+    if v2 and replay_fn_eff is None:
+
+        def _dispatch(subset: list[dict], params: dict[str, Any]) -> list[dict]:
+            trades: list[dict] = []
+            for seg in ("mining_a", "mining_b", "judgment"):
+                sub = [r for r in subset if r.get("_seg", "judgment") == seg]
+                if sub:
+                    trades.extend(
+                        replay_signals(
+                            seg_packs[seg], sub, params, regime, args.cost_bps
+                        )
+                    )
+            return trades
+
+        replay_fn_eff = _dispatch
 
     # ── 分位切点只在挖掘窗估计（双窗硬隔离）──
     mining_values, cuts, buckets = _mining_buckets(signals, windows)
@@ -934,7 +1046,7 @@ def run_study(
     # ── 双窗研究（每种分桶方案一组映射枚举；uniform 与分桶无关——全桶合并
     # = 全信号同一档重放，只算一次复用）──
     studies = _studies_by_bucketing(
-        per_code, signals, buckets, regime, args, replay_fn, windows
+        per_code, signals, buckets, regime, args, replay_fn_eff, windows
     )
     all_configs = _joined_configs(studies)
 
@@ -977,7 +1089,7 @@ def run_study(
         signals,
         regime,
         args,
-        replay_fn,
+        replay_fn_eff,
         rng,
         ref_by_window,
         windows,
@@ -993,7 +1105,7 @@ def run_study(
         signals,
         regime,
         args,
-        replay_fn,
+        replay_fn_eff,
         rng,
         ref_by_window,
     )
@@ -1016,9 +1128,16 @@ def run_study(
             buckets,
             regime,
             args,
-            replay_fn,
+            replay_fn_eff,
             windows,
         )
+
+    segments_blk: Optional[dict] = None
+    if v2:
+        segments_blk = {
+            **seg_blocks,
+            "mining_merged": {"n_signals": len(signals["mining"])},
+        }
 
     return _assemble_report(
         args,
@@ -1039,6 +1158,7 @@ def run_study(
         c4,
         pool,
         sg,
+        segments=segments_blk,
     )
 
 
@@ -1067,10 +1187,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="每股回溯 K 线根数（缺省=按挖掘窗起点自动推算，显式值覆盖）",
     )
     ap.add_argument("--cost-bps", type=float, default=25.0, help="往返成本基点")
-    ap.add_argument("--mining-start", default="2022-01-01", help="挖掘窗起点")
-    ap.add_argument("--mining-end", default="2024-07-31", help="挖掘窗终点")
-    ap.add_argument("--judgment-start", default="2024-08-01", help="判定窗起点")
-    ap.add_argument("--judgment-end", default="2026-09-04", help="判定窗终点")
+    ap.add_argument(
+        "--mining-start",
+        default=None,
+        help="挖掘窗起点（窗口四参全缺省 ⇒ v2 三段布局：挖掘A 2000~2016 + "
+        "判定 2017~2021 + 挖掘B 2022~2026-09-04；全显式 ⇒ legacy 单段双窗）",
+    )
+    ap.add_argument("--mining-end", default=None, help="挖掘窗终点（缺省=v2 布局）")
+    ap.add_argument("--judgment-start", default=None, help="判定窗起点（缺省=v2 布局）")
+    ap.add_argument("--judgment-end", default=None, help="判定窗终点（缺省=v2 布局）")
     ap.add_argument(
         "--n-random", type=int, default=DEFAULT_N_RANDOM, help="C4 随机分桶臂数"
     )
@@ -1084,23 +1209,62 @@ def _build_parser() -> argparse.ArgumentParser:
     return ap
 
 
-def _check_windows(args: Any, ap: argparse.ArgumentParser) -> None:
-    """窗口护栏：段检查（load_window.segment_violation 单源——窗口须 ⊆ 挖掘 A/
-    判定/挖掘 B 之一且不触 holdout；v0.356，TODO #90）+ 双窗次序。
-    v0.356 拆除 pre2019 交集硬拒绝——C5 退役、挖掘 A 与该段天然重叠。
-    R40 旧窗（⊆ 挖掘 B）段内子窗自动合法（兼容通道在案）。"""
-    from custos.research.load_window import segment_violation  # noqa: PLC0415
+def _resolve_layout(
+    args: Any, ap: Optional[argparse.ArgumentParser] = None
+) -> tuple[list[tuple[str, str]], tuple[str, str]]:
+    """窗口布局解析（单源；owner 2026-10-13 拍板，TODO #90，v2 布局）。
 
-    for wname in ("mining", "judgment"):
-        s = getattr(args, f"{wname}_start")
-        e = getattr(args, f"{wname}_end")
+    - 四参全缺省（None）⇒ **v2 三段布局**：mining=[挖掘 A, 挖掘 B]，
+      judgment=判定段（load_window.SEG_* 单源）；
+    - 四参全显式 ⇒ **legacy 单段双窗**：逐窗段检查（segment_violation
+      单源——窗须 ⊆ 挖掘 A/判定/挖掘 B 之一且不触 holdout）+ 判定窗∩挖掘窗
+      **不相交**（取代旧 mining_end < judgment_start 次序规则：v2 判定段
+      天然夹在挖掘 A/B 之间，次序规则作废；R40 旧窗 ⊆ 挖掘 B 且互不相交
+      ⇒ 合法，兼容通道在案）；
+    - 只给一部分 ⇒ 拒绝（ap.error / ValueError——不许半截布局）。
+
+    返回 (mining_segments, judgment_window)；len(mining_segments) ≥ 2 ⇒ v2。
+    """
+    from custos.research.load_window import (  # noqa: PLC0415
+        SEG_JUDGMENT,
+        SEG_MINING_A,
+        SEG_MINING_B,
+        segment_violation,
+    )
+
+    vals = (
+        args.mining_start,
+        args.mining_end,
+        args.judgment_start,
+        args.judgment_end,
+    )
+
+    def _err(msg: str) -> NoReturn:
+        if ap is not None:
+            ap.error(msg)
+        raise ValueError(msg)
+
+    if all(v is None for v in vals):
+        return ([SEG_MINING_A, SEG_MINING_B], SEG_JUDGMENT)
+    if any(v is None for v in vals):
+        _err("窗口四参须全给（legacy 单段双窗）或全不给（v2 三段布局）——不许半截布局")
+    ms, me, js, je = (str(v) for v in vals)  # 上半截已拒 None
+    for wname, s, e in (("mining", ms, me), ("judgment", js, je)):
         msg = segment_violation(s, e)
         if msg:
-            ap.error(f"{wname} {msg}")
-    if args.mining_end >= args.judgment_start:
-        ap.error(
-            f"挖掘窗终点 {args.mining_end} 须早于判定窗起点 {args.judgment_start}（双窗硬隔离）"
+            _err(f"{wname} {msg}")
+    if not (me < js or je < ms):
+        _err(
+            f"挖掘窗 {ms}~{me} 与判定窗 {js}~{je} 相交"
+            "（双窗硬隔离——v2 起只查不相交，次序规则作废）"
         )
+    return ([(ms, me)], (js, je))
+
+
+def _check_windows(args: Any, ap: argparse.ArgumentParser) -> None:
+    """窗口护栏（bear/plan_rules/score_tier 同族终端共用入口）：布局解析 +
+    段检查 + 双窗不相交，全部走 ``_resolve_layout`` 单源（v2，TODO #90）。"""
+    _resolve_layout(args, ap)
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -1109,15 +1273,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap = _build_parser()
     args = ap.parse_args(argv)
     args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])
-    _check_windows(args, ap)
+    # 布局解析+段护栏（单源）；--count/check_reach 以最早挖掘段起点推算
+    # （v2 = 挖掘 A 起点 2000-01-01）
+    mining_segs, _judgment_win = _resolve_layout(args, ap)
+    earliest = min(s for s, _e in mining_segs)
     # 加载到达校验（v0.316，R41 指导顺手补）：逐股 _load_one_bars 不经批量
     # 截断护栏——count 不够会把窗口静默剪空（r36_c5 碎片宇宙教训）
     from custos.research.exit_c5_terminal import check_reach  # noqa: PLC0415
     from custos.research.load_window import resolve_count  # noqa: PLC0415
 
     try:
-        args.count = resolve_count(args.count, args.mining_start)  # v0.328 缺省自动推算
-        check_reach(args.count, args.mining_start)
+        args.count = resolve_count(args.count, earliest)  # v0.328 缺省自动推算
+        check_reach(args.count, earliest)
         rep = run_study(args)
     except (RuntimeError, ValueError) as exc:
         print(f"[ERR] {exc}", file=sys.stderr)

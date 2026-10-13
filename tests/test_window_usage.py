@@ -96,12 +96,14 @@ class TestSyntheticGuard:
 
     def test_injected_run_study_leaves_ledger_untouched(self, tmp_path, monkeypatch):
         """钉死事故路径：注入件（warm_fn/replay_fn）跑 run_study ⇒ 真实台账
-        路径零改动、k=None 注记「未入台账」。"""
+        路径零改动、k=None 注记「未入台账」。（v2 口径 TODO #90：走 v2 缺省
+        受保护判定窗——record_use 以 synthetic=True 被调、守卫拦写；legacy
+        窗不登记的对照钉在 test_plan_rules_replay.TestProductionRecordUse。）"""
         import test_plan_rules_replay as pxt
 
         ledger = tmp_path / "real_ledger.jsonl"
         monkeypatch.setattr(wu, "LEDGER", ledger)
-        rep = pxt._run(
+        rep = pxt._run_v2(
             pxt._mk_per_code(), pxt._replay_candidate, n_random=2, c4_min_pool=2
         )
         assert rep["window_usage"]["k"] is None

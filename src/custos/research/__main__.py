@@ -86,14 +86,15 @@ TOOLS: dict[str, tuple[str, str]] = {
         "driver",
         "R39 因子×出场交互研究终端：因子连续值×分桶×映射→出场档 80 格全枚举"
         "（首对象=信号日 ADX(14)，档集 K=4 象限策展），主基准=uniform-best，"
-        "C1~C4 判据跑数前写死（C4=随机分桶臂 N=50 同预算），pre2019 硬拒绝镜像",
+        "C1~C4 判据跑数前写死（C4=随机分桶臂 N=50 同预算）；v2 布局（v0.357）："
+        "缺省=挖掘 A∪B 合并池+判定 2017~2021，legacy 显式窗兼容（R40 口径）",
     ),
     "bear_regime_study": (
         "driver",
         "R40 0AMV 空头区间做多全栈研究终端：全量 46 门 ENTRY_GATES × 出场 5 档"
         " =230 格全枚举（_amv_checker 反转仅空头日放行，无映射不放行）；基准="
-        "随机入场臂（对等纪律：挖掘窗选型冻结配置带判定窗读数）；C1 不过="
-        "untested；pre2019 硬拒绝镜像",
+        "随机入场臂（对等纪律：挖掘窗选型冻结配置带判定窗读数；v2 母体同隔"
+        "离带纪律）；C1 不过=untested；v2 布局（v0.357）：缺省三段，legacy 兼容",
     ),
     "plan_rules_replay": (
         "driver",
@@ -102,7 +103,8 @@ TOOLS: dict[str, tuple[str, str]] = {
         "（现行版主读数 pct10 忠实 hard_loss/副读数 pct7 只报告；两版共用"
         " scale_out_frac=0.5）；C1 不过=untested/C2=Δmargin 双窗正+rdd 相对门"
         "（参照=同窗现行版）/C3=lookback 扰动新子集两版重跑/C4=随机止损价臂"
-        " N=50（预算对等=两边都不挑选）；pre2019 硬拒绝+check_reach 到达校验",
+        " N=50（预算对等=两边都不挑选）；v2 布局（v0.357）：缺省三段+隔离带，"
+        "legacy 显式窗兼容；check_reach 到达校验",
     ),
     "score_tier_position_study": (
         "driver",
@@ -112,14 +114,16 @@ TOOLS: dict[str, tuple[str, str]] = {
         "（相邻档差<0.086 标低置信）/C3 主判据=加权 expR vs 等权（权重格 "
         "W1~W3 归一化写死，双窗<0.035 按与零无法区分；W2=过滤器路线对照、"
         "组合层未测不改引擎）/C4=打乱「交易→档」归属臂 N=50 同预算 q95"
-        "（criteria_kit 单源）；判据全冻结不建 C5；pre2019/holdout 硬拒绝",
+        "（criteria_kit 单源）；判据全冻结；v2 布局（v0.357）：缺省三段"
+        "+隔离带，legacy 显式窗兼容（C5 已退役）",
     ),
     "window_usage": (
         "diagnostic",
-        "判定窗/pre2019 使用台账（v0.321，owner 方法论 review #1）："
+        "受保护判定窗使用台账（v0.321，owner 方法论 review #1；v0.356 换代）："
         "record_use 每读一次记一行（append-only+每日快照+写失败不炸研究），"
-        "报告必写「该窗第 k 次被读」（k 大判读打折——分岔路径下多轮使用的"
-        "判定窗不再是样本外）；CLI 查窗口被读次数",
+        "报告必写「该窗第 k 次被读」（k 大判读打折）；v2 新键 "
+        "judgment_2017_2021，旧键 judgment/pre2019 冻结拒写只判读历史行；"
+        "CLI 查窗口被读次数",
     ),
     "criteria_kit": (
         "diagnostic",
