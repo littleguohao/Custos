@@ -15,6 +15,8 @@
 |---|---|---|---|---|---|
 | 88 | 首次月度交易反思（2026-09 月），跑顺「月报 → TRADE_LESSONS」流程；之后按月执行，节奏见 MASTER_WORKFLOW §七 | P2 | 生产机 | 读 2026-09 月报 JSON（无则先补跑 `monthly_review`），按模板写 E3 并核对 L1~L7 | owner 2026-10-12；[TRADE_LESSONS](TRADE_LESSONS.md) |
 | 89 | 研究宇宙改全量 as-of（规则见 research README「研究宇宙」）：`--codes-file` 改可选、缺省按规则构造；去 `--pin-universe`；provenance 记规则+n_codes+sha（无 codes 文件时哈希解析出的名单）；续跑台账/轨迹池 sha 不一致拒绝；生产机实测耗时 | P2 | coder | 出实现并带钉测（信号日资格、个股判定同源、续跑拒绝），R40 跑完后再切 | owner 2026-10-13 |
+| 90 | 新窗口布局落地（规则见 research README「窗口与数据」）：挖掘=两段并集、判定 2017~2021、隔离带禁开仓、`forward_holdout_violation` 改按段检查、C5 入口退役；与 #89 同批，R40 跑完后切 | P2 | coder | 出实现与钉测（段并集/隔离带/硬拒绝/台账分段记），切换后先做只读基线重测 | owner 2026-10-13 |
+| 91 | 2000~2009 数据核查：0AMV 台账最早日期、各年在市个股数与满 N 根可用数、板块指数覆盖，决定挖掘 A 起点 | P2 | 生产机 | 跑一次统计脚本把结果回填 research README | owner 2026-10-13；#90 前置 |
 | 82 | 0AMV 空头区间做多全栈（R40） | P2 | 生产机 | r40_a1 跑完回填 R40；判毕后头部同步 | [R40](governance/research/R40_bear_regime_long_strategy.md)；owner 2026-10-08 立项 |
 | 60 | plan 信号并入 SIGNAL_ORDER 与否。判据（两条同时成立）：①实现一致性——影子台账非 default 事件 ≥5 个交易日无异常；②规则有效性——R41 已判 falsified（v0.351）路径关闭，只剩 `plan_shadow_review` 累计 K=20 个独立事件（段头计、≥5 只持仓）均值 Δret₅ ≥ 0（凑不满 K ⇒ ②不成立 ⇒ 不并轨）。default 来源永不出 plan 信号；并轨=独立提交、只改 SIGNAL_ORDER | P2 | 观察中 | 影子事件持续累计，攒满或 60 交易日到期后 owner 定夺 | [R41](governance/research/R41_position_plan_rules_replay.md)；owner 2026-10-09 判据；v0.310/0.311/0.314/0.351 |
 | 81 | R39 因子×出场：ADX(14) 判毕 untested（无条件化增量），下一个因子对象（J 深度 / V0 总分）或换方向 | P2 | owner | 拍板下一对象后预注册追加 | [R39](governance/research/R39_factor_exit_interaction.md)；owner 2026-09-23 五维度②（①过滤器路线已证伪 v0.292） |
