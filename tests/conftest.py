@@ -110,6 +110,21 @@ def _redirect_window_usage_ledger_tmp(monkeypatch, tmp_path):
     monkeypatch.setattr(window_usage, "LEDGER", tmp_path / "window_usage.jsonl")
 
 
+@pytest.fixture(autouse=True)
+def _redirect_xdxr_cache_tmp(monkeypatch, tmp_path):
+    """把 xdxr 权息缓存目录改道 tmp（v0.370）。
+
+    研究侧默认股本/分红读取（如 regime_style_study 的 ``_default_shares_fn``
+    /``_default_xdxr_fn``）缓存未命中会尝试在线拉取，并把**失败墓碑**写进
+    ``data/market/xdxr/``——不钉的话，测试会话往真实仓库写几十个垃圾缓存
+    （v0.368 CI 双平台 test_repo_hygiene 红；本机全量曾误绿，因为这些墓碑
+    已被更早的测试运行写进本机树，mtime 早于会话起点）。
+    """
+    from custos.datasource.local_tdx import adjust_factors
+
+    monkeypatch.setattr(adjust_factors, "CACHE_DIR", tmp_path / "xdxr")
+
+
 @pytest.fixture
 def reversal_thresholds():
     """按依赖顺序重载 B1 反转 K 阈值链，并在退出时**完整还原**。

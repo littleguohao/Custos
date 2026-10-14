@@ -597,6 +597,9 @@ def test_run_study_smoke():
         codes=sorted(frames),
         sector_bars={},
         sector_types={},
+        shares_fn=lambda c: None,
+        xdxr_fn=lambda c: None,
+        pit_records=[],
     )
     assert rep["n_qualified_segments"] == 6
     assert rep["segment_drops"] == {"short": 0, "crossing": 0}
@@ -619,6 +622,9 @@ def test_empty_guard_returns_2_and_no_write(tmp_path):
         codes=["600000"],
         sector_bars={},
         sector_types={},
+        shares_fn=lambda c: None,
+        xdxr_fn=lambda c: None,
+        pit_records=[],
     )
     assert rc == 2 and not out.exists()
 
@@ -639,6 +645,9 @@ def test_no_window_usage_registration(monkeypatch):
         codes=sorted(frames),
         sector_bars={},
         sector_types={},
+        shares_fn=lambda c: None,
+        xdxr_fn=lambda c: None,
+        pit_records=[],
     )
     assert calls == []
 
@@ -710,6 +719,11 @@ def _calib_run(seed: int, edge: bool, **inj):
         codes=sorted(frames),
         sector_bars={},
         sector_types={},
+        # 默认股本/分红/PIT 读取走真实 xdxr 缓存（未命中会写墓碑文件）——
+        # 测试一律注入空实现（conftest 的 CACHE_DIR 重定向是兜底）。
+        shares_fn=lambda c: None,
+        xdxr_fn=lambda c: None,
+        pit_records=[],
     )
     kw.update(inj)
     return rs.run_study(_calib_args(), **kw)
