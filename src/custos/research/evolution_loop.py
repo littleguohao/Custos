@@ -894,13 +894,17 @@ class _Prepared:
     """_prepare 的产出聚合（main 的局部变量预算友好）。
 
     bars 在截尾后被 ``replace(prep, bars=None)`` 丢弃（双窗物理隔离 ①），
-    故类型允许 None。
+    故类型允许 None。``judge_load``（v0.362 收窄豁免，owner review）：
+    判定窗终审专用加载器（allow_holdout=True——尾随执行要读 holdout 后
+    bar，既定口径注记在案）；挖掘侧 ``load`` 用默认截断（end=None ⇒
+    截到 2026-09-04）——豁免只给判定侧，不给整个进程。
     """
 
     llm: Any
     codes: list[str]
     load: Callable[[list[str], int], dict]
     bars: dict | None
+    judge_load: Any = None
 
 
 def _prepare(
@@ -915,20 +919,26 @@ def _prepare(
     """
     llm = _assemble_llm(args, ap)
     codes = bt._resolve_universe(args, ap)
-    load = (
-        loader
-        if loader is not None
-        else functools.partial(
-            # 判定窗尾随执行豁免（v0.361 owner 拍板）：挖掘侧另有 clip_tail 物理
-            # 隔离，判定窗评估的出场尾随需读 holdout 后 bar（既定口径注记）
+    if loader is not None:
+        load = judge_load = loader
+    else:
+        # 挖掘侧：默认截断（end=None ⇒ 截到 2026-09-04，v0.361 加载层口径）；
+        # 判定侧：尾随执行豁免（读 holdout 后 bar，既定口径注记在案）——
+        # 豁免只给判定侧加载器，不给整个进程（v0.362 owner review 收窄）。
+        load = functools.partial(
+            bt._load_bars_local,
+            start=None,
+            end=None,
+            allow_tail_clip=False,
+        )
+        judge_load = functools.partial(
             bt._load_bars_local,
             start=None,
             end=None,
             allow_tail_clip=False,
             allow_holdout=True,
         )
-    )
-    return _Prepared(llm, codes, load, load(codes, args.count))
+    return _Prepared(llm, codes, load, load(codes, args.count), judge_load)
 
 
 def _expand_and_announce(args: Any, llm: Any, pool: TrajectoryPool) -> list[str]:
@@ -1100,7 +1110,7 @@ def main(
         return 2
     pool.save()
 
-    dual = _run_final_judge(args, prep.load, prep.codes, pool, cell_runner)
+    dual = _run_final_judge(args, prep.judge_load, prep.codes, pool, cell_runner)
     res = _RunResult(
         out_dir=out_dir,
         args=args,

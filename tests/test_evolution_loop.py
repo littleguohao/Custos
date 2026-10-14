@@ -2134,3 +2134,35 @@ class TestMiningInJudgmentSegmentRejected:
         )
         with pytest.raises(SystemExit):
             el._validate_args(args, ap)
+
+
+class TestHoldoutExemptionScope:
+    """豁免收窄（v0.362 owner review）：挖掘侧 load 默认截断（无
+    allow_holdout），判定侧 judge_load 才带 allow_holdout=True——豁免只给
+    判定窗尾随执行，不给整个进程。"""
+
+    def test_prepare_scoped_exemption(self, monkeypatch):
+        monkeypatch.setattr(el.bt, "_load_bars_local", lambda *a, **k: {})
+        ap = el._build_parser()
+        args = ap.parse_args(
+            [
+                "--direction",
+                "动量",
+                "--mining-start",
+                "2022-01-01",
+                "--mining-end",
+                "2024-07-31",
+                "--codes",
+                "600000",
+                "--mock-llm",
+                "--count",
+                "100",
+            ]
+        )
+        prep = el._prepare(args, ap, None)
+        assert not prep.load.keywords.get("allow_holdout", False), "挖掘侧不豁免"
+        assert prep.judge_load.keywords.get("allow_holdout") is True, "判定侧豁免"
+        # 注入路径：两侧同一注入 loader（测试语义不变）
+        injected = lambda *a, **k: {}
+        prep2 = el._prepare(args, ap, injected)
+        assert prep2.load is injected and prep2.judge_load is injected

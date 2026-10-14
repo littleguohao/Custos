@@ -668,6 +668,7 @@ class TestProductionRecordUse:
 
         _patch_adx(monkeypatch)
         calls = _wu_spy(monkeypatch)
+
         def _mk_pc(year, off):
             d = {}
             for k in range(60):

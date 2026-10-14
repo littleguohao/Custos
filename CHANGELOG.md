@@ -364,6 +364,7 @@
 | 2026-10-13 | v0.360 | **CI 红根因修复：四处 legacy 金样浮点归一化比对**——金样嵌本机全精度浮点（margin/expR/q95 来自 numpy 求和），numpy 按 CPU SIMD 路径（AVX2/AVX512）分派求和核、末位 ULP 跨代际可不同 ⇒ 本机全过、GitHub runner 双平台必挂（608f4ef/4b43312 红根因，owner 供 FAILED 行定位）；tests/helpers_golden.py 新增 norm_floats/canon_json（归一 1e-12，行为级断言不变），score_tier/factor_exit/bear 改两侧同口径比对，plan_rules 哈希同口径重捕金样 | owner+coder 联合定位 | CI 待验 |
 | 2026-10-13 | v0.361 | **owner review 二修（v2 纪律漏洞）**：①holdout end=None 后路堵死——加载层 end=None 默认截到 2026-09-04，allow_holdout=True 显式豁免（仅 plan_shadow_review 复盘 live 影子 + evolution_loop 尾随执行）；②判定段两后门堵死——load_window 新增 mining_violation（挖掘窗∩判定段即拒）+ touches_judgment（登记改相交制，判定子窗不漏登记），7 入口+dual_window 统一接线；钉测：挖掘∩判定段拒绝×7 + 判定子窗登记×7 + end=None 截断×3 + 两函数单源矩阵 | owner review | mypy=0；钉测 |
 | 2026-10-13 | v0.362 | **Windows CI 红根因修复（ci-diag-1 九轮二分实锤：plan_rules TestLegacyR40Compat）**：provenance.pre_reg_doc 由 str(Path.relative_to) 改 .as_posix()——Windows 产出反斜杠路径，Linux 捕的金样哈希必挂（ubuntu 绿 windows 红真因）；加恒正斜杠钉测；其余 Path 衍生字段复核无同类（cmdline=用户输入原文、universe/git=哈希） | coder 二分定位 | CI 待验 |
+| 2026-10-14 | v0.363 | **格式门槛修复 + evolution_loop 豁免收窄（owner review）**：test_factor_exit_study/test_provenance 补 ruff format（v0.361/v0.362 提交前漏跑，教训=提交前 format 最后跑）；豁免收窄——_Prepared 加 judge_load：挖掘侧 load 默认截断（end=None⇒截到 2026-09-04），豁免只给判定窗尾随执行加载器，不再给整个进程（v2 判定段 2017~2021 本就用不到豁免；legacy 判定窗尾部尾随按 EXIT_BARS_HOLDOUT_NOTE 口径保留） | owner review | 钉测 +1 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
