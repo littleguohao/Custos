@@ -28,6 +28,11 @@ C4 的所有伪段起点用固定种子**在加载数据前**预抽（确定性�
   本就相等，口径不变）。其余收益/比率类维度维持 qfq——**免疫论证**：as-of 窗内
   的事后复权因子对窗内所有历史bar是公共乘子，收益/比值/均线相对位置不变，
   look-ahead 只污染价格**水平**（市值/估值/分红率都含价格水平）。
+- **``turnover20`` 用还原原始量（v0.373，#94 追加 owner review）**：apply_qfq 把
+  成交量 ÷ 因子，量水平同样含未来送转信息（10 送 10 后段起点换手率 1%→2%）；
+  还原 ``raw_vol = volume × close / raw_close`` 再除流通股本。``vr20``/``amt_chg20``
+  是量/额的窗内比值（公共乘子免疫），``amt20``/``amt_cv60``/``amihud20`` 用成交额
+  （apply_qfq 不调成交额）——均不受影响。
 - ``mcap_float``/``mcap_total``/``turnover20`` 依赖股本事件（xdxr 缓存，
   ``adjust_factors.get_shares_events``），单票缺事件 ⇒ 该票记缺；
 - 基本面 10 维依赖 `data/fundamentals/pit_financials.jsonl`：文件缺失 ⇒ 整组记缺；
@@ -509,7 +514,9 @@ def _own_feature_frame(
     """单票全序列 as-of 特征（37 列；beta250/ivol60 留 NaN 由第二遍填）。
 
     价格水平类 7 维用**未复权** ``raw_close``（qfq 含未来除权 = look-ahead，
-    v0.372 TODO #94）；qfq 失败/注入帧无该列 ⇒ 回退 close（两者本就相等）。
+    v0.372 TODO #94）；``turnover20`` 用**还原原始量**（qfq 量 = 原始量 ÷ 因子，
+    同为水平量被污染，v0.373 #94 追加：raw_vol = volume × close / raw_close）。
+    qfq 失败/注入帧无 raw_close 列 ⇒ 回退 close（两者本就相等）。
     """
     dts = df["date"].astype(str).str[:10].reset_index(drop=True)
     close = df["close"].astype("float64").reset_index(drop=True)
@@ -520,6 +527,9 @@ def _own_feature_frame(
     )
     amount = df["amount"].astype("float64").reset_index(drop=True)
     volume = df["volume"].astype("float64").reset_index(drop=True)
+    # 还原未复权成交量：f = close_qfq / raw_close，volume_raw = volume_qfq × f
+    # （apply_qfq：价 × f、量 ÷ f）。raw_close ≤ 0 ⇒ NaN ⇒ 记缺。
+    raw_vol = volume * close / raw_close.where(raw_close > 0)
     r1 = close.pct_change()
     total_sh = _shares_series(dts, shares_events, "total_shares")
     float_sh = _shares_series(dts, shares_events, "float_shares")
@@ -532,7 +542,7 @@ def _own_feature_frame(
         "mcap_float": raw_close * float_sh,
         "mcap_total": raw_close * total_sh,
         "amt20": amt20,
-        "turnover20": (volume / float_sh).rolling(20).mean(),
+        "turnover20": (raw_vol / float_sh).rolling(20).mean(),
         "amihud20": (r1.abs() / amount.where(amount > 0)).rolling(20).mean(),
         "amt_cv60": amount.rolling(60).std() / amount.rolling(60).mean(),
         "price": raw_close,

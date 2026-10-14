@@ -322,7 +322,8 @@ class TestRawClosePin:
     @staticmethod
     def _df_with_future_split():
         """65 根：第 61 根起 10:1 送转除权——raw 名义价 100→10（事件真实腰斩）；
-        qfq 把前 61 根压成 10（回看因子 0.1）使序列连续。段起点 = 除权前一日。"""
+        qfq 把前 61 根压成 10（回看因子 0.1）使序列连续。段起点 = 除权前一日。
+        量同样被 qfq 污染（量 ÷ 因子）：真实原始量恒 3e6，前 61 根 qfq 量 = 3e7。"""
         n = 65
         days = [d.strftime("%Y-%m-%d") for d in pd.bdate_range("2023-01-02", periods=n)]
         df = pd.DataFrame(
@@ -331,7 +332,7 @@ class TestRawClosePin:
                 "close": [10.0] * n,  # qfq：早年价被未来除权压低
                 "raw_close": [100.0] * 61 + [10.0] * 4,  # 未复权名义价
                 "amount": [2e7] * n,
-                "volume": [3e6] * n,
+                "volume": [3e7] * 61 + [3e6] * 4,  # qfq 量 = 原始量 3e6 ÷ f(=0.1/1)
             }
         )
         return df, days[60]  # 段起点 = 送转前一日
@@ -356,6 +357,26 @@ class TestRawClosePin:
         assert row["mcap_float"] == 100.0 * 8e7
         # 收益类维持 qfq（免疫：公共乘子不改变比值/收益）
         assert row["ret5"] == 0.0
+
+    def test_future_split_does_not_move_turnover20(self):
+        """#94 追加（owner 实测 10 送 10 后段起点换手率 1%→2%）：量也被 qfq
+        污染（量 ÷ 因子）⇒ turnover20 用还原原始量（volume × close / raw_close）。"""
+        df, s = self._df_with_future_split()
+        frame = rs._own_feature_frame(
+            "600000",
+            df,
+            shares_events=[
+                {"date": "2023-01-02", "total_shares": 1e8, "float_shares": 8e7}
+            ],
+            pit_table=None,
+            xdxr_events=None,
+            limit_pct=10.0,
+        )
+        row = frame[frame["date"] == s].iloc[0]
+        # 原始量 3e6 / 流通 8e7；若误用 qfq 量则得 3e7/8e7（10 倍污染）
+        assert row["turnover20"] == pytest.approx(3e6 / 8e7)
+        # 对照：夹具里 qfq 量确为 10 倍（污染真实存在，不是测试空转）
+        assert float(df.loc[df["date"] == s, "volume"].iloc[0]) == 3e7
 
     def test_fallback_without_raw_close_column(self):
         """qfq 失败（adjust=none）/注入帧无 raw_close 列 ⇒ 回退 close
