@@ -14,19 +14,21 @@
 | # | 事项 | 优先级 | 卡在 | 下一步 | 出处 |
 |---|---|---|---|---|---|
 | 88 | 首次月度交易反思（2026-09 月），跑顺「月报 → TRADE_LESSONS」流程；之后按月执行，节奏见 MASTER_WORKFLOW §七 | P2 | 生产机 | 读 2026-09 月报 JSON（无则先补跑 `monthly_review`），按模板写 E3 并核对 L1~L7 | owner 2026-10-12；[TRADE_LESSONS](TRADE_LESSONS.md) |
+| 94 | R43 跑数前必修两处（owner review 2026-10-14）：①价格水平类维度（price / mcap_* / pe·pb·ps / dy）改用**未复权收盘**——前复权价含未来除权信息（look-ahead）；②board 统计量「最高组−最低组」恒 ≥0，C2 同号恒成立——改成预注册的固定对比（如创业+科创 − 主板）或各板块组单列 | P2 | coder | 修代码 + 修订注记（跑数前）+ 钉测：未来除权不改变段起点 price/mcap；board 价差可为负 | [R43](governance/research/R43_regime_sector_style.md) |
+| 95 | 判定段批次锁：批次登记文件（批次号 / 候选冻结配置哈希 / 开关批时间）；读判定段须带 --batch-id 与候选哈希，候选不在批、已读或批已关一律拒绝 | P2 | coder | 按 research README「判定段攒批协议」实现，带钉测 | owner 2026-10-14 |
+| 96 | 0AMV 手工录入防护：绝对值超阈值需 `--confirm-extreme` 二次确认（阈值先 15%，生产机按台账 amv_change_pct 绝对值的 p99.9×1.2 回填）；越线（≥+4 / ≤−2.3）报告醒目提示核对；当日漏录报告顶部告警不阻断；manual 计入「0AMV 可用」但保留 source 标签、不自动升 confirmed | P2 | coder | 实现 + 钉测；阈值由生产机统计回填 | owner 2026-10-14 |
+| 97 | R41 续作立项：计划止损（stop_loss_ref）加 5% 下限（止损距离 = max(计划距离, 5%)），vs 现行 EXIT_RULES，入判定段第一批 | P2 | coder | 预注册（判据沿用 R41 族 + 功效节）后复用 plan_rules_replay 加下限参数 | owner 2026-10-14；R41 机制（中位止损 1.17%）+ R10「5% 是崖」 |
 | 93 | R43 工具实现 `regime_style_study`（区间段切分 / 停牌过滤 / 38 维 as-of 特征 / 五分位价差 / C1~C4 伪区间段零假设 / 板块层），带零假设两连测与回归哨兵 | P2 | 生产机 | 工具 v0.368 已落地；功效节数值待 #91 回填后定稿，跑数待生产机发令 | owner 2026-10-14；[R43](governance/research/R43_regime_sector_style.md) |
 | 92 | v2 切换后基线重测 + 全量宇宙耗时实测：定案=切换后第一步基线重测（R1/R4/R11 量级，**只在两段挖掘上做**；判定段基线留到首批候选判定时同次读出）；实测全量 ~5500 票 × count(2000 年起推算) × 三段 warm 耗时 | P2 | 生产机 | 命令与读数口径已写死于 research README『基线重测 runbook』；耗时埋点 v0.364 已落地；runbook v0.365 已补 SEG_A_START 规则+板块缺数据语义+2012 子窗；生产机执行回填 | owner 2026-10-13（定案 v0.355）；#89/#90 遗留 |
 | 91 | 2000~2009 数据核查：0AMV 台账最早日期、各年在市个股数与满 N 根可用数、板块指数覆盖，决定挖掘 A 起点；并核 gbbq 历史股本 / 分红记录可读性与 880/881 板块类型字段（R43 前置） | P2 | 生产机 | 生产机跑 data_coverage_probe（命令见 README 窗口节）贴回 JSON ⇒ 定挖掘 A 起点；探针 v0.364 已落地 | owner 2026-10-13；#90 前置 |
 | 82 | 0AMV 空头区间做多全栈（R40） | P2 | 生产机 | r40_a1 跑完回填 R40；判毕后头部同步 | [R40](governance/research/R40_bear_regime_long_strategy.md)；owner 2026-10-08 立项 |
 | 60 | plan 信号并入 SIGNAL_ORDER 与否。判据（两条同时成立）：①实现一致性——影子台账非 default 事件 ≥5 个交易日无异常；②规则有效性——R41 已判 falsified（v0.351）路径关闭，只剩 `plan_shadow_review` 累计 K=20 个独立事件（段头计、≥5 只持仓）均值 Δret₅ ≥ 0（凑不满 K ⇒ ②不成立 ⇒ 不并轨）。default 来源永不出 plan 信号；并轨=独立提交、只改 SIGNAL_ORDER | P2 | 观察中 | 影子事件持续累计，攒满或 60 交易日到期后 owner 定夺 | [R41](governance/research/R41_position_plan_rules_replay.md)；owner 2026-10-09 判据；v0.310/0.311/0.314/0.351 |
-| 81 | R39 因子×出场：ADX(14) 判毕 untested（无条件化增量），下一个因子对象（J 深度 / V0 总分）或换方向 | P2 | owner | 拍板下一对象后预注册追加 | [R39](governance/research/R39_factor_exit_interaction.md)；owner 2026-09-23 五维度②（①过滤器路线已证伪 v0.292） |
-| 87 | R35 打分系统存在性终局拍板（A 维持 V0 粗过滤 / B 只留有独立证据的腿 / C 撤分改门） | P2 | owner | 按 R35「决策路径」问题清单拍板；R36 Phase 1 与 R42「中段最好」是新增证据 | [R35](governance/research/R35_score_system_existence_review.md) |
-| 61 | capital_intent 等 candidate 因子的分值校准（candidate→active 前提，含 #62 迁入的 7 个技术分轴因子）。目标函数已由 objective v2.1 承担；剩余的「分层行动语义」经 R42 证伪，目前无在案路径 | P3 | owner | 定：维持 candidate 结案，或随 #87 终局另立问法 | owner 2026-10-09；[R42](governance/research/R42_score_tier_position.md) |
+| 81 | R39 因子×出场：ADX(14) 判毕 untested（无条件化增量），下一个因子对象（J 深度 / V0 总分）或换方向 | P2 | 挂起 | 暂停（owner 2026-10-14）：等判定段第一批（含 R39 ADX 重测）读出后再定下一对象 | [R39](governance/research/R39_factor_exit_interaction.md)；owner 2026-09-23 五维度②（①过滤器路线已证伪 v0.292） |
+| 87 | R35 打分系统存在性终局拍板（A 维持 V0 粗过滤 / B 只留有独立证据的腿 / C 撤分改门） | P2 | 挂起 | 等判定段第一批（含 R36 adx_gt_60）判完再拍板终局（owner 2026-10-14） | [R35](governance/research/R35_score_system_existence_review.md) |
 | 76 | #67 接口收敛的最后保险：1800 候选表标注列影子对照，非 BJ 宇宙逐位一致攒满 10 个交易日即闭环（进度 3/10，09-24 为止） | P3 | 生产机 | 继续跑 `scripts/dev/shadow_1800_compare.sh` 并记进度 | [设计稿](governance/strategy/_factors/interface_unification_plan.md)；v0.239 / v0.295 |
-| 80 | LLM 转岗：从「提数值表达式」改为「读失败模式、提机制假设」（证据：表达式提案不比随机好，Phase 1 诊断是机制级洞察）。原落地形态 R37 Phase 3 已随 R37 收口失效，需重定落点 | P3 | owner | 定落点（R39 已允许 LLM 提机制假设、不碰数值） | owner 方法论 review 2026-09-23 ③（①②④ 已闭环 v0.267/0.286/0.296） |
+| 80 | LLM 转岗：从「提数值表达式」改为「读失败模式、提机制假设」（证据：表达式提案不比随机好，Phase 1 诊断是机制级洞察）。原落地形态 R37 Phase 3 已随 R37 收口失效，需重定落点 | P3 | 挂起 | 落点定为 R43（owner 2026-10-14）：风格规律出来后由 LLM 读失败区间段提机制假设、不碰数值 | owner 方法论 review 2026-09-23 ③（①②④ 已闭环 v0.267/0.286/0.296） |
 | 86 | R36 后续维度剩余三项：③条件化/regime（0AMV 作因子条件变量）④盈亏比排序（服务仓位）⑤horizon 与出场轴对齐；另「结构因子基准臂」待打分侧重开时议 | P3 | 挂起 | 判据新建成本高，排在 #81 之后 | owner 2026-09-23 五维度③④⑤；原 #81/#80① |
 | 59 | scorer 双形态剩余：pvcorr / low_vol / momentum / reversal_quality± 可接 `_SCORER_PRECOMPUTE`（每键需逐位等价钉测）；mcap 与黑盒 detector 不接 | P3 | 挂起 | 随回测批次顺带做 | v0.73 审查（③批量写 ④分页并发已否决，理由见 `fetch_pit_financials.py` docstring）；v0.236（s_shape 系已落地） |
-| 26 | 板块信息利用：剩余子项（回调四项切换检查脚本化、主线题材判定重设计）在清理瘦身方向下优先级存疑 | P3 | 挂起 | owner 下次提到时再定做不做 | CHANGELOG v0.77-v0.80 |
 
 ## 已闭环索引
 
@@ -60,6 +62,7 @@
 | 23 | 「白线大于黄线」的歧义口径 | 2026-08-10 | commit 33d1fc4 |
 | 24 | S 阈值 70/60 是否采纳 | 2026-08-10 | commit f21c9be |
 | 25 | M2 续扫仅限「0AMV × 出场」组合维度 | 2026-08-17 | commit faa8757 |
+| 26 | 板块信息利用剩余子项 | 2026-10-14 | v0.371（结案：并入 R43 板块层） |
 | 27 | 代码里 REVERSAL_CHANGE_PCT = 2.0 | 2026-08-09 | commit a906fff |
 | 28 | 止损口径的层级关系 | 2026-08-06 | commit f990bf0 |
 | 29 | 报告缺可审计字段 | 2026-08-09 | commit f89a61d |
@@ -92,6 +95,7 @@
 | 56 | 涨跌幅内联实现已收敛，剩 5 处保留项需 owner 定 | 2026-08-12 | v0.43 |
 | 57 | mypy 渐进类型化 | 2026-08-12 | v0.42 |
 | 58 | 高复杂度函数拆分原则 | 2026-08-22 | v0.102 |
+| 61 | candidate 因子分值校准 | 2026-10-14 | v0.371（结案：维持 candidate（R42 证伪分层路径；随 #87 终局再议）） |
 | 62 | 技术分轴因子化 | 2026-08-22 | v0.102 |
 | 63 | 两处直读 TDX 安装目录文件的解析器下沉 datasource | 2026-09-14 | v0.225 |
 | 64 | rsi_deep（RSI 深水）进 live 与否 | 2026-09-14 | v0.229 |
