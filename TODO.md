@@ -14,8 +14,9 @@
 | # | 事项 | 优先级 | 卡在 | 下一步 | 出处 |
 |---|---|---|---|---|---|
 | 88 | 首次月度交易反思（2026-09 月），跑顺「月报 → TRADE_LESSONS」流程；之后按月执行，节奏见 MASTER_WORKFLOW §七 | P2 | 生产机 | 读 2026-09 月报 JSON（无则先补跑 `monthly_review`），按模板写 E3 并核对 L1~L7 | owner 2026-10-12；[TRADE_LESSONS](TRADE_LESSONS.md) |
+| 93 | R43 工具实现 `regime_style_study`（区间段切分 / 停牌过滤 / 38 维 as-of 特征 / 五分位价差 / C1~C4 伪区间段零假设 / 板块层），带零假设两连测与回归哨兵 | P2 | coder | 按 R43「工程落点」实现；功效节待 #91 回填 | owner 2026-10-14；[R43](governance/research/R43_regime_sector_style.md) |
 | 92 | v2 切换后基线重测 + 全量宇宙耗时实测：定案=切换后第一步基线重测（R1/R4/R11 量级，**只在两段挖掘上做**；判定段基线留到首批候选判定时同次读出）；实测全量 ~5500 票 × count(2000 年起推算) × 三段 warm 耗时 | P2 | 生产机 | 命令与读数口径已写死于 research README『基线重测 runbook』；耗时埋点 v0.364 已落地；runbook v0.365 已补 SEG_A_START 规则+板块缺数据语义+2012 子窗；生产机执行回填 | owner 2026-10-13（定案 v0.355）；#89/#90 遗留 |
-| 91 | 2000~2009 数据核查：0AMV 台账最早日期、各年在市个股数与满 N 根可用数、板块指数覆盖，决定挖掘 A 起点 | P2 | 生产机 | 生产机跑 data_coverage_probe（命令见 README 窗口节）贴回 JSON ⇒ 定挖掘 A 起点；探针 v0.364 已落地 | owner 2026-10-13；#90 前置 |
+| 91 | 2000~2009 数据核查：0AMV 台账最早日期、各年在市个股数与满 N 根可用数、板块指数覆盖，决定挖掘 A 起点；并核 gbbq 历史股本 / 分红记录可读性与 880/881 板块类型字段（R43 前置） | P2 | 生产机 | 生产机跑 data_coverage_probe（命令见 README 窗口节）贴回 JSON ⇒ 定挖掘 A 起点；探针 v0.364 已落地 | owner 2026-10-13；#90 前置 |
 | 82 | 0AMV 空头区间做多全栈（R40） | P2 | 生产机 | r40_a1 跑完回填 R40；判毕后头部同步 | [R40](governance/research/R40_bear_regime_long_strategy.md)；owner 2026-10-08 立项 |
 | 60 | plan 信号并入 SIGNAL_ORDER 与否。判据（两条同时成立）：①实现一致性——影子台账非 default 事件 ≥5 个交易日无异常；②规则有效性——R41 已判 falsified（v0.351）路径关闭，只剩 `plan_shadow_review` 累计 K=20 个独立事件（段头计、≥5 只持仓）均值 Δret₅ ≥ 0（凑不满 K ⇒ ②不成立 ⇒ 不并轨）。default 来源永不出 plan 信号；并轨=独立提交、只改 SIGNAL_ORDER | P2 | 观察中 | 影子事件持续累计，攒满或 60 交易日到期后 owner 定夺 | [R41](governance/research/R41_position_plan_rules_replay.md)；owner 2026-10-09 判据；v0.310/0.311/0.314/0.351 |
 | 81 | R39 因子×出场：ADX(14) 判毕 untested（无条件化增量），下一个因子对象（J 深度 / V0 总分）或换方向 | P2 | owner | 拍板下一对象后预注册追加 | [R39](governance/research/R39_factor_exit_interaction.md)；owner 2026-09-23 五维度②（①过滤器路线已证伪 v0.292） |
