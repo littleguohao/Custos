@@ -143,6 +143,10 @@
    无相邻对 ⇒ C3 None（provisional）。
 5. **挖掘 A 起点无需显式 SEG_A_START**：区间段只存在于台账覆盖期，段集合天然
    ≥ 台账首日（与基线 runbook 的 SEG_A_START 规则同源同理）。
+6. **`debt_ratio` 恒记缺**（v0.368 工具落地时核实）：PIT 台账只存 8 个绝对值科目
+   （eps/eps_deduct/revenue/net_profit/roe_waa/bps/ocf_ps/gross_margin），无资产
+   负债率字段——该维恒记缺（C1 不过 ⇒ untested），基本面族实际可算 9 维；功效节
+   Bonferroni α 回填定稿时按可得维度数（价格 28 + 基本面 9）重算。
 
 ### 写死的风险注记（判读时逐条核对）
 
