@@ -266,12 +266,19 @@ margin」这个前提，R1 的量级随后按已实现口径重取（只在 0AMV
 命令**写死**，改动须先改这里再跑。公共参数（宇宙缺省=全量 as-of，不传任何 codes 旗标）：
 `--scorer baseline --entry-filter j_low --stop-mode pct --stop-pct 8 --bbi-consec 2 --cost-bps 25 --trade-sim --seed 0`。
 
+- **步骤 0（先跑 #91 探针，再定 R4 挖掘 A 起点）**：`--amv-long-only` 的
+  `_amv_checker` 对**台账首日之前的日期一律拦截**（as-of 查不到 regime ⇒ 不放行）
+  ——AMV 腿实际覆盖从台账首日起，无 AMV 腿却是全段；四格起点不齐会把不同年份的
+  行情差异混进「择时增益」。因此从探针 JSON 读 `amv_ledger.date_min`，记
+  **SEG_A_START = max(2000-01-01, 台账首日）**，R4 挖掘 A **四格统一**用此起点，
+  count 用 `load_window --start SEG_A_START` 重算。R11 无择时腿、无此混杂，
+  维持 2000-01-01 全段（要与 R4 同窗对齐可另跑，不默认）。
 - **R11 基准**（无择时纯出场组合，已实现口径）×2 段：
   ```bash
   uv run python -m custos.research backtest_factors --trade-sim \
     --scorer baseline --entry-filter j_low --stop-mode pct --stop-pct 8 \
     --bbi-consec 2 --cost-bps 25 --seed 0 \
-    --start 2000-01-01 --end 2016-12-31 --count 7000 \
+    --start 2000-01-01 --end 2016-12-31 --count 7200 \
     --summary-only --out artifacts/logs/baseline_v2/r11_segA.json
   uv run python -m custos.research backtest_factors --trade-sim \
     --scorer baseline --entry-filter j_low --stop-mode pct --stop-pct 8 \
@@ -288,18 +295,28 @@ margin」这个前提，R1 的量级随后按已实现口径重取（只在 0AMV
   （同 `score_return_study.py` 口径）；win_rate 按全量报并注明含 open_end。
 - **R4 择时网格** 2×2×2 = 8 条：公共参数上叠 `--portfolio --risk-pct 1 --max-concurrent 5 --max-pos 20`；
   AMV 腿加 `--amv-long-only`，板块腿加 `--sector-filter`（依赖 `data/market/sector_index/`
-  + `sector_members.json`，生产机已有）；窗同上两段；产物
-  `artifacts/logs/baseline_v2/r4_seg{A,B}_{amv,sector,amv_sector,none}.json`。
+  + `sector_members.json`，生产机已有）；挖掘 A 起点=SEG_A_START（步骤 0），挖掘 B
+  窗同 R11；产物 `artifacts/logs/baseline_v2/r4_seg{A,B}_{amv,sector,amv_sector,none}.json`。
   读数口径：portfolio 块 `portfolio.cagr` / `portfolio.max_drawdown` /
   `portfolio.total_return` / `portfolio.return_over_maxdd`（收益/回撤比，
   注意键名不是 ret_dd）+ trades 层 `trade_summary.expectancy_R`（open_end 口径同上）。
+  **板块腿缺数据语义**（代码事实，读数按此解读）：成员表或板块指数目录整体缺失
+  ⇒ fail-closed 拒跑（不静默全放行）；个股未分类到「有数据板块」⇒ **放行**；
+  已分类到有数据板块、日期早于板块数据起点 ⇒ **拦截**（gate 带 `effective_start`=
+  最早板块数据日，--start 早于它时 bt 打 [WARN]）。⇒ 覆盖稀疏期（2011-10 前仅
+  198/587）板块腿只是**部分过滤**，两腿差值被稀释——故挖掘 A 加跑 **2012 起子窗**
+  完整 2×2（4 条：`--start 2012-01-01 --end 2016-12-31 --count 4200`；若 SEG_A_START
+  晚于 2012-01-01，子窗起点=SEG_A_START 并重算 count），产物
+  `r4_segA2012_{none,amv,sector,amv_sector}.json`；对比必须同窗 ⇒ 不能只跑板块两格。
 - **R1 量级不单跑**：取自 R4 网格「有 AMV 无板块」两格
   （`r4_segA_amv.json` / `r4_segB_amv.json` 的 `trade_summary.expectancy_R`
   + `portfolio.cagr` / `portfolio.max_drawdown`）。
-- 注记：`--count` 含 ~300 根预热余量；若 #91 把挖掘 A 起点推后，用
-  `uv run python -m custos.research load_window --start YYYY-MM-DD` 重算 count。
-  引擎 CLI 无 `--warmup-bars`，段起点指标冷启动与 R1/R4/R11 原口径一致（可比性优先）；
-  判定段基线留到首批候选判定时同次读出。
+- 注记：`--count` = 从最新 bar 回溯根数，宁多勿少——多出的部分被 `--start` 裁掉、
+  指标在裁剪后冷启动，故 count **只影响起点可达性、不影响读数**（busday
+  (起点→今天)：2000 起 ≈7000、2012 起 ≈3900、2022 起 ≈1250，命令各留了余量）。
+  起点变动时用 `uv run python -m custos.research load_window --start YYYY-MM-DD`
+  重算。引擎 CLI 无 `--warmup-bars`，段起点指标冷启动与 R1/R4/R11 原口径一致
+  （可比性优先）；判定段基线留到首批候选判定时同次读出。
 - **耗时收集**（v0.364 埋点）：每条命令把 stderr 的 `[TIME]` 行
   （`加载(含前复权)…/ 评估…` 与 `总耗时…`）与产物 JSON 的 `timing` 块
   （load_s/eval_s/total_s）贴回本节；四终端 warm 耗时由 `[TIME] warm …` 行提供。

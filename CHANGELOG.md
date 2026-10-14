@@ -366,6 +366,7 @@
 | 2026-10-13 | v0.362 | **Windows CI 红根因修复（ci-diag-1 九轮二分实锤：plan_rules TestLegacyR40Compat）**：provenance.pre_reg_doc 由 str(Path.relative_to) 改 .as_posix()——Windows 产出反斜杠路径，Linux 捕的金样哈希必挂（ubuntu 绿 windows 红真因）；加恒正斜杠钉测；其余 Path 衍生字段复核无同类（cmdline=用户输入原文、universe/git=哈希） | coder 二分定位 | CI 待验 |
 | 2026-10-14 | v0.363 | **格式门槛修复 + evolution_loop 豁免收窄（owner review）**：test_factor_exit_study/test_provenance 补 ruff format（v0.361/v0.362 提交前漏跑，教训=提交前 format 最后跑）；豁免收窄——_Prepared 加 judge_load：挖掘侧 load 默认截断（end=None⇒截到 2026-09-04），豁免只给判定窗尾随执行加载器，不再给整个进程（v2 判定段 2017~2021 本就用不到豁免；legacy 判定窗尾部尾随按 EXIT_BARS_HOLDOUT_NOTE 口径保留） | owner review | 钉测 +1 |
 | 2026-10-14 | v0.364 | **#91 数据覆盖探针 + #92 耗时埋点与基线 runbook**：新工具 data_coverage_probe（vipdoc 个股/板块组普查、eligible_date=满 60 根资格日、逐年 active/eligible、板块指数 880/881+sector_index csv、0AMV 台账最早/最晚；holdout 不计+空结果护栏）；bt 两分支新增 [TIME] 总耗时行+payload timing 块（旧行不动），warm 两函数新增 [TIME] warm 行；README 写死「基线重测 runbook」+登记探针/C5 行标 🔄；AGENTS §5 补 mining_violation/touches_judgment/warmup_bars=300 | TODO #91/#92 | 钉测 +17 |
+| 2026-10-14 | v0.365 | **基线 runbook 修订（owner review，纯文档）**：①R4 挖掘 A 四格起点统一为 SEG_A_START=max(2000-01-01, 0AMV 台账首日)——_amv_checker 对台账首日前一律拦截，起点不齐会把年份行情差异混进择时增益；②板块腿缺数据语义写死（成员表/指数目录整体缺=fail-closed；未分类到有数据板块=放行；日期早于板块数据起点=拦截，gate 带 effective_start）⇒ 稀疏期是部分过滤，挖掘 A 加跑 2012 起子窗完整 2×2（对比必须同窗）；③count 语义注明（只影响起点可达性不影响读数），seg A 7000→7200 留余量 | owner review（runbook 两问题） | 生产机跑数前核对 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
