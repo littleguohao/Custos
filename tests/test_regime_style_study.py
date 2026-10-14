@@ -246,18 +246,47 @@ class TestEvalSegment:
         # 均值为 0 ⇒ 组均超额 ±0.05 ⇒ spread = 0.10
         assert abs(out["spreads"]["ma_bull"] - 0.10) < 1e-9
 
-    def test_board_max_min(self):
+    def test_board_spread_signed_and_can_be_negative(self):
+        """v0.372（修订注记 8）：board 拆 4 维 signed——该组等权超额 − 其余组。
+        主板跑赢的合成段 ⇒ board_cyb 价差必须 < 0（旧 max−min 构造恒 ≥0，做不到）。"""
         codes = [f"c{i}" for i in range(6)]
         values = {c: 1.0 for c in codes}  # 无关维
-        rets = {"c0": 0.10, "c1": 0.10, "c2": 0.0, "c3": 0.0, "c4": -0.10, "c5": -0.10}
+        # 创业板两票 −0.10；主板/北交所四票 +0.10
+        rets = {
+            "c0": -0.10,
+            "c1": -0.10,
+            "c2": 0.10,
+            "c3": 0.10,
+            "c4": 0.10,
+            "c5": 0.10,
+        }
         ctx, seg = _hand_ctx(values, rets, dim="ret5")
         ctx["stocks"]["c0"]["board"] = "创业板"
         ctx["stocks"]["c1"]["board"] = "创业板"
         ctx["stocks"]["c4"]["board"] = "北交所"
         ctx["stocks"]["c5"]["board"] = "北交所"
         out = rs.eval_segment(seg, ctx, min_stocks=6, min_group=2)
-        # mean=0；创业板 0.10、主板 0.0、北交所 −0.10 ⇒ max−min = 0.20
-        assert abs(out["spreads"]["board"] - 0.20) < 1e-9
+        # 组差里基准对消：board_cyb = −0.10 − 0.10 = −0.20（signed，可为负）
+        assert out["spreads"]["board_cyb"] == pytest.approx(-0.20)
+        # 主板组超额 0.10−1/30；其余组 = (−0.10−1/30 + 0.10−1/30)/2 = −1/30 ⇒ 0.10
+        assert out["spreads"]["board_main"] == pytest.approx(0.10)
+        assert "board" not in out["spreads"]  # 旧单维已废
+        # 原分组均值表保留为附带读数（创业板 = −0.10 − 1/30 ≈ −0.1333）
+        assert out["board_group_means"]["创业板"]["mean_excess"] == pytest.approx(
+            -0.10 - 1 / 30
+        )
+
+    def test_board_dim_missing_when_group_empty(self):
+        """北交所早段常态空 ⇒ 该段该维记缺（该组与其余组都 ≥ min_group 才可算）。"""
+        codes = [f"c{i}" for i in range(6)]
+        values = {c: 1.0 for c in codes}
+        rets = {c: 0.01 for c in codes}
+        ctx, seg = _hand_ctx(values, rets, dim="ret5")
+        ctx["stocks"]["c4"]["board"] = "创业板"  # 4 主板 + 2 创业板
+        ctx["stocks"]["c5"]["board"] = "创业板"
+        out = rs.eval_segment(seg, ctx, min_stocks=6, min_group=2)
+        assert out["spreads"]["board_bj"] is None  # 北交所组 0 只 ⇒ 记缺
+        assert out["spreads"]["board_main"] == 0.0  # 主板 4 / 其余 2 ⇒ 可算
 
     def test_negative_pe_excluded_and_reported(self):
         codes = [f"c{i}" for i in range(10)]
@@ -284,6 +313,66 @@ class TestTStat:
         assert abs(rs._t_stat([0.1, 0.2, 0.3]) - 0.2 * math.sqrt(3) / 0.1) < 1e-9
         assert rs._t_stat([0.1]) is None  # n<2 记缺
         assert rs._t_stat([0.2, 0.2, 0.2]) is None  # std==0 记缺
+
+
+class TestRawClosePin:
+    """TODO #94 必修①：价格水平类 7 维用未复权 raw_close（qfq 含未来除权 =
+    look-ahead）；收益/比率类维持 qfq（免疫论证见模块 docstring）。"""
+
+    @staticmethod
+    def _df_with_future_split():
+        """65 根：第 61 根起 10:1 送转除权——raw 名义价 100→10（事件真实腰斩）；
+        qfq 把前 61 根压成 10（回看因子 0.1）使序列连续。段起点 = 除权前一日。"""
+        n = 65
+        days = [d.strftime("%Y-%m-%d") for d in pd.bdate_range("2023-01-02", periods=n)]
+        df = pd.DataFrame(
+            {
+                "date": days,
+                "close": [10.0] * n,  # qfq：早年价被未来除权压低
+                "raw_close": [100.0] * 61 + [10.0] * 4,  # 未复权名义价
+                "amount": [2e7] * n,
+                "volume": [3e6] * n,
+            }
+        )
+        return df, days[60]  # 段起点 = 送转前一日
+
+    def test_future_split_does_not_move_segstart_price_mcap(self):
+        """owner 点名钉测：段起点后发生 10:1 送转 ⇒ 段起点 price/mcap 逐位不变。"""
+        df, s = self._df_with_future_split()
+        frame = rs._own_feature_frame(
+            "600000",
+            df,
+            shares_events=[
+                {"date": "2023-01-02", "total_shares": 1e8, "float_shares": 8e7}
+            ],
+            pit_table=None,
+            xdxr_events=None,
+            limit_pct=10.0,
+        )
+        row = frame[frame["date"] == s].iloc[0]
+        assert float(df.loc[df["date"] == s, "close"].iloc[0]) == 10.0  # qfq 被压低
+        assert row["price"] == 100.0  # raw_close：未来除权不改变段起点名义价
+        assert row["mcap_total"] == 100.0 * 1e8
+        assert row["mcap_float"] == 100.0 * 8e7
+        # 收益类维持 qfq（免疫：公共乘子不改变比值/收益）
+        assert row["ret5"] == 0.0
+
+    def test_fallback_without_raw_close_column(self):
+        """qfq 失败（adjust=none）/注入帧无 raw_close 列 ⇒ 回退 close
+        （此时 close 本就是未复权口径，两者相等）。"""
+        df, s = self._df_with_future_split()
+        df = df.drop(columns=["raw_close"])
+        df["close"] = [100.0] * 61 + [10.0] * 4  # adjust=none：close 即未复权
+        frame = rs._own_feature_frame(
+            "600000",
+            df,
+            shares_events=None,
+            pit_table=None,
+            xdxr_events=None,
+            limit_pct=10.0,
+        )
+        row = frame[frame["date"] == s].iloc[0]
+        assert row["price"] == 100.0  # fallback 口径不变
 
 
 # ---------------------------------------------------------------------------
@@ -511,11 +600,11 @@ class TestFundamentalFrame:
 # ---------------------------------------------------------------------------
 
 
-def _seg_result(spread):
+def _seg_result(spread, dim="price"):
     return (
         {"n_days": 10},
         {
-            "spreads": {"price": spread},
+            "spreads": {dim: spread},
             "neg_groups": {},
             "susp_by_group": {},
             "n_members": 200,
@@ -565,6 +654,42 @@ class TestJudges:
         )
         assert jd["verdict"] == "candidate"
         assert jd["c4_state"] == "confirmed_pass"
+
+    def test_c2_sign_flip_is_false(self):
+        """C2 同号检验能判 False（修订注记 8 修复点：旧 board max−min 恒 ≥0，
+        同号检验对它恒成立 = 失效）：A 窗恒负 / B 窗恒正 ⇒ c2_ok False ⇒
+        falsified（即便 C4 双窗都过）。"""
+        per_win = {
+            "A": [_seg_result(-0.10 - i * 0.001, dim="board_cyb") for i in range(9)],
+            "B": [_seg_result(0.10 + i * 0.001, dim="board_cyb") for i in range(9)],
+        }
+        jd = rs.judge_style_dim(
+            "board_cyb",
+            per_win,
+            {"A": [0.01] * 25, "B": [0.01] * 25},
+            min_segs=8,
+            c4_min_pool=20,
+        )
+        assert jd["c1_ok"] and jd["c4_state"] == "confirmed_pass"
+        assert jd["c2_ok"] is False
+        assert jd["verdict"] == "falsified"
+
+    def test_c2_stable_negative_direction_is_true(self):
+        """方向稳定的**负**价差是合法方向（双窗恒负 = 稳定跑输）：C2 同号检验
+        判 True——C2 查「方向是否稳定」，不查正负。"""
+        per_win = {
+            "A": [_seg_result(-0.10 - i * 0.001, dim="board_cyb") for i in range(9)],
+            "B": [_seg_result(-0.10 - i * 0.001, dim="board_cyb") for i in range(9)],
+        }
+        jd = rs.judge_style_dim(
+            "board_cyb",
+            per_win,
+            {"A": [0.01] * 25, "B": [0.01] * 25},
+            min_segs=8,
+            c4_min_pool=20,
+        )
+        assert jd["c2_ok"] is True
+        assert jd["verdict"] == "candidate"  # 负方向 candidate（判读时方向自负）
 
 
 # ---------------------------------------------------------------------------

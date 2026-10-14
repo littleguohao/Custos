@@ -372,7 +372,7 @@ margin」这个前提，R1 的量级随后按已实现口径重取（只在 0AMV
 | `bear_regime_study` | R40 | 空头区间 46 门×5 档，随机入场臂基准 |
 | `plan_rules_replay` | R41 | 计划止损 vs 现行出场配对回放（引擎信号级 `stop_override` 钩子） |
 | `score_tier_position_study` | R42 | V0 分档单调性与加权 expectancy_R |
-| `regime_style_study` | R43 | 0AMV 区间段风格/板块描述性条件化（38 维五分位价差 + 伪段 C4；不接交易引擎） |
+| `regime_style_study` | R43 | 0AMV 区间段风格/板块描述性条件化（41 维 as-of 价差 + 伪段 C4；不接交易引擎） |
 | `plan_shadow_review` | #60 | live 影子台账分歧段事后打分（N=5/10） |
 | `factor_ic_profile` | 分诊 | 截面 RankIC/ICIR 可比表——**分诊镜，不是晋级判据** |
 | `data_coverage_probe` | #91 | 数据覆盖探针：vipdoc 个股/板块指数 + 0AMV 台账 + sector_index csv 覆盖普查（定挖掘 A 起点） |

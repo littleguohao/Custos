@@ -17,16 +17,27 @@ C4 的所有伪段起点用固定种子**在加载数据前**预抽（确定性�
 供段收益与全市场等权收益序列用）。stderr 末尾打 ``[MEM]`` 峰值（复用
 ``backtest_factors.peak_rss_mb``）。
 
-## 38 维可得性（记缺=该 (段,维) 不参与；整维缺源 ⇒ 该维所有段记缺 ⇒ C1 不过 untested）
+## 41 维可得性（记缺=该 (段,维) 不参与；整维缺源 ⇒ 该维所有段记缺 ⇒ C1 不过 untested）
 
 - 纯行情 26 维恒可得（df 由 ``bt._load_bars_local`` 读入，qfq + holdout 截断内置）；
+- **价格水平类 7 维改未复权收盘（v0.372，TODO #94 owner review 必修）**：
+  ``price``/``mcap_float``/``mcap_total``/``pe_ttm``/``pb``/``ps_ttm``/``dy``
+  的段起点取值用 ``raw_close``（qfq 前复权价含未来除权信息 = look-ahead）；
+  取数辅助 ``raw = df["raw_close"] if "raw_close" in df.columns else df["close"]``
+  （qfq 失败 adjust="none" 无 raw_close 列、测试注入帧也不带——fallback 时两者
+  本就相等，口径不变）。其余收益/比率类维度维持 qfq——**免疫论证**：as-of 窗内
+  的事后复权因子对窗内所有历史bar是公共乘子，收益/比值/均线相对位置不变，
+  look-ahead 只污染价格**水平**（市值/估值/分红率都含价格水平）。
 - ``mcap_float``/``mcap_total``/``turnover20`` 依赖股本事件（xdxr 缓存，
   ``adjust_factors.get_shares_events``），单票缺事件 ⇒ 该票记缺；
 - 基本面 10 维依赖 `data/fundamentals/pit_financials.jsonl`：文件缺失 ⇒ 整组记缺；
   其中 **``debt_ratio`` 恒记缺**（PIT 库 VALUE_FIELDS 无资产负债率字段）；
   ``dy`` 依赖 xdxr 分红记录（``load_xdxr_cache`` 的 fenhong，覆盖不可全得），
   单票缺缓存 ⇒ 该票记缺——生产机覆盖不全时记缺即可，**不 fail**；
-- ``board`` 为股票静态属性（沪/深主板→主板、创业板、科创板、北交所），不在特征矩阵。
+- board 拆 4 个独立维（v0.372，修订注记 8）：``board_main``/``board_cyb``/
+  ``board_kcb``/``board_bj``，段内统计量 = 该组等权超额 − 其余组等权超额
+  （**signed，可为负**）——股票静态属性，不在特征矩阵；原「最高组−最低组」
+  恒 ≥0 构造已废（C2 同号检验对它恒成立=失效）。价格族池 28→31。
 
 用法（生产机）::
 
@@ -122,9 +133,21 @@ MATRIX_DIMS = (
     "np_yoy",
     "dy",
 )
-PRICE_FAMILY = tuple(d for d in MATRIX_DIMS[:27]) + ("board",)  # 28（max-of-28）
+#: board 拆 4 个独立维（v0.372，修订注记 8）：静态属性，统计量 = 该组等权超额
+#: − 其余组等权超额（signed）；北交所早段常态空 ⇒ 记缺路径（组 < min_group）。
+BOARD_DIMS = ("board_main", "board_cyb", "board_kcb", "board_bj")
+BOARD_DIM_GROUP = {
+    "board_main": "主板",
+    "board_cyb": "创业板",
+    "board_kcb": "科创板",
+    "board_bj": "北交所",
+}
+
+PRICE_FAMILY = (
+    tuple(d for d in MATRIX_DIMS[:27]) + BOARD_DIMS
+)  # 31（max-of-31，v0.372）
 FUND_FAMILY = MATRIX_DIMS[27:]  # 10（max-of-10）
-ALL_DIMS = tuple(PRICE_FAMILY) + tuple(FUND_FAMILY)  # 38
+ALL_DIMS = tuple(PRICE_FAMILY) + tuple(FUND_FAMILY)  # 41
 FAMILY_OF = {d: ("price" if d in PRICE_FAMILY else "fund") for d in ALL_DIMS}
 NEG_GROUP_DIMS = ("pe_ttm", "pb", "ps_ttm")  # 负值单列一组、价差剔除
 
@@ -327,7 +350,7 @@ def _shares_series(
 def _fundamental_frame(
     code: str,
     dates: pd.Series,
-    close: pd.Series,
+    close_raw: pd.Series,
     total_shares: pd.Series,
     pit_table: Optional[dict[str, Any]],
     xdxr_events: Optional[list[dict]],
@@ -338,6 +361,8 @@ def _fundamental_frame(
     可见性查询 = 逐日二分，不建全量索引——D 上万日期 × 全宇宙的 dict 是内存坑）；
     None ⇒ 整组记缺（全 NaN）。debt_ratio 恒 NaN（PIT 库无字段）。
     dy = 过去 12 个月 fenhong 合计 / 收盘（xdxr 缓存缺 ⇒ NaN）。
+    ``close_raw``（v0.372 TODO #94）：**未复权**收盘——pe/pb/ps 的市值与 dy
+    的分母都是价格水平，qfq 含未来除权 = look-ahead。
     """
     n = len(dates)
     cols = {d: np.full(n, np.nan) for d in FUND_FAMILY}
@@ -347,7 +372,7 @@ def _fundamental_frame(
     notices = pit_table["notices"] if pit_table else []
     rds_sorted = pit_table["rds"] if pit_table else []
     ds = list(dates.astype(str).str[:10])
-    closes = close.to_numpy(dtype="float64")
+    closes = close_raw.to_numpy(dtype="float64")
     shares = total_shares.to_numpy(dtype="float64")
     dy_events: list[tuple[str, float]] = []
     if xdxr_events:
@@ -481,9 +506,18 @@ def _own_feature_frame(
     xdxr_events: Optional[list[dict]],
     limit_pct: float,
 ) -> pd.DataFrame:
-    """单票全序列 as-of 特征（37 列；beta250/ivol60 留 NaN 由第二遍填）。"""
+    """单票全序列 as-of 特征（37 列；beta250/ivol60 留 NaN 由第二遍填）。
+
+    价格水平类 7 维用**未复权** ``raw_close``（qfq 含未来除权 = look-ahead，
+    v0.372 TODO #94）；qfq 失败/注入帧无该列 ⇒ 回退 close（两者本就相等）。
+    """
     dts = df["date"].astype(str).str[:10].reset_index(drop=True)
     close = df["close"].astype("float64").reset_index(drop=True)
+    raw_close = (
+        df["raw_close"].astype("float64").reset_index(drop=True)
+        if "raw_close" in df.columns
+        else close
+    )
     amount = df["amount"].astype("float64").reset_index(drop=True)
     volume = df["volume"].astype("float64").reset_index(drop=True)
     r1 = close.pct_change()
@@ -495,13 +529,13 @@ def _own_feature_frame(
     neg = r1.where(r1 < 0, 0.0)
     lim = limit_pct / 100.0 - 0.001  # 容差：收盘涨幅 ≥ 限制−0.1pp 记涨停
     cols: dict[str, Any] = {
-        "mcap_float": close * float_sh,
-        "mcap_total": close * total_sh,
+        "mcap_float": raw_close * float_sh,
+        "mcap_total": raw_close * total_sh,
         "amt20": amt20,
         "turnover20": (volume / float_sh).rolling(20).mean(),
         "amihud20": (r1.abs() / amount.where(amount > 0)).rolling(20).mean(),
         "amt_cv60": amount.rolling(60).std() / amount.rolling(60).mean(),
-        "price": close,
+        "price": raw_close,
         "vol60": r1.rolling(60).std(),
         "downvol60": (neg * neg).rolling(60).mean() ** 0.5,
         "beta250": np.nan,  # 第二遍（需全市场等权收益序列）
@@ -524,7 +558,8 @@ def _own_feature_frame(
         "age": pd.Series(np.arange(1, len(dts) + 1), dtype="float64"),
     }
     out = pd.DataFrame(cols)
-    fund = _fundamental_frame(code, dts, close, total_sh, pit_table, xdxr_events)
+    # 基本面 10 维的价格口径 = raw_close（pe/pb/ps 的市值与 dy 的分母都是价格水平）
+    fund = _fundamental_frame(code, dts, raw_close, total_sh, pit_table, xdxr_events)
     for c in FUND_FAMILY:
         out[c] = fund[c].to_numpy() if c in fund else np.nan
     out.insert(0, "date", dts)
@@ -679,19 +714,19 @@ def eval_segment(
 
     for dim in ALL_DIMS:
         spreads[dim] = None
-        if dim == "board":
-            groups: dict[str, list[int]] = {}
-            for k, m in enumerate(members):
-                groups.setdefault(stocks[m[1]]["board"], []).append(k)
-            means = {}
-            for gname, idxs in groups.items():
-                if len(idxs) >= min_group:
-                    means[gname] = float(excess[idxs].mean())
-                    susp_by_group.setdefault(dim, {})[gname] = round(
-                        float(np.mean([members[i][3] for i in idxs])), 4
-                    )
-            if len(means) >= 2:
-                spreads[dim] = max(means.values()) - min(means.values())
+        if dim in BOARD_DIMS:
+            # v0.372（修订注记 8）：board 拆 4 维 signed——该组等权超额 − 其余组
+            # 等权超额；两组都 ≥ min_group 才可算（北交所早段常态空 ⇒ 记缺）
+            g = BOARD_DIM_GROUP[dim]
+            in_idx = [k for k, m in enumerate(members) if stocks[m[1]]["board"] == g]
+            out_idx = [k for k, m in enumerate(members) if stocks[m[1]]["board"] != g]
+            susp_by_group.setdefault(dim, {})["in"] = (
+                round(float(np.mean([members[i][3] for i in in_idx])), 4)
+                if in_idx
+                else math.nan
+            )
+            if len(in_idx) >= min_group and len(out_idx) >= min_group:
+                spreads[dim] = float(excess[in_idx].mean() - excess[out_idx].mean())
             continue
         col = MATRIX_DIMS.index(dim)
         v = Xs[:, col].astype("float64")
@@ -737,10 +772,20 @@ def eval_segment(
                         sp = _early_spread(seg, kk, mm, q_lo=qs[0], q_hi=qs[4], ctx=ctx)
                         if sp is not None:
                             early[kk][dim] = sp
+    # 附带读数（不作判据）：原 board 分组均值表保留（v0.372 拆维后仅作展示）
+    board_group_means: dict[str, Any] = {}
+    for g in ("主板", "创业板", "科创板", "北交所", "其他"):
+        idx = [k for k, m in enumerate(members) if stocks[m[1]]["board"] == g]
+        if idx:
+            board_group_means[g] = {
+                "n": len(idx),
+                "mean_excess": float(excess[idx].mean()),
+            }
     return {
         "spreads": spreads,
         "neg_groups": neg_groups,
         "susp_by_group": susp_by_group,
+        "board_group_means": board_group_means,
         "n_members": len(members),
         "frac_pos": frac_pos,
         "early": early,
@@ -1402,6 +1447,8 @@ def run_study(
         "criteria": criteria,
         "notes": [
             "描述性条件化研究，不接交易引擎；cost_sensitivity 不适用（无交易）",
+            "口径：price/mcap_float/mcap_total/pe_ttm/pb/ps_ttm/dy 七维 = raw_price"
+            "（未复权收盘，TODO #94）；其余维度 = qfq（免疫论证见模块 docstring）",
             "判定段 2017~2021 的段集未读（攒批协议未拍板）；本工具不登记 window_usage",
             "停牌伪抗跌：每组平均停牌比例见 extras.susp_ratio_by_group；"
             "debt_ratio 恒记缺（PIT 库无资产负债率字段）；dy 依赖 xdxr 缓存覆盖",
@@ -1491,12 +1538,23 @@ def _extras(style_results: dict[str, dict[str, list]]) -> dict[str, Any]:
     len_weighted: dict[str, Any] = {}
     frac_pos: dict[str, Any] = {}
     susp: dict[str, Any] = {}
+    board_means: dict[str, Any] = {}
     for w in WINDOWS:
         for dr in DIRECTIONS:
             res = [(_s, r) for _s, r in style_results[w][dr] if r is not None]
             key = f"{w}/{dr}"
             fr = [r["frac_pos"] for _s, r in res]
             frac_pos[key] = round(float(np.mean(fr)), 4) if fr else None
+            # 原 board 分组均值表（附带读数，v0.372 拆维后不作判据）
+            for g in ("主板", "创业板", "科创板", "北交所", "其他"):
+                vals = [
+                    r["board_group_means"][g]["mean_excess"]
+                    for _s, r in res
+                    if g in r["board_group_means"]
+                ]
+                board_means.setdefault(g, {})[key] = (
+                    round(float(np.mean(vals)), 6) if vals else None
+                )
             for dim in ALL_DIMS:
                 pairs5 = [
                     r["early"][5][dim]
@@ -1545,6 +1603,7 @@ def _extras(style_results: dict[str, dict[str, list]]) -> dict[str, Any]:
         "len_weighted_spread": len_weighted,
         "frac_abs_positive": frac_pos,
         "susp_ratio_by_group": susp,
+        "board_group_means": board_means,
     }
 
 

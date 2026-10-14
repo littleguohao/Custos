@@ -14,7 +14,6 @@
 | # | 事项 | 优先级 | 卡在 | 下一步 | 出处 |
 |---|---|---|---|---|---|
 | 88 | 首次月度交易反思（2026-09 月），跑顺「月报 → TRADE_LESSONS」流程；之后按月执行，节奏见 MASTER_WORKFLOW §七 | P2 | 生产机 | 读 2026-09 月报 JSON（无则先补跑 `monthly_review`），按模板写 E3 并核对 L1~L7 | owner 2026-10-12；[TRADE_LESSONS](TRADE_LESSONS.md) |
-| 94 | R43 跑数前必修两处（owner review 2026-10-14）：①价格水平类维度（price / mcap_* / pe·pb·ps / dy）改用**未复权收盘**——前复权价含未来除权信息（look-ahead）；②board 统计量「最高组−最低组」恒 ≥0，C2 同号恒成立——改成预注册的固定对比（如创业+科创 − 主板）或各板块组单列 | P2 | coder | 修代码 + 修订注记（跑数前）+ 钉测：未来除权不改变段起点 price/mcap；board 价差可为负 | [R43](governance/research/R43_regime_sector_style.md) |
 | 95 | 判定段批次锁：批次登记文件（批次号 / 候选冻结配置哈希 / 开关批时间）；读判定段须带 --batch-id 与候选哈希，候选不在批、已读或批已关一律拒绝 | P2 | coder | 按 research README「判定段攒批协议」实现，带钉测 | owner 2026-10-14 |
 | 96 | 0AMV 手工录入防护：绝对值超阈值需 `--confirm-extreme` 二次确认（阈值先 15%，生产机按台账 amv_change_pct 绝对值的 p99.9×1.2 回填）；越线（≥+4 / ≤−2.3）报告醒目提示核对；当日漏录报告顶部告警不阻断；manual 计入「0AMV 可用」但保留 source 标签、不自动升 confirmed | P2 | coder | 实现 + 钉测；阈值由生产机统计回填 | owner 2026-10-14 |
 | 97 | R41 续作立项：计划止损（stop_loss_ref）加 5% 下限（止损距离 = max(计划距离, 5%)），vs 现行 EXIT_RULES，入判定段第一批 | P2 | coder | 预注册（判据沿用 R41 族 + 功效节）后复用 plan_rules_replay 加下限参数 | owner 2026-10-14；R41 机制（中位止损 1.17%）+ R10「5% 是崖」 |
@@ -118,6 +117,7 @@
 | 85 | mypy 进 CI 门槛防回退 | 2026-10-13 | v0.353（tests.yml mypy job） |
 | 89 | 研究宇宙改全量 as-of 实现 | 2026-10-13 | v0.356（universe.py 单源）；耗时实测 → #92 |
 | 90 | 新窗口布局落地（v2 段/隔离带/C5 退役） | 2026-10-13 | v0.356~v0.358；基线重测 → #92 |
+| 94 | R43 跑数前必修（raw_close 7 维 + board 拆 4 维） | 2026-10-14 | v0.372 |
 
 ## 维护约定
 

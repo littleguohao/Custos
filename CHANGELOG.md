@@ -373,6 +373,7 @@
 | 2026-10-14 | v0.369 | R43 修订注记补第 6 条：debt_ratio 恒记缺（PIT 台账无资产负债率字段，该维 C1 不过 untested），基本面族实际可算 9 维；功效节 Bonferroni α 回填定稿时按可得维度数（价格 28+基本面 9）重算——预注册维度清单变动留痕（以代码为准） | coder 落地核实（v0.368） | 跑数前已定稿 |
 | 2026-10-14 | v0.370 | **修 CI 红（test_repo_hygiene 双平台挂）**：regime_style_study 测试没注入 shares_fn/xdxr_fn/pit_records，默认股本读取走真实 xdxr 缓存、未命中在线拉取并往 data/market/xdxr 写失败墓碑（51 个垃圾文件）——本机全量误绿只因墓碑 mtime 早于会话起点（守卫只看会话内新建）；修法=conftest 加 adjust_factors.CACHE_DIR 重定向（结构性堵漏，全测试生效）+ 新测试四处调用点显式注入空实现；本机树墓碑已清 | CI 红 10a51f2 复盘 | 净克隆全量复现→修复后 xdxr 零写入钉测 |
 | 2026-10-14 | v0.371 | **owner 拍板全按推荐**：判定段攒批协议写入 research README（一批只读一次 / 判定线 q(1−0.05/m) / 第一批截止=#92 完成+4 周、r37_b1 不陪跑 / holdout 功效节通过或满 24 个月解冻、owner 发令）；TODO 新增 #94 R43 两处必修、#95 批次锁、#96 0AMV 录入防护、#97 R41 续作；#61/#26 结案，#81/#87 等第一批，#80 落点 R43 | owner | 治理守卫绿 |
+| 2026-10-14 | v0.372 | **#94 跑数前必修（owner review）**：①R43 价格水平类 7 维（price/mcap_float/mcap_total/pe_ttm/pb/ps_ttm/dy）段起点改未复权 raw_close——qfq 含未来除权=look-ahead（收益/比率类维持 qfq：窗内复权因子是公共乘子，免疫论证见模块 docstring）；②board 废「最高组−最低组」恒 ≥0 构造（C2 同号恒成立=失效），拆 4 维 signed（board_main/cyb/kcb/bj=该组−其余组等权超额），价格族池 28→31；R43 修订注记 +7/+8、维度表口径更正、注记 3 board 部分标 🔄；TODO #94 闭环 | owner review 2026-10-14 | 钉测 +5 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
