@@ -859,6 +859,14 @@ class TestWarmV0WarmupFilter:
         sig_dates = [s["date"] for s in out["600000"]["signals"]]
         assert sig_dates == ["2016-12-01", "2017-01-03"]  # 0=原行为不滤
 
+    def test_warm_prints_time_line(self, monkeypatch, capsys):
+        """TODO #92：warm_v0_signals 末尾打 [TIME] warm 耗时行
+        （纯新增——既有 [warmup] 进度行逐字不动）。"""
+        self._run(monkeypatch, 300)
+        err = capsys.readouterr().err
+        assert "[TIME] warm 2017-01-01~2017-12-31" in err
+        assert "（1/1 票有信号）" in err
+
 
 class TestMiningInJudgmentSegmentRejected:
     """挖掘窗 ∩ 判定段 ⇒ 拒绝（v0.361 owner review）。"""

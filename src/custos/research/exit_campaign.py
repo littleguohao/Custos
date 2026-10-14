@@ -911,7 +911,9 @@ def warm_v0_signals(
     """
     from custos.research import backtest_factors as bt  # noqa: PLC0415
     from custos.research import score_return_study as srs  # noqa: PLC0415
+    import time as _time  # noqa: PLC0415
 
+    _t0 = _time.time()  # TODO #92 warm 耗时埋点（[TIME] warm 行，return 前打印）
     per_code: dict[str, dict] = {}
     for i, code in enumerate(codes, 1):
         if i % 200 == 0:
@@ -943,6 +945,11 @@ def warm_v0_signals(
                 continue
             scores[s["date"]] = score
         per_code[code] = {"df": df, "signals": sigs, "scores": scores}
+    print(  # TODO #92 新增行（既有 [warmup] 进度行逐字不动）
+        f"[TIME] warm {start}~{end} {_time.time() - _t0:.0f}s"
+        f"（{len(per_code)}/{len(codes)} 票有信号）",
+        file=sys.stderr,
+    )
     return per_code
 
 

@@ -172,10 +172,14 @@ uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 �
   2. rdd 门用 `strategy_grid.rdd_gate_ok` 并传事先固定的参照档；C5 已退役（v0.356，
      终审=判定段 2017~2021 批量只读一次 + holdout，勿再引 `exit_c5_terminal`）；
   3. 窗口走 v2 段（`load_window.SEG_*` 常量），校验调 `load_window.segment_violation`；
-     段末隔离带用 `entry_deadline`/`clip_entries`；`--count` 用 `resolve_count`；
-     逐股加载的终端调 `check_reach`；
+     **挖掘窗**用 `load_window.mining_violation`（与判定段**相交即拒**，勿用
+     segment_violation 代替）；段末隔离带用 `entry_deadline`/`clip_entries`；
+     `--count` 用 `resolve_count`；逐股加载的终端调 `check_reach`；v2 模式 warm
+     传 `warmup_bars=300`（段前预热只读价格，legacy 显式窗=0）；
   4. 读受保护判定窗（2017~2021）调 `window_usage.record_use`（键 `judgment_2017_2021`，
-     旧键冻结拒写；读挖掘段不登记），`synthetic` 在函数**入口**快照；
+     旧键冻结拒写；读挖掘段不登记），判定口径用 `load_window.touches_judgment`
+     （**相交制**——判定子窗也登记，勿用精确相等 == SEG_JUDGMENT），`synthetic`
+     在函数**入口**快照；
   5. 宇宙经 `universe.resolve`（缺省=规则构造全量个股，`--codes-file` 仅兼容通道）；
      报告接 `provenance.build`（宇宙三件套）与 `cost_sensitivity`；
   6. 带零假设校准两连测 + 回归哨兵（`tests/test_null_calibration.py`，collect_all 口径

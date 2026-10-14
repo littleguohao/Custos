@@ -118,7 +118,9 @@ def warm_gates(
     """
     from custos.research import backtest_factors as bt  # noqa: PLC0415
     from custos.research import score_return_study as srs  # noqa: PLC0415
+    import time as _time  # noqa: PLC0415
 
+    _t0 = _time.time()  # TODO #92 warm 耗时埋点（[TIME] warm 行，return 前打印）
     per_code: dict[str, dict] = {}
     for i, code in enumerate(codes, 1):
         if i % 200 == 0:
@@ -154,6 +156,13 @@ def warm_gates(
                     continue
                 scores[s["date"]] = score
         per_code[code] = {"df": df, "gate_signals": gate_signals, "scores": scores}
+    # 分子=任一门有信号的票（per_code 含 df 加载成功但 0 信号的票，母体口径）
+    n_sig = sum(1 for p in per_code.values() if p["gate_signals"])
+    print(  # TODO #92 新增行（既有 [warmup] 进度行逐字不动）
+        f"[TIME] warm {start}~{end} {_time.time() - _t0:.0f}s"
+        f"（{n_sig}/{len(codes)} 票有信号）",
+        file=sys.stderr,
+    )
     return per_code
 
 

@@ -311,6 +311,13 @@ TOOLS: dict[str, tuple[str, str]] = {
         "复权口径诊断：量化未复权数据对回测与选股的影响",
     ),
     "probe_data_sources": ("diagnostic", "数据源探针：实测可用性/耗时/返回形状"),
+    "data_coverage_probe": (
+        "diagnostic",
+        "数据覆盖探针（TODO #91）：vipdoc 个股普查（按市场/板块组、first_date/"
+        "eligible_date=满 60 根的 as-of 资格日、逐年 active+eligible）+ 板块指数"
+        "（vipdoc 880/881 与 sector_index csv）+ 0AMV 台账最早/最晚——生产机跑"
+        "一条命令回答「挖掘 A（2000~2016）数据能回溯到哪天」；holdout 段不读",
+    ),
     "random_baseline_study": (
         "study",
         "随机 DSL 表达式 baseline 裁决实验（R32/#71：LLM 增量证据的对照组；"

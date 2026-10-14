@@ -1078,3 +1078,71 @@ class TestLoaderEndNoneClamp:
         self._stub(monkeypatch)
         out = bt._load_bars_local(["600000"], 0, None, None)
         assert list(out["600000"]["date"]) == ["2026-08-30", "2026-09-04"]
+
+
+# ---------- TODO #92 耗时埋点：payload["timing"] + [TIME] 总耗时行 ----------
+
+
+class TestTimingInstrumentation:
+    """#92：两条 run 分支末尾打新增 [TIME] 总耗时行；产物 payload 带 timing 块
+    （--summary-only 裁枝后仍保留）。既有 [TIME] 加载/评估行逐字不动
+    （m2_stop_sweep 只在注释里引用、无代码解析——新增行是纯增量）。"""
+
+    @staticmethod
+    def _synth(n=80):
+        # 同 TestScorerExpr._synth：先缓涨 60 日后急跌 20 日 ⇒ 必有成交/信号
+        closes, price = [], 100.0
+        for t in range(n):
+            price *= 1.01 if t < 60 else 0.96
+            closes.append(price)
+        return make_df(closes)
+
+    def test_trade_sim_timing_block_and_time_lines(self, tmp_path, capsys):
+        import re
+
+        out = tmp_path / "t.json"
+        rc = bt.main(
+            [
+                "--trade-sim",
+                "--codes",
+                "S000",
+                "--entry-filter",
+                "none",
+                "--scorer",
+                "baseline",
+                "--count",
+                "0",
+                "--summary-only",
+                "--out",
+                str(out),
+            ],
+            loader=lambda codes, count: {c: self._synth() for c in codes},
+        )
+        assert rc == 0
+        payload = _json.loads(out.read_text("utf-8"))
+        assert "trades" not in payload  # summary-only 裁枝
+        timing = payload["timing"]  # 但 timing 块保留
+        for k in ("load_s", "eval_s", "total_s"):
+            assert k in timing
+        # total_s ≥ load+eval（留 0.5s 取整余量；total 截至落盘前）
+        assert timing["total_s"] >= timing["load_s"] + timing["eval_s"] - 0.5
+        err = capsys.readouterr().err
+        assert re.search(r"\[TIME\] 加载\(含前复权\) \d+s / 评估 \d+s（加载占", err)
+        assert re.search(r"\[TIME\] 总耗时 \d+s（扫描 \d+s / 其余 \d+s）", err)
+
+    def test_signal_scan_timing_block_and_time_line(self, tmp_path, capsys):
+        import re
+
+        out = tmp_path / "s.json"
+        rc = bt.main(
+            ["--codes", "S000", "--count", "0", "--out", str(out)],
+            loader=lambda codes, count: {c: self._synth() for c in codes},
+        )
+        assert rc == 0
+        payload = _json.loads(out.read_text("utf-8"))
+        timing = payload["timing"]
+        for k in ("load_s", "eval_s", "total_s"):
+            assert k in timing
+        assert timing["total_s"] >= timing["load_s"] + timing["eval_s"] - 0.5
+        err = capsys.readouterr().err
+        assert re.search(r"\[TIME\] 总耗时 \d+s（扫描 \d+s / 其余 \d+s）", err)

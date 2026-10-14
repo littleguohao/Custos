@@ -5558,6 +5558,9 @@ def main(
     loader: Optional[Callable[[list[str], int], dict]] = None,
 ) -> int:
     argv_list = list(argv) if argv is not None else sys.argv[1:]
+    import time as _time  # noqa: PLC0415
+
+    _t_main0 = _time.time()  # TODO #92 总耗时埋点起点（[TIME] 总行见两分支末尾）
     expr_key = _preregister_scorer_expr(argv_list)  # 赶在 --scorer choices 冻结前
     ap = _build_parser()
     args = ap.parse_args(argv_list)
@@ -5622,8 +5625,8 @@ def main(
         if args.from_trades:
             # 放在 amv_regime 加载**之前**：复用时不需要指南针数据在本机可读
             return _portfolio_from_trades(args, codes)
-        return _run_trade_sim(args, codes, load, ap)
-    return _run_signal_scan(args, codes, load, horizons)
+        return _run_trade_sim(args, codes, load, ap, t_main0=_t_main0)
+    return _run_signal_scan(args, codes, load, horizons, t_main0=_t_main0)
 
 
 def _stream_trades(
@@ -5809,7 +5812,11 @@ def _print_trade_report(args: Any, payload: dict[str, Any], tsum: dict) -> None:
 
 
 def _run_trade_sim(
-    args: Any, codes: list[str], load: Callable, ap: argparse.ArgumentParser
+    args: Any,
+    codes: list[str],
+    load: Callable,
+    ap: argparse.ArgumentParser,
+    t_main0: Optional[float] = None,
 ) -> int:
     """--trade-sim 分支：amv/板块 gate 加载（fail-closed）→ 流式逐股回测 →
     耗时/内存汇报 → 空结果护栏 → payload 组装 → 组合层 → 落盘/控制台报告。
@@ -5819,7 +5826,13 @@ def _run_trade_sim(
     ``--signals-out`` 时扫描照常跑、候选信号额外落盘供后续方案重放。
     重放路径不需要 amv/板块 gate 在本机可读（它们只参与进场扫描，
     口径已由签名锁定）——同 ``--from-trades`` 不需要指南针数据的道理。
+
+    ``t_main0``（TODO #92）：main() 入口的计时起点（None=直接调用，以本函数
+    入口为起点）；末尾打 ``[TIME] 总耗时`` 行，payload 带 ``timing`` 块。
     """
+    import time as _time  # noqa: PLC0415
+
+    t0_main = t_main0 if t_main0 is not None else _time.time()
     signals_in = None
     if args.from_signals:
         signals_in = _load_signals_checked(args, codes)
@@ -5882,7 +5895,15 @@ def _run_trade_sim(
         "count": args.count,
         "trade_summary": tsum,
         "trades": trades,
+        # TODO #92 耗时埋点（--summary-only 只裁 trades，本块保留）；
+        # total_s=截至落盘前，末尾 [TIME] 总耗时行另计落盘/打印开销
+        "timing": {
+            "load_s": round(t_load, 1),
+            "eval_s": round(t_eval, 1),
+            "total_s": round(_time.time() - t0_main, 1),
+        },
     }
+    t_scan = t_load + t_eval  # 扫描耗时=加载+评估（[TIME] 总行拆分口径）
     if replay:
         payload["signals_reused_from"] = Path(args.from_signals).name
     if args.signals_out:
@@ -5891,14 +5912,34 @@ def _run_trade_sim(
     if args.out:
         _write_trade_result(args, payload, trades)
     _print_trade_report(args, payload, tsum)
+    t_total = _time.time() - t0_main
+    print(  # TODO #92 新增行（既有 [TIME] 加载/评估行逐字不动，见 _report_stream_stats）
+        f"[TIME] 总耗时 {t_total:.0f}s（扫描 {t_scan:.0f}s / "
+        f"其余 {max(t_total - t_scan, 0.0):.0f}s）",
+        file=sys.stderr,
+    )
     return 0
 
 
 def _run_signal_scan(
-    args: Any, codes: list[str], load: Callable, horizons: tuple[int, ...]
+    args: Any,
+    codes: list[str],
+    load: Callable,
+    horizons: tuple[int, ...],
+    t_main0: Optional[float] = None,
 ) -> int:
-    """非 trade-sim 分支：整批加载 → evaluate 走查 → 分档矩阵/门槛扫描/因子 lift。"""
+    """非 trade-sim 分支：整批加载 → evaluate 走查 → 分档矩阵/门槛扫描/因子 lift。
+
+    ``t_main0``（TODO #92）：main() 入口的计时起点（None=直接调用，以本函数
+    入口为起点）；末尾打 ``[TIME] 总耗时`` 行，payload 带 ``timing`` 块。
+    """
+    import time as _time  # noqa: PLC0415
+
+    t0_main = t_main0 if t_main0 is not None else _time.time()
+    _t0 = _time.time()
     bars = load(codes, args.count)
+    t_load = _time.time() - _t0
+    _t0 = _time.time()
     records = evaluate(
         bars,
         horizons=horizons,
@@ -5907,6 +5948,7 @@ def _run_signal_scan(
         scorer=SCORERS[args.scorer],
         gate_window=args.gate_window,
     )
+    t_eval = _time.time() - _t0
     _report_gates()
     rc_empty = _empty_result_guard(
         len(bars or {}), len(records), "条信号", args.allow_empty
@@ -5925,7 +5967,14 @@ def _run_signal_scan(
         "summary": summary,
         "horizon_band_matrix": matrix,
         "records": records,
+        # TODO #92 耗时埋点（total_s=截至落盘前；末尾 [TIME] 总行另计落盘/打印）
+        "timing": {
+            "load_s": round(t_load, 1),
+            "eval_s": round(t_eval, 1),
+            "total_s": round(_time.time() - t0_main, 1),
+        },
     }
+    t_scan = t_load + t_eval
     if args.threshold_sweep:
         payload["threshold_sweep"] = sweep_threshold(
             records, horizon=args.summary_horizon
@@ -5956,6 +6005,12 @@ def _run_signal_scan(
         print(payload["factor_lift"]["text"])
     print("\n=== summary(horizon=%d) ===" % args.summary_horizon)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
+    t_total = _time.time() - t0_main
+    print(  # TODO #92 新增行（本分支此前无 [TIME] 行，纯增量）
+        f"[TIME] 总耗时 {t_total:.0f}s（扫描 {t_scan:.0f}s / "
+        f"其余 {max(t_total - t_scan, 0.0):.0f}s）",
+        file=sys.stderr,
+    )
     return 0
 
 

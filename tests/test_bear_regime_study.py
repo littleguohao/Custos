@@ -1160,6 +1160,39 @@ class TestWarmGatesWarmupFilter:
             "2017-01-03"
         ]
 
+    def test_warm_gates_prints_time_line(self, monkeypatch, capsys):
+        """TODO #92：warm_gates 末尾打 [TIME] warm 耗时行；分子=任一门有信号的票
+        （per_code 含 df 加载成功但 0 信号的母体票，不能拿 len(per_code) 充数）。"""
+        import pandas as pd
+
+        from custos.research import backtest_factors as bt
+        from custos.research import score_return_study as srs
+
+        df = pd.DataFrame({"date": ["2017-01-03"]})
+        monkeypatch.setattr(bt, "_load_one_bars", lambda *a, **k: df)
+
+        def _eval(bars, **kw):
+            kw["signals_out"].extend([{"i": 0, "date": "2017-01-03"}])
+            return []
+
+        monkeypatch.setattr(bt, "evaluate_trades", _eval)
+        monkeypatch.setattr(
+            srs, "asof_technical_score", lambda *a, **k: (50.0, "中", {})
+        )
+        brs.warm_gates(
+            ["600000"],
+            {"2017-01-03": "做多"},
+            None,
+            gates=["j_low"],
+            count=500,
+            cost_bps=25.0,
+            start="2017-01-01",
+            end="2017-12-31",
+        )
+        err = capsys.readouterr().err
+        assert "[TIME] warm 2017-01-01~2017-12-31" in err
+        assert "（1/1 票有信号）" in err
+
 
 class TestMiningInJudgmentSegmentRejected:
     """挖掘窗 ∩ 判定段 ⇒ 拒绝（v0.361 owner review）。"""

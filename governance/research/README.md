@@ -235,7 +235,9 @@ margin」这个前提，R1 的量级随后按已实现口径重取（只在 0AMV
     （任一序皆可，旧「mining 必在 judgment 之前」退役）。
   - **C5（pre2019 终审）取消**，由判定段 + holdout 接替；已判 C5 结论（R36/R37）保留不改。
   - 切换后第一步是**基线重测**（R1/R4/R11 量级），**只在两段挖掘上做**；判定段基线留到第一批候选判定时同次读出。
-  - 2000~2009 先核数据（TODO #91）：0AMV 台账能否回溯（不能则挖掘 A 从有数据日起）、板块覆盖稀（2011-10 前 198/587）。
+  - 2000~2009 先核数据（TODO #91）：0AMV 台账能否回溯（不能则挖掘 A 从有数据日起）、板块覆盖稀（2011-10 前 198/587）。生产机跑
+    `uv run python -m custos.research data_coverage_probe --tdx-root <通达信根> --out artifacts/logs/data_coverage_probe.json`，
+    JSON 贴回本节。基线重测的命令与读数口径见本节末「基线重测 runbook」。
 
 - 🔄 **旧双窗（v2 前制度，R40 及此前单元按其跑数；勿用于新单元）**：挖掘窗
   2022-01-01~2024-07-31 / 判定窗 2024-08-01~2026-09-04（s3000 钉死宇宙）；寻优全程不读
@@ -258,6 +260,49 @@ margin」这个前提，R1 的量级随后按已实现口径重取（只在 0AMV
   （live 按当前名称排除 ST，没有历史 ST 状态，as-of 复现不了——与 live 的已知差异）；
   不设版本号，provenance 记宇宙规则 + `n_codes` + `universe_sha256`（解析后名单指纹），
   跨运行累积的台账/轨迹池宇宙不一致即拒绝续跑。vipdoc 无退市股，幸存者偏差不变（R14）。
+
+#### 基线重测 runbook（TODO #92，v2 口径）
+
+命令**写死**，改动须先改这里再跑。公共参数（宇宙缺省=全量 as-of，不传任何 codes 旗标）：
+`--scorer baseline --entry-filter j_low --stop-mode pct --stop-pct 8 --bbi-consec 2 --cost-bps 25 --trade-sim --seed 0`。
+
+- **R11 基准**（无择时纯出场组合，已实现口径）×2 段：
+  ```bash
+  uv run python -m custos.research backtest_factors --trade-sim \
+    --scorer baseline --entry-filter j_low --stop-mode pct --stop-pct 8 \
+    --bbi-consec 2 --cost-bps 25 --seed 0 \
+    --start 2000-01-01 --end 2016-12-31 --count 7000 \
+    --summary-only --out artifacts/logs/baseline_v2/r11_segA.json
+  uv run python -m custos.research backtest_factors --trade-sim \
+    --scorer baseline --entry-filter j_low --stop-mode pct --stop-pct 8 \
+    --bbi-consec 2 --cost-bps 25 --seed 0 \
+    --start 2022-01-01 --end 2026-09-04 --count 1600 \
+    --summary-only --out artifacts/logs/baseline_v2/r11_segB.json
+  ```
+  读数口径：trades 汇总块 `trade_summary.n` / `trade_summary.win_rate` /
+  `trade_summary.expectancy` / `trade_summary.expectancy_R`。**剔除 open_end**：
+  bt 裸跑没有段末隔离带（那是四终端的 `clip_entries` 纪律），段末交易会按
+  open_end 强平在段末 bar（R11 已证偏正）——用 `trade_summary.exit_reasons.open_end`
+  的 n/avg_return 从全量期望剔除（n_r·E_r = n·E − n_oe·E_oe 后除以 n−n_oe），
+  或重跑不带 `--summary-only` 逐笔过滤 `reason` 以 open_end 开头
+  （同 `score_return_study.py` 口径）；win_rate 按全量报并注明含 open_end。
+- **R4 择时网格** 2×2×2 = 8 条：公共参数上叠 `--portfolio --risk-pct 1 --max-concurrent 5 --max-pos 20`；
+  AMV 腿加 `--amv-long-only`，板块腿加 `--sector-filter`（依赖 `data/market/sector_index/`
+  + `sector_members.json`，生产机已有）；窗同上两段；产物
+  `artifacts/logs/baseline_v2/r4_seg{A,B}_{amv,sector,amv_sector,none}.json`。
+  读数口径：portfolio 块 `portfolio.cagr` / `portfolio.max_drawdown` /
+  `portfolio.total_return` / `portfolio.return_over_maxdd`（收益/回撤比，
+  注意键名不是 ret_dd）+ trades 层 `trade_summary.expectancy_R`（open_end 口径同上）。
+- **R1 量级不单跑**：取自 R4 网格「有 AMV 无板块」两格
+  （`r4_segA_amv.json` / `r4_segB_amv.json` 的 `trade_summary.expectancy_R`
+  + `portfolio.cagr` / `portfolio.max_drawdown`）。
+- 注记：`--count` 含 ~300 根预热余量；若 #91 把挖掘 A 起点推后，用
+  `uv run python -m custos.research load_window --start YYYY-MM-DD` 重算 count。
+  引擎 CLI 无 `--warmup-bars`，段起点指标冷启动与 R1/R4/R11 原口径一致（可比性优先）；
+  判定段基线留到首批候选判定时同次读出。
+- **耗时收集**（v0.364 埋点）：每条命令把 stderr 的 `[TIME]` 行
+  （`加载(含前复权)…/ 评估…` 与 `总耗时…`）与产物 JSON 的 `timing` 块
+  （load_s/eval_s/total_s）贴回本节；四终端 warm 耗时由 `[TIME] warm …` 行提供。
 
 ### 判据件（单一来源；新终端必须复用，禁止再抄一份）
 
@@ -287,13 +332,14 @@ margin」这个前提，R1 的量级随后按已实现口径重取（只在 0AMV
 | `score_evolution_study` | R34 / R36 | 打分基因组裁决；`--v0-lattice` 调权格 / `--addon-leg` 骨架加腿 |
 | `score_filter_study` | R36 P4 | 排序器→过滤器判据 |
 | `exit_campaign` | R37 | 出场基因组战役壳（CTL-1~5；台账续跑带 objective 版本守卫） |
-| `exit_c5_terminal` / `score_c5_terminal` | R37 / R36 | pre2019 终审（只能杀不能确认） |
+| `exit_c5_terminal` / `score_c5_terminal` | R37 / R36 | 🔄 已退役（v0.356，勿用于新判决——pre2019 终审由判定段 2017~2021 + holdout 接替，与判据件表对齐；保留只为复现 R36/R37） |
 | `factor_exit_study` | R39 | 因子分桶→出场档 80 格枚举，主基准 uniform-best |
 | `bear_regime_study` | R40 | 空头区间 46 门×5 档，随机入场臂基准 |
 | `plan_rules_replay` | R41 | 计划止损 vs 现行出场配对回放（引擎信号级 `stop_override` 钩子） |
 | `score_tier_position_study` | R42 | V0 分档单调性与加权 expectancy_R |
 | `plan_shadow_review` | #60 | live 影子台账分歧段事后打分（N=5/10） |
 | `factor_ic_profile` | 分诊 | 截面 RankIC/ICIR 可比表——**分诊镜，不是晋级判据** |
+| `data_coverage_probe` | #91 | 数据覆盖探针：vipdoc 个股/板块指数 + 0AMV 台账 + sector_index csv 覆盖普查（定挖掘 A 起点） |
 | `power_mde` / `load_window` / `window_usage` / `criteria_kit` / `provenance` / `cost_sensitivity` | 基础件 | 见上「研究纪律」 |
 
 **LLM 进化引擎口径**：LLM 只做假设生成/变异/杂交与解读；live 链路零 LLM；候选晋级 live
