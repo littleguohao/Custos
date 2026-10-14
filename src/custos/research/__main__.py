@@ -186,6 +186,13 @@ TOOLS: dict[str, tuple[str, str]] = {
         "exit_c5_terminal 同族镜像）：冻结 v0-lattice 基因组 vs 等倍率基准，"
         "日簇配对 bootstrap + CI 三分，只能杀不能确认",
     ),
+    "regime_style_study": (
+        "study",
+        "R43 0AMV 区间段的板块与股票风格（描述性条件化，不接交易引擎）：区间段"
+        "切分（台账重放，首段/<5日/跨段丢弃）→ 38 维 as-of 五分位价差 → C1~C4"
+        "（C4=伪段随机放置 + 族内 max|t|，两族共用同组伪段）→ 四态；判定段不读"
+        "（攒批协议未拍板）；板块层 880/881 指数排名 + 层级 C3",
+    ),
     "score_filter_study": (
         "study",
         "R36 Phase 4 排序器→过滤器判据：前置剔除尾部 X%（X 网格与 4 测试对象"

@@ -159,6 +159,8 @@
 
 ### 工程落点（TODO #93，coder）
 
+- ✅ 工具已落地（v0.368，`research/regime_style_study.py`），跑数待 #91 后生产机发令。
+
 - 新工具 `research/regime_style_study.py`：区间段切分（复用 `load_amv_regime`）→ 逐段
   宇宙 / 停牌过滤 → 38 维 as-of 特征 → 五分位价差 → C1~C4 → 四态；板块层同框架。
 - 必接（AGENTS §5 合入清单）：`criteria_kit`、`load_window`（段检查 + holdout）、

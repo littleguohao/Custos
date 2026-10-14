@@ -178,8 +178,47 @@ class TestSentinelMaxOf5:
 
 
 # ---------------------------------------------------------------------------
-# plan_rules_replay（R41 终端）
+# regime_style_study（R43 终端，v0.368）
 # ---------------------------------------------------------------------------
+
+
+def _r43_run(edge: bool, **inj):
+    def run(seed):
+        from test_regime_style_study import _calib_run
+
+        return _calib_run(seed, edge, **inj)
+
+    return run
+
+
+class TestRegimeStyleCalibration:
+    """R43 零假设两连测：纯噪声（收益与特征无关）5 种子 confirmed_pass 0/5；
+    植入 regime 专属价差（空头段 age 高龄组系统性占优——静态序不漂移）可识别。"""
+
+    def test_noise(self):
+        hn.assert_noise_calibration("regime_style", _r43_run(False))
+
+    def test_edge_detected(self):
+        hn.assert_edge_detected("regime_style", _r43_run(True))
+
+
+class TestSentinelAlignedPseudo:
+    """回归哨兵：伪段构造换成「与真实同向段对齐」的错误实现（零假设 = 真实段
+    本身 ⇒ 族 max|t| 池恒 ≥ 候选 |t|，q95 永远压线）⇒ 植入用例必须**不再**
+    confirmed_pass。能抓住这个 bug 才证明 C4 的「随机放置」语义有效。"""
+
+    @staticmethod
+    def _aligned_draw(real_segs, win_days, *, n_draws, seed, max_retry=100):
+        # 错误实现（仅哨兵复刻，勿用于生产）：伪段 = 真实段本身
+        aligned = [dict(s) for s in real_segs]
+        return {"draws": [aligned for _ in range(n_draws)], "n_dropped": 0}
+
+    def test_aligned_pseudo_breaks_edge_detection(self, monkeypatch):
+        from custos.research import regime_style_study as rs
+
+        monkeypatch.setattr(rs, "draw_pseudo_placements", self._aligned_draw)
+        with pytest.raises(AssertionError, match="未被识别"):
+            hn.assert_edge_detected("regime_style[对齐哨兵]", _r43_run(True), seed=0)
 
 
 def _prr_run(replay, **kw):
