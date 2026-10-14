@@ -491,6 +491,17 @@ def run_study(
     ``collector``/``rq_fetcher`` 可注入（测试合成数据）。空结果护栏：
     任一窗 0 候选 → RuntimeError（不落盘）。
     """
+    # 判定段批次锁（v0.374，TODO #95）：数据装配（_prepare_inputs）之前硬门——
+    # 注入件非 None（合成）不查；判定窗与受保护段不相交（legacy）不查
+    from custos.research import judgment_batch as jb  # noqa: PLC0415
+
+    jb.gate_judgment_read(
+        args,
+        _build_parser(),
+        synthetic=(collector is not None or rq_fetcher is not None),
+        judgment_span=(args.judgment_start, args.judgment_end),
+        tool="score_filter_study",
+    )
     windows, codes, exit_spec = _prepare_inputs(args)
     enriched, baseline = _collect_baselines(
         args, collector, rq_fetcher, windows, codes, exit_spec
@@ -515,6 +526,11 @@ def run_study(
         if _is_protected_j
         else None
     )
+    if getattr(args, "_judgment_gated", False):
+        # 批次锁过闸（v0.374）⇒ 登记读完（末位候选读完自动关批）
+        jb.mark_read(
+            args.batch_id, args.candidate_id, tool="score_filter_study", tag=args.tag
+        )
     from custos.research import provenance as pv  # noqa: PLC0415
 
     return {
@@ -599,6 +615,14 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--n-random", type=int, default=50, help="每 X 档随机过滤器臂数")
     ap.add_argument("--seed", type=int, default=20261005)
     ap.add_argument("--tag", default="r36_p4_v1")
+    # 判定段批次锁（v0.374，TODO #95）：读判定段 2017~2021 须带批次身份
+    ap.add_argument("--batch-id", default="", help="判定段批次号（攒批协议）")
+    ap.add_argument("--candidate-id", default="", help="批内候选 id")
+    ap.add_argument(
+        "--print-config-hash",
+        action="store_true",
+        help="只打印 <tool>:<配置哈希> 并退出（冻结入批流程；不碰数据）",
+    )
     return ap
 
 
@@ -622,6 +646,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         )  # v0.358 段检查单源（含 holdout；pre2019 拒绝已退役）
         if _sv:
             ap.error(f"{name} {_sv}")
+    if args.print_config_hash:
+        # 冻结入批流程（TODO #95）：run_study 不改参数，此处即门同状态
+        from custos.research import judgment_batch as jb  # noqa: PLC0415
+
+        return jb.print_config_hash_and_exit(args, "score_filter_study")
     try:
         rep = run_study(args)
     except (RuntimeError, ValueError) as exc:

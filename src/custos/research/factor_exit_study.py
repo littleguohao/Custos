@@ -848,6 +848,7 @@ def _assemble_report(
     ``segments``：v2 三段布局的段块（各段区间 + n_signals + n_clipped + 合并
     总数）；legacy 单段传 None ⇒ 不出 segments 块（报告与改前逐位一致）。
     """
+    from custos.research import judgment_batch as jb  # noqa: PLC0415
     from custos.research import load_window as lw  # noqa: PLC0415
 
     # 判定窗使用台账（v0.321，owner 方法论 review #1）：本报告=该窗第 k 次被读。
@@ -866,6 +867,11 @@ def _assemble_report(
         if _is_protected_judgment
         else None
     )
+    if getattr(args, "_judgment_gated", False):
+        # 批次锁过闸（v0.374）⇒ 登记读完（末位候选读完自动关批）
+        jb.mark_read(
+            args.batch_id, args.candidate_id, tool="factor_exit_study", tag=args.tag
+        )
     from custos.research import provenance as pv  # noqa: PLC0415
     from custos.research.load_window import EXIT_BARS_HOLDOUT_NOTE  # noqa: PLC0415
 
@@ -978,6 +984,17 @@ def run_study(
     from custos.research import strategy_grid as sg  # noqa: PLC0415
 
     mining_segs, judgment_win = _resolve_layout(args)
+    # 判定段批次锁（v0.374，TODO #95）：数据加载之前硬门——合成运行（注入件
+    # 非 None）/legacy 窗不查；v2 缺省窗生产方向必须带合法批次
+    from custos.research import judgment_batch as jb  # noqa: PLC0415
+
+    jb.gate_judgment_read(
+        args,
+        _build_parser(),
+        synthetic=injected,
+        judgment_span=judgment_win,
+        tool="factor_exit_study",
+    )
     v2 = len(mining_segs) > 1
     regime: dict[str, str] = {}
     if warm_fn is None:
@@ -1209,6 +1226,14 @@ def _build_parser() -> argparse.ArgumentParser:
         default="artifacts/logs/factor_exit",
         help="产物根目录（默认 artifacts/logs/factor_exit）",
     )
+    # 判定段批次锁（v0.374，TODO #95）：读判定段 2017~2021 须带批次身份
+    ap.add_argument("--batch-id", default="", help="判定段批次号（攒批协议）")
+    ap.add_argument("--candidate-id", default="", help="批内候选 id")
+    ap.add_argument(
+        "--print-config-hash",
+        action="store_true",
+        help="只打印 <tool>:<配置哈希> 并退出（冻结入批流程；不碰数据）",
+    )
     return ap
 
 
@@ -1289,6 +1314,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         args.count = resolve_count(args.count, earliest)  # v0.328 缺省自动推算
         check_reach(args.count, earliest)
+        if args.print_config_hash:
+            # 冻结入批流程（TODO #95）：哈希必须与批次门同状态（参数归一化之后）
+            from custos.research import judgment_batch as jb  # noqa: PLC0415
+
+            return jb.print_config_hash_and_exit(args, "factor_exit_study")
         rep = run_study(args)
     except (RuntimeError, ValueError) as exc:
         print(f"[ERR] {exc}", file=sys.stderr)

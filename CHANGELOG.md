@@ -375,6 +375,7 @@
 | 2026-10-14 | v0.371 | **owner 拍板全按推荐**：判定段攒批协议写入 research README（一批只读一次 / 判定线 q(1−0.05/m) / 第一批截止=#92 完成+4 周、r37_b1 不陪跑 / holdout 功效节通过或满 24 个月解冻、owner 发令）；TODO 新增 #94 R43 两处必修、#95 批次锁、#96 0AMV 录入防护、#97 R41 续作；#61/#26 结案，#81/#87 等第一批，#80 落点 R43 | owner | 治理守卫绿 |
 | 2026-10-14 | v0.372 | **#94 跑数前必修（owner review）**：①R43 价格水平类 7 维（price/mcap_float/mcap_total/pe_ttm/pb/ps_ttm/dy）段起点改未复权 raw_close——qfq 含未来除权=look-ahead（收益/比率类维持 qfq：窗内复权因子是公共乘子，免疫论证见模块 docstring）；②board 废「最高组−最低组」恒 ≥0 构造（C2 同号恒成立=失效），拆 4 维 signed（board_main/cyb/kcb/bj=该组−其余组等权超额），价格族池 28→31；R43 修订注记 +7/+8、维度表口径更正、注记 3 board 部分标 🔄；TODO #94 闭环 | owner review 2026-10-14 | 钉测 +5 |
 | 2026-10-14 | v0.373 | **#94 追加必修（owner review 漏网一维）**：turnover20 改还原原始量——apply_qfq 把成交量 ÷ 因子，量水平同样含未来送转（owner 实测 10 送 10 后段起点换手率 1%→2%）；还原 raw_vol = volume × close / raw_close（adjust_factors.py:572 语义核实）；amt 系（额不调）与 vr20/amt_chg20（窗内量比、公共乘子免疫）确认不受影响；R43 修订注记 +9、维度表同步 | owner 实测发现 | 钉测：未来除权不改变 turnover20（污染对照断言同在） |
+| 2026-10-14 | v0.374 | **判定段批次锁落地（TODO #95）**：新模块 judgment_batch（judgment_batches.jsonl 入库 append-only；open/五路拒/mark_read 末位自动关批/close/status）；7+1 终端加 --batch-id/--candidate-id/--print-config-hash（冻结配置哈希与门同状态）；门禁 synthetic 快照豁免+相交制，缺批/五路不过 ⇒ exit 2；evolution_loop 可经 --final-judge 读判定段却从不登记=既存漏洞，同装门+补 record_use；conftest 重定向 REGISTRY | owner 2026-10-14 | 钉测：状态机/五路拒/门豁免+8 终端生产方向 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

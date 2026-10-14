@@ -537,6 +537,17 @@ def _wu_spy(monkeypatch):
     return calls
 
 
+def _with_batch(args, tool):
+    """v0.374 批次锁（TODO #95）：生产方向（注入件全 None）跑数须先入批——
+    登记文件已被 conftest 改道 tmp，这里开批并把批次身份写进 args。"""
+    from custos.research import judgment_batch as jb
+
+    h = jb.config_hash(tool, args)
+    jb.open_batch("b1", [{"id": "c1", "config_hash": h, "unit": "R", "note": "t"}])
+    args.batch_id, args.candidate_id = "b1", "c1"
+    return jb
+
+
 class TestProductionRecordUse:
     """run_study 传 warm_fn=None（**生产路径**）+ 生产依赖全 monkeypatch 成
     合成 ⇒ record_use 必须以 ``synthetic=False`` 被调且 k 直通报告。防回归：
@@ -585,17 +596,19 @@ class TestProductionRecordUse:
             ),
         )
         # fxt._args_v2 无宇宙/count 字段（注入路径用不到）——生产分支要读
+        args = _args_v2(
+            n_random=2,
+            c4_min_pool=2,
+            codes="",
+            codes_file="",
+            universe_local=False,
+            universe_sample=0,
+            universe_seed=42,
+            count=2000,
+        )
+        _with_batch(args, "factor_exit_study")  # v0.374：生产方向须带批次
         return fes.run_study(
-            _args_v2(
-                n_random=2,
-                c4_min_pool=2,
-                codes="",
-                codes_file="",
-                universe_local=False,
-                universe_sample=0,
-                universe_seed=42,
-                count=2000,
-            ),
+            args,
             warm_fn=None,
             replay_fn=None,
         )
@@ -711,19 +724,21 @@ class TestProductionRecordUse:
                 subset, params
             ),
         )
+        args = _args(
+            judgment_start="2018-01-01",
+            judgment_end="2020-12-31",
+            n_random=2,
+            c4_min_pool=2,
+            codes="",
+            codes_file="",
+            universe_local=False,
+            universe_sample=0,
+            universe_seed=42,
+            count=2000,
+        )
+        _with_batch(args, "factor_exit_study")  # v0.374：判定子窗相交 ⇒ 须带批次
         rep = fes.run_study(
-            _args(
-                judgment_start="2018-01-01",
-                judgment_end="2020-12-31",
-                n_random=2,
-                c4_min_pool=2,
-                codes="",
-                codes_file="",
-                universe_local=False,
-                universe_sample=0,
-                universe_seed=42,
-                count=2000,
-            ),
+            args,
             warm_fn=None,
             replay_fn=None,
         )
@@ -732,6 +747,43 @@ class TestProductionRecordUse:
         assert calls[0]["window"] == "judgment_2017_2021"
         assert calls[0]["synthetic"] is False
         assert rep["window_usage"]["window"] == "judgment_2017_2021"
+
+    def test_production_without_batch_rejected(self):
+        """v0.374 批次锁（TODO #95）：v2 缺省窗 + 无批次 ⇒ 数据加载之前
+        ap.error（exit 2）——门在暖身/加载之前，无需任何数据桩。"""
+        with pytest.raises(SystemExit) as exc:
+            fes.run_study(
+                _args_v2(
+                    n_random=2,
+                    c4_min_pool=2,
+                    codes="",
+                    codes_file="",
+                    universe_local=False,
+                    universe_sample=0,
+                    universe_seed=42,
+                    count=2000,
+                ),
+                warm_fn=None,
+                replay_fn=None,
+            )
+        assert exc.value.code == 2
+
+    def test_mark_read_lands_and_auto_closes(self, monkeypatch):
+        """带合法批次 ⇒ 过闸，收尾 mark_read 落进 tmp 登记文件；单候选批
+        读完自动关批（末位候选读完自动 close）。"""
+        _wu_spy(monkeypatch)
+        self._production_run(monkeypatch)
+        from custos.research import judgment_batch as jb
+
+        rows = [
+            json.loads(ln)
+            for ln in jb.REGISTRY.read_text(encoding="utf-8").splitlines()
+            if ln.strip()
+        ]
+        assert [r["ev"] for r in rows] == ["open", "read", "close"]
+        assert (
+            rows[1]["candidate_id"] == "c1" and rows[1]["tool"] == "factor_exit_study"
+        )
 
 
 class TestV2Layout:

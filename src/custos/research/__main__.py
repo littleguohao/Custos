@@ -326,6 +326,13 @@ TOOLS: dict[str, tuple[str, str]] = {
         "（vipdoc 880/881 与 sector_index csv）+ 0AMV 台账最早/最晚——生产机跑"
         "一条命令回答「挖掘 A（2000~2016）数据能回溯到哪天」；holdout 段不读",
     ),
+    "judgment_batch": (
+        "diagnostic",
+        "判定段批次锁（TODO #95，攒批协议的代码闸门）：open/close/status 管理"
+        " judgment_batches.jsonl（入库 append-only）；7+1 终端读判定段 "
+        "2017~2021 须带 --batch-id/--candidate-id + 冻结配置哈希，候选不在批/"
+        "已读/批已关一律拒绝；末位候选读完自动关批",
+    ),
     "random_baseline_study": (
         "study",
         "随机 DSL 表达式 baseline 裁决实验（R32/#71：LLM 增量证据的对照组；"

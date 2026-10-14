@@ -293,6 +293,14 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--out-dir", default="", help=f"产物根目录（默认 {OUTDIR}），tag 作子目录"
     )
+    # 判定段批次锁（v0.374，TODO #95）：读判定段 2017~2021 须带批次身份
+    ap.add_argument("--batch-id", default="", help="判定段批次号（攒批协议）")
+    ap.add_argument("--candidate-id", default="", help="批内候选 id")
+    ap.add_argument(
+        "--print-config-hash",
+        action="store_true",
+        help="只打印 <tool>:<配置哈希> 并退出（冻结入批流程；不碰数据）",
+    )
     return ap
 
 
@@ -2599,6 +2607,25 @@ def main(
             )
         legs, legs_source = _resolve_legs(args, ap)
     mining, judgment = _validate_windows(args, ap)
+    if args.print_config_hash:
+        # 冻结入批流程（TODO #95）：哈希必须与批次门同状态（参数归一化之后）
+        from custos.research import judgment_batch as jb  # noqa: PLC0415
+
+        return jb.print_config_hash_and_exit(args, "score_evolution_study")
+    # 判定段批次锁（v0.374，TODO #95）：宇宙/数据装配之前硬门——注入件非 None
+    # （合成运行）不查；判定窗与受保护段不相交（legacy/未给）不查
+    from custos.research import judgment_batch as jb  # noqa: PLC0415
+
+    jb.gate_judgment_read(
+        args,
+        ap,
+        synthetic=any(
+            x is not None
+            for x in (cell_runner, cell_runner_coarse, v0_runner, v0l_collector)
+        ),
+        judgment_span=(judgment.start, judgment.end) if judgment is not None else None,
+        tool="score_evolution_study",
+    )
     exit_spec = _resolve_exit(args, ap)
     _validate_gate(args, ap)
     codes = _resolve_universe(args, ap)
@@ -2690,6 +2717,11 @@ def main(
             if _is_protected_j
             else None
         )
+        if getattr(args, "_judgment_gated", False):
+            # 批次锁过闸（v0.374）⇒ 登记读完（末位候选读完自动关批）
+            jb.mark_read(
+                args.batch_id, args.candidate_id, tool="score_evolution_study", tag=tag
+            )
         rep["window_usage"] = {
             "window": "judgment_2017_2021" if _is_protected_j else "mining_segment",
             "k": _wu_k,

@@ -662,6 +662,17 @@ def _wu_spy(monkeypatch):
     return calls
 
 
+def _with_batch(args, tool):
+    """v0.374 批次锁（TODO #95）：生产方向（注入件全 None）跑数须先入批——
+    登记文件已被 conftest 改道 tmp，这里开批并把批次身份写进 args。"""
+    from custos.research import judgment_batch as jb
+
+    h = jb.config_hash(tool, args)
+    jb.open_batch("b1", [{"id": "c1", "config_hash": h, "unit": "R", "note": "t"}])
+    args.batch_id, args.candidate_id = "b1", "c1"
+    return jb
+
+
 class TestProductionRecordUse:
     """run_study 传 warm_fn=None（**生产路径**）+ 生产依赖全 monkeypatch 成
     合成 ⇒ record_use 必须以 ``synthetic=False`` 被调且 k 直通报告（生产
@@ -704,9 +715,9 @@ class TestProductionRecordUse:
     def test_production_records_with_synthetic_false(self, monkeypatch):
         """v2 缺省布局（判定=受保护段）：生产路径登记新键 + synthetic=False。"""
         calls = _wu_spy(monkeypatch)
-        rep = self._production_run(
-            monkeypatch, _v2_spec(), _v2_args(n_random=2, c4_min_pool=2)
-        )
+        args = _v2_args(n_random=2, c4_min_pool=2)
+        jb = _with_batch(args, "score_tier_position_study")  # v0.374 须带批次
+        rep = self._production_run(monkeypatch, _v2_spec(), args)
         assert len(calls) == 1
         assert calls[0]["unit"] == "R42"
         assert calls[0]["window"] == "judgment_2017_2021"
@@ -714,6 +725,23 @@ class TestProductionRecordUse:
         assert rep["window_usage"]["window"] == "judgment_2017_2021"
         assert rep["window_usage"]["k"] == 7, "生产口径 k 直通报告"
         assert "第 7 次被读" in rep["window_usage"]["note"]
+        # v0.374：收尾 mark_read 落 tmp 登记文件（单候选 ⇒ 末位读完自动关批）
+        rows = [
+            json.loads(ln)
+            for ln in jb.REGISTRY.read_text(encoding="utf-8").splitlines()
+            if ln.strip()
+        ]
+        assert [r["ev"] for r in rows] == ["open", "read", "close"]
+        assert rows[1]["tool"] == "score_tier_position_study"
+
+    def test_production_without_batch_rejected(self):
+        """v0.374 批次锁（TODO #95）：v2 缺省窗 + 无批次 ⇒ 数据加载之前
+        ap.error（exit 2）——门在暖身/加载之前，无需任何数据桩。"""
+        with pytest.raises(SystemExit) as exc:
+            stp.run_study(
+                _v2_args(n_random=2, c4_min_pool=2), warm_fn=None, replay_fn=None
+            )
+        assert exc.value.code == 2
 
     def test_legacy_production_not_registered(self, monkeypatch):
         """legacy R40 窗（判定 ⊆ 挖掘B）：生产路径也不登记（v2 口径——读
@@ -738,17 +766,19 @@ class TestProductionRecordUse:
                 lambda k: f"2019-{(k % 12) + 1:02d}-{(k % 28) + 1:02d}", i0=5000
             ),
         }
+        args = _args(
+            mining_start="2022-01-01",
+            mining_end="2024-07-31",
+            judgment_start="2018-01-01",
+            judgment_end="2020-12-31",
+            n_random=2,
+            c4_min_pool=2,
+        )
+        _with_batch(args, "score_tier_position_study")  # v0.374：判定子窗相交 ⇒ 带批次
         rep = self._production_run(
             monkeypatch,
             spec,
-            _args(
-                mining_start="2022-01-01",
-                mining_end="2024-07-31",
-                judgment_start="2018-01-01",
-                judgment_end="2020-12-31",
-                n_random=2,
-                c4_min_pool=2,
-            ),
+            args,
         )
         assert len(calls) == 1
         assert calls[0]["unit"] == "R42"

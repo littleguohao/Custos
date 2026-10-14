@@ -250,7 +250,7 @@ class TestProductionRecordUse:
             seed=0,
         )
 
-    def _run(self, monkeypatch, args):
+    def _run(self, monkeypatch, args, *, batch=True):
         monkeypatch.setattr(
             sf,
             "_prepare_inputs",
@@ -291,6 +291,15 @@ class TestProductionRecordUse:
             "record_use",
             lambda *a, **kw: calls.append({"args": a, "kwargs": kw}) or 1,
         )
+        if batch:
+            # v0.374 批次锁（TODO #95）：生产方向（无注入件）须先入批
+            from custos.research import judgment_batch as jb
+
+            h = jb.config_hash("score_filter_study", args)
+            jb.open_batch(
+                "b1", [{"id": "c1", "config_hash": h, "unit": "R36", "note": "t"}]
+            )
+            args.batch_id, args.candidate_id = "b1", "c1"
         sf.run_study(args)
         return calls
 
@@ -300,6 +309,24 @@ class TestProductionRecordUse:
         assert len(calls) == 1
         assert calls[0]["args"][:2] == ("R36-P4", "judgment_2017_2021")
         assert calls[0]["kwargs"]["synthetic"] is False
+        # v0.374：收尾 mark_read 落 tmp 登记文件（单候选 ⇒ 末位读完自动关批）
+        import json as _j
+
+        from custos.research import judgment_batch as jb
+
+        rows = [
+            _j.loads(ln)
+            for ln in jb.REGISTRY.read_text(encoding="utf-8").splitlines()
+            if ln.strip()
+        ]
+        assert [r["ev"] for r in rows] == ["open", "read", "close"]
+        assert rows[1]["tool"] == "score_filter_study"
+
+    def test_protected_judgment_without_batch_rejected(self, monkeypatch):
+        """v0.374 批次锁：生产方向 + 无批次 ⇒ 门拒（ap.error，exit 2）。"""
+        with pytest.raises(SystemExit) as exc:
+            self._run(monkeypatch, self._args("2017-01-01", "2021-12-31"), batch=False)
+        assert exc.value.code == 2
 
     def test_legacy_judgment_not_registered(self, monkeypatch):
         """legacy 判定窗（⊆挖掘 B）⇒ 读挖掘段不入台账（零调用）。"""

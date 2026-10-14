@@ -1449,7 +1449,9 @@ class TestProductionRecordUse:
     """生产方向钉测（v0.359，owner review 实锤：旧键 judgment 在判定窗非 None
     时无条件写——生产跑数尾部崩 ValueError；合成注入路径提前 return 拦不到）。"""
 
-    def _run_production(self, tmp_path, monkeypatch, js, je):
+    def _run_production(
+        self, tmp_path, monkeypatch, js, je, capsys, *, batch: bool = True
+    ):
         calls = []
         monkeypatch.setattr(
             ses.wu,
@@ -1469,25 +1471,72 @@ class TestProductionRecordUse:
             "--judgment-end",
             je,
         )
+        if batch:
+            # v0.374 批次锁（TODO #95）：--print-config-hash 冻结（与门同状态）
+            # → 开批 → 带批次跑；登记文件已被 conftest 改道 tmp
+            from custos.research import judgment_batch as jb
+
+            rc0 = ses.main(argv + ["--print-config-hash"])
+            assert rc0 == 0
+            printed = capsys.readouterr().out
+            h = [
+                ln.rsplit(":", 1)[-1]
+                for ln in printed.splitlines()
+                if ln.startswith("score_evolution_study:")
+            ][-1]
+            jb.open_batch(
+                "b1", [{"id": "c1", "config_hash": h, "unit": "R34", "note": "t"}]
+            )
+            argv = argv + ["--batch-id", "b1", "--candidate-id", "c1"]
         rc = ses.main(argv)
         assert rc == 0
         return calls
 
-    def test_protected_judgment_writes_new_key(self, tmp_path, monkeypatch):
+    def test_protected_judgment_writes_new_key(self, tmp_path, monkeypatch, capsys):
         """judgment==SEG_JUDGMENT ⇒ 生产路径（注入件全 None）以新键登记 synthetic=False。"""
-        calls = self._run_production(tmp_path, monkeypatch, "2017-01-01", "2021-12-31")
+        calls = self._run_production(
+            tmp_path, monkeypatch, "2017-01-01", "2021-12-31", capsys
+        )
         assert len(calls) == 1
         assert calls[0]["args"][:2] == ("R34", "judgment_2017_2021")
         assert calls[0]["kwargs"]["synthetic"] is False
+        # v0.374：收尾 mark_read 落 tmp 登记文件（单候选 ⇒ 末位读完自动关批）
+        import json as _j
 
-    def test_legacy_judgment_not_registered(self, tmp_path, monkeypatch):
+        from custos.research import judgment_batch as jb
+
+        rows = [
+            _j.loads(ln)
+            for ln in jb.REGISTRY.read_text(encoding="utf-8").splitlines()
+            if ln.strip()
+        ]
+        assert [r["ev"] for r in rows] == ["open", "read", "close"]
+        assert rows[1]["tool"] == "score_evolution_study"
+
+    def test_protected_judgment_without_batch_rejected(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """v0.374 批次锁（TODO #95）：生产方向 + 无批次 ⇒ 门拒（exit 2）。"""
+        monkeypatch.setattr(ses, "_resolve_universe", lambda a, ap: ["600000"])
+        argv = _argv(
+            tmp_path, "--judgment-start", "2017-01-01", "--judgment-end", "2021-12-31"
+        )
+        with pytest.raises(SystemExit) as exc:
+            ses.main(argv)
+        assert exc.value.code == 2
+
+    def test_legacy_judgment_not_registered(self, tmp_path, monkeypatch, capsys):
         """legacy 判定窗（⊆挖掘 B）⇒ 读挖掘段不入台账（零调用）。"""
-        calls = self._run_production(tmp_path, monkeypatch, "2024-08-01", "2026-09-04")
+        calls = self._run_production(
+            tmp_path, monkeypatch, "2024-08-01", "2026-09-04", capsys
+        )
         assert calls == []
 
-    def test_legacy_judgment_subwindow_registered(self, tmp_path, monkeypatch):
+    def test_legacy_judgment_subwindow_registered(self, tmp_path, monkeypatch, capsys):
         """判定**子窗**（2018~2020 ⊆ 判定段）⇒ 相交即登记（v0.361 owner review）。"""
-        calls = self._run_production(tmp_path, monkeypatch, "2018-01-01", "2020-12-31")
+        calls = self._run_production(
+            tmp_path, monkeypatch, "2018-01-01", "2020-12-31", capsys
+        )
         assert len(calls) == 1
         assert calls[0]["args"][:2] == ("R34", "judgment_2017_2021")
         assert calls[0]["kwargs"]["synthetic"] is False

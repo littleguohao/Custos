@@ -279,6 +279,17 @@ margin」这个前提，R1 的量级随后按已实现口径重取（只在 0AMV
   （到期样本不足照开，结论最高 provisional）；一次性使用，解冻日起重新攒下一轮；由 owner 发令，
   工具不自动解冻。
 
+**批次锁用法**（v0.374 落地，`judgment_batch` 模块；登记文件 `judgment_batches.jsonl` 入库、
+append-only、生产机写入提交）：
+
+1. **冻结**：打算跑数的那条命令加 `--print-config-hash` → 打印 `<tool>:<hash>`（不碰数据）；
+2. **开批**：`uv run python -m custos.research judgment_batch open --batch-id b1 \
+   --candidate r36_adx_gt_60:<hash>:R36:备注 [--candidate ...]`（批次号只增不复用，空名册拒）；
+3. **跑数**：原命令加 `--batch-id b1 --candidate-id <id>`——候选不在批/哈希不匹配/已读/批已关
+   一律 exit 2；合成运行（注入件）与判定窗不接触（legacy 窗）不查批；
+4. **关批**：末位候选读完自动关；手动 `judgment_batch close --batch-id b1`；
+   `status [--batch-id]` 查批状态/已读/未读清单。
+
 #### 基线重测 runbook（TODO #92，v2 口径）
 
 命令**写死**，改动须先改这里再跑。公共参数（宇宙缺省=全量 as-of，不传任何 codes 旗标）：

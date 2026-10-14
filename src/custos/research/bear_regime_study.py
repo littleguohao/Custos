@@ -846,6 +846,13 @@ def _build_report(
         if _is_protected_judgment
         else None
     )
+    if getattr(args, "_judgment_gated", False):
+        # 批次锁过闸（v0.374）⇒ 登记读完（末位候选读完自动关批）
+        from custos.research import judgment_batch as jb  # noqa: PLC0415
+
+        jb.mark_read(
+            args.batch_id, args.candidate_id, tool="bear_regime_study", tag=args.tag
+        )
     entry_accounting = arms["entry_accounting"]
     from custos.research import provenance as pv  # noqa: PLC0415
     from custos.research import strategy_grid as sg  # noqa: PLC0415
@@ -937,6 +944,17 @@ def run_study(
         "mining": (seg_windows[mining_segs[0]][0], seg_windows[mining_segs[-1]][1]),
         "judgment": seg_windows["judgment"],
     }
+    # 判定段批次锁（v0.374，TODO #95）：数据加载（_resolve_warm）之前硬门——
+    # 合成运行/legacy 窗不查；v2 缺省窗生产方向必须带合法批次
+    from custos.research import judgment_batch as jb  # noqa: PLC0415
+
+    jb.gate_judgment_read(
+        args,
+        _build_parser(),
+        synthetic=injected,
+        judgment_span=windows["judgment"],
+        tool="bear_regime_study",
+    )
     gates = _resolve_gates(args)
     exits = sg.DEFAULT_EXIT_GRID
     regime_bear, index_df, warm_fn = _resolve_warm(
@@ -1161,6 +1179,14 @@ def _build_parser() -> argparse.ArgumentParser:
         default="artifacts/logs/bear_regime",
         help="产物根目录（默认 artifacts/logs/bear_regime）",
     )
+    # 判定段批次锁（v0.374，TODO #95）：读判定段 2017~2021 须带批次身份
+    ap.add_argument("--batch-id", default="", help="判定段批次号（攒批协议）")
+    ap.add_argument("--candidate-id", default="", help="批内候选 id")
+    ap.add_argument(
+        "--print-config-hash",
+        action="store_true",
+        help="只打印 <tool>:<配置哈希> 并退出（冻结入批流程；不碰数据）",
+    )
     return ap
 
 
@@ -1255,6 +1281,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
         args.count = lw.resolve_count(args.count, earliest)  # v0.328 缺省自动推算
         check_reach(args.count, earliest)
+        if args.print_config_hash:
+            # 冻结入批流程（TODO #95）：哈希必须与批次门同状态（参数归一化之后）
+            from custos.research import judgment_batch as jb  # noqa: PLC0415
+
+            return jb.print_config_hash_and_exit(args, "bear_regime_study")
         rep = run_study(args)
     except (RuntimeError, ValueError) as exc:
         print(f"[ERR] {exc}", file=sys.stderr)

@@ -269,6 +269,14 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--out-dir", default="", help=f"产物根目录（默认 {OUTDIR}），tag 作子目录"
     )
+    # 判定段批次锁（v0.374，TODO #95）：读判定段 2017~2021 须带批次身份
+    ap.add_argument("--batch-id", default="", help="判定段批次号（攒批协议）")
+    ap.add_argument("--candidate-id", default="", help="批内候选 id")
+    ap.add_argument(
+        "--print-config-hash",
+        action="store_true",
+        help="只打印 <tool>:<配置哈希> 并退出（冻结入批流程；不碰数据）",
+    )
     return ap
 
 
@@ -370,8 +378,16 @@ def _gate_banner(args: Any) -> None:
     )
 
 
-def _validate_args(args: Any, ap: argparse.ArgumentParser) -> None:
-    """互斥/必填/窗口校验（fail-closed：一律 ap.error，exit 2）。"""
+def _validate_args(
+    args: Any, ap: argparse.ArgumentParser, *, synthetic: bool = False
+) -> None:
+    """互斥/必填/窗口校验（fail-closed：一律 ap.error，exit 2）。
+
+    ``synthetic``（v0.374 批次锁）：main 传 ``loader is not None``——注入
+    loader = 合成运行，判定段门不查（合成数据不读真实判定段）；生产方向
+    （loader=None）且 --final-judge 判定窗与受保护段相交 ⇒ 必须带合法批次。
+    ⚠️ 直接调本函数的既有测试走默认 synthetic=False——v2 判定段形状须带批次。
+    """
     if not args.direction:
         ap.error("至少需要一个 --direction（可多次给出）")
     if args.rounds < 1 or args.candidates_per_round < 1:
@@ -391,6 +407,17 @@ def _validate_args(args: Any, ap: argparse.ArgumentParser) -> None:
         args.final_judge = True  # --grid-judge 隐含双窗终审（三轴终审吃它的产出）
     if args.final_judge:
         _validate_judgment_window(args, ap)
+        # 判定段批次锁（TODO #95）：--final-judge 判定窗可与受保护段
+        # 2017~2021 相交（段内子窗合法），此前不记台账=既存漏洞——装门 + 补登记
+        from custos.research import judgment_batch as jb  # noqa: PLC0415
+
+        jb.gate_judgment_read(
+            args,
+            ap,
+            synthetic=synthetic,
+            judgment_span=(args.judgment_start, args.judgment_end),
+            tool="evolution_loop",
+        )
     if (args.joint or args.grid_judge) and args.count <= 0:
         # R32 / #69：单元格子进程不继承 loader 默认深度——不显式 --count 则
         # strategy_grid 默认 500 只回溯约两年，早窗口的格子被尾部截断护栏全灭。
@@ -1026,7 +1053,13 @@ def main(
     ap = _build_parser()
     args = ap.parse_args(argv)
     args.cmdline = " ".join(argv) if argv is not None else " ".join(sys.argv[1:])
-    _validate_args(args, ap)
+    if args.grid_judge:
+        args.final_judge = True  # 与 _validate_args 同序归一（哈希与门同状态）
+    if args.print_config_hash:
+        from custos.research import judgment_batch as jb  # noqa: PLC0415
+
+        return jb.print_config_hash_and_exit(args, "evolution_loop")
+    _validate_args(args, ap, synthetic=loader is not None)
     _factor_axis_banner(args)  # #70：三轴流程的容量/退化启动横幅
     _gate_banner(args)  # R36 Phase 2 三轮：非默认门口径启动横幅
     prep = _prepare(args, ap, loader)
@@ -1111,6 +1144,13 @@ def main(
     pool.save()
 
     dual = _run_final_judge(args, prep.judge_load, prep.codes, pool, cell_runner)
+    if getattr(args, "_judgment_gated", False):
+        # 批次锁过闸（v0.374）⇒ 判定段读取入台账 + 登记读完（末位自动关批）
+        from custos.research import judgment_batch as jb  # noqa: PLC0415
+        from custos.research import window_usage as _wu  # noqa: PLC0415
+
+        _wu.record_use("R32", "judgment_2017_2021", tag, "进化终审判定窗读数")
+        jb.mark_read(args.batch_id, args.candidate_id, tool="evolution_loop", tag=tag)
     res = _RunResult(
         out_dir=out_dir,
         args=args,

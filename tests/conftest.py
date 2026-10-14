@@ -111,6 +111,19 @@ def _redirect_window_usage_ledger_tmp(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _redirect_judgment_batch_registry_tmp(monkeypatch, tmp_path):
+    """把判定段批次锁登记文件改道 tmp（v0.374，TODO #95）。
+
+    研究终端的判定段批次门（judgment_batch.gate_judgment_read/mark_read）
+    会读写 ``governance/research/judgment_batches.jsonl``——不钉的话，生产
+    方向钉测会把假批次写进真实登记文件（入库的 append-only 台账）。
+    """
+    from custos.research import judgment_batch
+
+    monkeypatch.setattr(judgment_batch, "REGISTRY", tmp_path / "judgment_batches.jsonl")
+
+
+@pytest.fixture(autouse=True)
 def _redirect_xdxr_cache_tmp(monkeypatch, tmp_path):
     """把 xdxr 权息缓存目录改道 tmp（v0.370）。
 

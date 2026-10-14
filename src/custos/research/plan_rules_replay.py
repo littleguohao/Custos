@@ -349,6 +349,17 @@ def run_study(
     # 不入台账（r42_probe 事故根因，v0.338 排查的实锤答案）。
     injected = warm_fn is not None or replay_fn is not None
     layout, mining_segs, judgment_span = _layout_of(args)
+    # 判定段批次锁（v0.374，TODO #95）：数据加载之前硬门——合成运行（注入件
+    # 非 None）/legacy 窗不查；v2 缺省窗生产方向必须带合法批次
+    from custos.research import judgment_batch as jb  # noqa: PLC0415
+
+    jb.gate_judgment_read(
+        args,
+        _build_parser(),
+        synthetic=injected,
+        judgment_span=judgment_span,
+        tool="plan_rules_replay",
+    )
     earliest_start = min(s for _name, s, _e in mining_segs)
     regime: dict[str, str] = {}
     if warm_fn is None:
@@ -563,6 +574,11 @@ def run_study(
         if _is_protected_judgment
         else None
     )
+    if getattr(args, "_judgment_gated", False):
+        # 批次锁过闸（v0.374）⇒ 登记读完（末位候选读完自动关批）
+        jb.mark_read(
+            args.batch_id, args.candidate_id, tool="plan_rules_replay", tag=args.tag
+        )
     from custos.research import provenance as pv  # noqa: PLC0415
 
     rep: dict[str, Any] = {
@@ -690,6 +706,14 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--seed", type=int, default=20261009)
     ap.add_argument("--tag", required=True)
     ap.add_argument("--out-dir", default=str(LOGS))
+    # 判定段批次锁（v0.374，TODO #95）：读判定段 2017~2021 须带批次身份
+    ap.add_argument("--batch-id", default="", help="判定段批次号（攒批协议）")
+    ap.add_argument("--candidate-id", default="", help="批内候选 id")
+    ap.add_argument(
+        "--print-config-hash",
+        action="store_true",
+        help="只打印 <tool>:<配置哈希> 并退出（冻结入批流程；不碰数据）",
+    )
     return ap
 
 
@@ -718,6 +742,11 @@ def main(
                 args.count, earliest
             )
             check_reach(args.count, earliest)
+        if args.print_config_hash:
+            # 冻结入批流程（TODO #95）：哈希必须与批次门同状态（参数归一化之后）
+            from custos.research import judgment_batch as jb  # noqa: PLC0415
+
+            return jb.print_config_hash_and_exit(args, "plan_rules_replay")
         rep = run_study(args, warm_fn=warm_fn, replay_fn=replay_fn)
     except (RuntimeError, ValueError) as exc:
         print(f"[plan_rules_replay] {exc}", file=sys.stderr)

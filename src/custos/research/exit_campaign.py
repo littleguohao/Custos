@@ -1151,6 +1151,14 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="从台账状态续跑（配置以台账为准；v0.258 增量落盘教训）",
     )
+    # 判定段批次锁（v0.374，TODO #95）：读判定段 2017~2021 须带批次身份
+    ap.add_argument("--batch-id", default="", help="判定段批次号（攒批协议）")
+    ap.add_argument("--candidate-id", default="", help="批内候选 id")
+    ap.add_argument(
+        "--print-config-hash",
+        action="store_true",
+        help="只打印 <tool>:<配置哈希> 并退出（冻结入批流程；不碰数据）",
+    )
     return ap
 
 
@@ -1216,6 +1224,20 @@ def main(
             f"挖掘窗与判定窗必须不相交: mining={args.mining_start}..{args.mining_end}"
             f" 与 judgment={args.judgment_start}..{args.judgment_end} 相交"
         )
+    # 判定段批次锁（v0.374，TODO #95）：评估器装配（读数）之前硬门——注入
+    # 评估器（合成）不查；判定窗与受保护段不相交（legacy 旧窗）不查
+    from custos.research import judgment_batch as jb  # noqa: PLC0415
+
+    if args.print_config_hash:
+        # 冻结入批流程：哈希必须与批次门同状态（参数归一化之后）
+        return jb.print_config_hash_and_exit(args, "exit_campaign")
+    jb.gate_judgment_read(
+        args,
+        ap,
+        synthetic=evaluator is not None,
+        judgment_span=(args.judgment_start, args.judgment_end),
+        tool="exit_campaign",
+    )
     ev = evaluator if evaluator is not None else make_v0_replay_evaluator(args, ap)
     ledger = ledger_path_for(Path(args.out_dir), args.tag)
     if not args.resume and ledger.exists():
@@ -1233,6 +1255,11 @@ def main(
         )
     except LedgerSpaceChanged as exc:
         ap.error(str(exc))  # 档位空间守卫：干净 exit 2，不留 traceback
+    if getattr(args, "_judgment_gated", False):
+        # 批次锁过闸（v0.374）⇒ 收尾登记读完（末位候选读完自动关批）
+        jb.mark_read(
+            args.batch_id, args.candidate_id, tool="exit_campaign", tag=args.tag
+        )
     # 溯源回填（v0.325）：run_campaign 内置占位，宇宙/命令行在主入口补齐
     from custos.research import provenance as pv  # noqa: PLC0415
 

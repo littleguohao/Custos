@@ -917,3 +917,59 @@ class TestJudgmentSubwindowRegistered:
         rep = ec.run_campaign(cfg, _fake_all_lose, ledger, tag="t")
         assert rep["window_usage"]["window"] == "judgment_2017_2021"
         assert rep["window_usage"]["k"] == 1  # k 走 redirect 的 tmp 台账
+
+
+class TestJudgmentBatchGate:
+    """v0.374 批次锁（TODO #95）：判定窗与受保护段（2017~2021）相交时，
+    生产方向（evaluator=None）须带合法批次；合成（注入评估器）不查——
+    注入路径由既有 TestEndToEnd 族覆盖（它们无批次仍全绿即证据）。"""
+
+    def _argv(self, tmp_path, *extra):
+        return [
+            "--tag",
+            "t95",
+            "--out-dir",
+            str(tmp_path),
+            "--judgment-start",
+            "2017-01-01",
+            "--judgment-end",
+            "2021-12-31",
+            "--count",
+            "1000",  # 显式 ⇒ resolve_count 不变异（哈希与门同状态）
+            *extra,
+        ]
+
+    def test_production_without_batch_rejected(self, tmp_path):
+        """无批次 ⇒ 门拒（ap.error，exit 2）——门在评估器装配（读数）之前。"""
+        with pytest.raises(SystemExit) as exc:
+            ec.main(self._argv(tmp_path))
+        assert exc.value.code == 2
+
+    def test_production_with_batch_marks_read(self, tmp_path, monkeypatch):
+        """带合法批次 ⇒ 过闸 + 收尾 mark_read 落 tmp 登记文件（自动关批）。"""
+        from custos.research import judgment_batch as jb
+
+        args0 = ec._build_parser().parse_args(self._argv(tmp_path))
+        h = jb.config_hash("exit_campaign", args0)
+        jb.open_batch(
+            "b1", [{"id": "c1", "config_hash": h, "unit": "R37", "note": "t"}]
+        )
+        monkeypatch.setattr(ec, "make_v0_replay_evaluator", lambda *a, **k: object())
+        monkeypatch.setattr(
+            ec,
+            "run_campaign",
+            lambda *a, **k: {
+                "provenance": {},
+                "status": "candidate_found",
+                "verdict": "x",
+            },
+        )
+        rc = ec.main(self._argv(tmp_path, "--batch-id", "b1", "--candidate-id", "c1"))
+        assert rc == 0
+        rows = [
+            json.loads(ln)
+            for ln in jb.REGISTRY.read_text(encoding="utf-8").splitlines()
+            if ln.strip()
+        ]
+        assert [r["ev"] for r in rows] == ["open", "read", "close"]
+        assert rows[1]["tool"] == "exit_campaign"

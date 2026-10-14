@@ -1149,7 +1149,8 @@ class TestSegmentGuard:
         assert exc.value.code == 2
 
     def test_judgment_before_mining_accepted(self):
-        """v2 新合法形态：判定早于挖掘但不相交（旧次序规则已退役）。"""
+        """v2 新合法形态：判定早于挖掘但不相交（旧次序规则已退役）。
+        v0.374（TODO #95 批次锁）：判定窗=受保护段 ⇒ 须带批次——开批后过闸。"""
         ap, args = self._parse(
             "--direction",
             "动量",
@@ -1163,7 +1164,32 @@ class TestSegmentGuard:
             "--judgment-end",
             "2021-12-31",
         )
+        from custos.research import judgment_batch as jb
+
+        h = jb.config_hash("evolution_loop", args)
+        jb.open_batch("b1", [{"id": "c1", "config_hash": h, "unit": "R32", "note": ""}])
+        args.batch_id, args.candidate_id = "b1", "c1"
         el._validate_args(args, ap)  # 不抛即通过
+        assert args._judgment_gated is True
+
+    def test_judgment_protected_without_batch_rejected(self):
+        """v0.374（TODO #95 批次锁）：判定窗=受保护段 + 无批次 ⇒ exit 2。"""
+        ap, args = self._parse(
+            "--direction",
+            "动量",
+            "--mining-start",
+            "2022-01-01",
+            "--mining-end",
+            "2024-07-31",
+            "--final-judge",
+            "--judgment-start",
+            "2017-01-01",
+            "--judgment-end",
+            "2021-12-31",
+        )
+        with pytest.raises(SystemExit) as exc:
+            el._validate_args(args, ap)
+        assert exc.value.code == 2
 
     def test_both_inside_mining_a_accepted(self):
         """原 pre2019 段内两窗（已并入挖掘 A）不相交 ⇒ 合法（C5 退役）。"""
