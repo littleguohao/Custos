@@ -368,6 +368,7 @@
 | 2026-10-14 | v0.364 | **#91 数据覆盖探针 + #92 耗时埋点与基线 runbook**：新工具 data_coverage_probe（vipdoc 个股/板块组普查、eligible_date=满 60 根资格日、逐年 active/eligible、板块指数 880/881+sector_index csv、0AMV 台账最早/最晚；holdout 不计+空结果护栏）；bt 两分支新增 [TIME] 总耗时行+payload timing 块（旧行不动），warm 两函数新增 [TIME] warm 行；README 写死「基线重测 runbook」+登记探针/C5 行标 🔄；AGENTS §5 补 mining_violation/touches_judgment/warmup_bars=300 | TODO #91/#92 | 钉测 +17 |
 | 2026-10-14 | v0.365 | **基线 runbook 修订（owner review，纯文档）**：①R4 挖掘 A 四格起点统一为 SEG_A_START=max(2000-01-01, 0AMV 台账首日)——_amv_checker 对台账首日前一律拦截，起点不齐会把年份行情差异混进择时增益；②板块腿缺数据语义写死（成员表/指数目录整体缺=fail-closed；未分类到有数据板块=放行；日期早于板块数据起点=拦截，gate 带 effective_start）⇒ 稀疏期是部分过滤，挖掘 A 加跑 2012 起子窗完整 2×2（对比必须同窗）；③count 语义注明（只影响起点可达性不影响读数），seg A 7000→7200 留余量 | owner review（runbook 两问题） | 生产机跑数前核对 |
 | 2026-10-14 | v0.366 | **R43 预注册落档（owner 立项）**：0AMV 空头 / 多头区间段的板块（880/881 指数，不用当前快照成分）与股票风格（38 维：价格类 28 + 基本面 10，段起点 as-of 五分位价差）；C2 双窗方向稳定、C4 伪区间段族内 max-of-K 零假设兼管多重比较；停牌伪抗跌与幸存者偏差注记写死；工具 TODO #93 | owner | 预注册 |
+| 2026-10-14 | v0.367 | **R43 跑数前修订注记×5**（工具实现前定稿）：①段起点当日无 bar 的票当段剔除（防冻结价当行动价）；②C4 抽样域=（挖掘窗×方向×族）各自成池、候选须两窗都过族 q95、一过一不过=provisional；③board/ma_bull 的 t 构造写明、进价格族池维持 max-of-28；④板块层 C1 段内合格板块≥30、同向段<2 时 C3=None；⑤挖掘 A 起点自动=台账首日（段只存在于台账覆盖期），无需显式 SEG_A_START | coder review R43 | 判据不变量钉测 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
