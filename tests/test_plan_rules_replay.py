@@ -1409,3 +1409,38 @@ class TestScanModeDiscipline:
         assert rep["mode"] == "width_scan" and rep["grid"] == [
             float(x) for x in prr.WIDTH_GRID
         ]
+
+
+class TestAnchorJudgmentBatch:
+    """v0.391（owner 选 B）：锚点模式判定段随机宽度臂同次重读 + 攒批判决块。"""
+
+    def _rep(self, monkeypatch, **kw):
+        monkeypatch.setattr(prr, "SCAN_N_RANDOM", 6)
+        return _run(
+            _mk_per_code(),
+            _replay_candidate,
+            stop_anchor="signal_low",
+            stop_buffer_pct=8.0,
+            **kw,
+        )
+
+    def test_no_batch_reports_pool_only(self, monkeypatch):
+        blk = self._rep(monkeypatch)["criteria"]["judgment_batch"]
+        assert blk["verdict"] == "no_batch" and blk["line"] is None
+        assert blk["evaluated"] >= blk["pool_size"]
+
+    def test_batch_line_uses_roster_m(self, monkeypatch, tmp_path):
+        from custos.research import judgment_batch as jb
+
+        reg = tmp_path / "jb.jsonl"
+        jb.open_batch(
+            "b1",
+            [{"id": f"c{k}", "config_hash": f"t:{k}", "unit": "R44"} for k in range(4)],
+            path=reg,
+        )
+        monkeypatch.setattr(jb, "REGISTRY", reg)
+        blk = self._rep(monkeypatch, batch_id="b1", c4_min_pool=3)["criteria"][
+            "judgment_batch"
+        ]
+        assert blk["line"]["m"] == 4 and blk["line"]["alpha"] == 0.0125
+        assert blk["verdict"] in {"candidate", "provisional", "falsified"}

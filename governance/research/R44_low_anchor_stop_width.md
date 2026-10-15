@@ -82,6 +82,7 @@ J<13 信号日已是超跌极限位，不再另找结构低点（owner 2026-10-1
   每臂对每个信号独立抽 x ~ U[5%, 20%] 作止损（与候选同锚点、同宽度范围），**每臂抽 8 组
   取 max**（与 8 档网格同预算），池元素 = 臂的合并 Δmargin；x* 的合并 Δmargin > q95 ⇒
   confirmed_pass。——检验「某个固定宽度」是否比「同范围内随机宽度挑最好的」更好。
+- **判定段池（v0.391 跑数前修订，owner 选 B）**：入批读数时同一次运行在判定段重抽随机宽度臂（逐信号 x~U[5%,20%] 单次抽、不取 max——候选冻结单档、臂冻结「策略」，两边都不在判定段挑选），N=200 过门臂，池元素 = 臂判定段 Δmargin；判定线 = `judgment_batch.judgment_line`（m 来自名册）。命令：`plan_rules_replay --stop-anchor signal_low --stop-buffer-pct <x*>`（v2 缺省布局）。
 - **结局**：C1~C4 全过 = candidate ⇒ x* 冻结配置入判定段第一批；判定段读数过收紧后的判定线
   才可进 live 拍板（改 `EXIT_RULES.json` 是独立提交）。
 

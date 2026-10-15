@@ -651,6 +651,80 @@ def run_study(
         "重抽至池满或评估达上限（v0.317；池构造=criteria_kit 单源 v0.322）",
     }
 
+    # ── 锚点模式判定段攒批判决（v0.391，owner 选 B）：随机宽度臂在判定段**同次运行**
+    # 重读——锚点宽度臂没有可冻结参数（挖掘段 max-of-8 选的是一组逐信号随机宽度，
+    # 搬不到判定段信号上），故冻结的是「策略」：判定段逐信号 x~U[5%,20%] 单次抽
+    # （不再取 max），与候选冻结单档 x*「两边都不在判定段挑选」对等；池元素 =
+    # 臂判定段 Δmargin（vs 现行 pct10，同 rdd 相对门）。──
+    judgment_batch_blk: Optional[dict[str, Any]] = None
+    if anchor_mode:
+        lo_w, hi_w = C4_WIDTH_RANGE
+        live_j = pair_rds["judgment"]["live"]
+        plan_j = pair_rds["judgment"]["plan"]
+        j_groups = logical_groups["judgment"]
+
+        def _arm_j(i: int) -> Optional[float]:
+            arm_rng = random.Random(f"{args.seed}-j{i}")  # 臂级种子写死可复现
+            arm_trades: list[dict] = []
+            for g in j_groups:
+                arm_recs = [
+                    _sig_with_stop(
+                        r, r["anchor_low"] * (1.0 - arm_rng.uniform(lo_w, hi_w) / 100.0)
+                    )
+                    for r in g["subset"]
+                ]
+                if not arm_recs:
+                    continue
+                arm_trades.extend(
+                    replay_fn(arm_recs, PLAN_PARAMS)
+                    if replay_fn is not None
+                    else fes.replay_signals(
+                        g["per_code"], arm_recs, PLAN_PARAMS, regime, args.cost_bps
+                    )
+                )
+            rd = fes.combine_readings(arm_trades, args.top_n, ref=live_j)
+            if not rd or not rd.get("rdd_gate") or rd.get("margin") is None:
+                return None
+            if not live_j or live_j.get("margin") is None:
+                return None
+            return rd["margin"] - live_j["margin"]
+
+        pool_j_blk = kit.assemble_c4_pool(SCAN_N_RANDOM, _arm_j)
+        pool_j = pool_j_blk["pool"]
+        cand_j = (
+            plan_j["margin"] - live_j["margin"]
+            if plan_j
+            and live_j
+            and plan_j.get("margin") is not None
+            and live_j.get("margin") is not None
+            else None
+        )
+        cand_gate = bool(plan_j and plan_j.get("rdd_gate"))
+        line = (
+            jb.judgment_line(args.batch_id, cand_j, pool_j, min_pool=args.c4_min_pool)
+            if getattr(args, "batch_id", "")
+            else None
+        )
+        if cand_j is None or cand_j <= 0 or not cand_gate:
+            bverdict = "falsified"
+        elif line is not None and line["state"] == "confirmed_pass":
+            bverdict = "candidate"
+        else:
+            bverdict = "provisional"
+        judgment_batch_blk = {
+            "cand_delta_judgment": cand_j,
+            "cand_rdd_gate_judgment": cand_gate,
+            "pool": pool_j,
+            "pool_size": len(pool_j),
+            "evaluated": pool_j_blk["evaluated"],
+            "gate_pass_rate": pool_j_blk["gate_pass_rate"],
+            "line": line,
+            "verdict": bverdict if line is not None else "no_batch",
+            "rule": "判定段：x* Δmargin>0 且过 rdd 门 且 > 冻结臂判定段重读池的攒批判定线"
+            "（judgment_batch.judgment_line，m 来自名册）⇒ candidate；Δ≤0 或门不过 ⇒ "
+            "falsified；否则 provisional。无 --batch-id（合成/预览）⇒ no_batch 只报池",
+        }
+
     # ── 四态结局（criteria_kit 单源：C1 优先；C4 池未满/池空 ⇒ provisional）──
     verdict = kit.verdict_four_state(
         c1_ok=c1["ok"], c2_ok=c2["ok"], c3_ok=c3["ok"], c4_state=c4_state
@@ -770,7 +844,8 @@ def run_study(
                 {
                     "anchor_note": "signal_low 锚点模式（R44，v0.379）：本报告的 C4 "
                     "随机臂仍是 R41 口径（entry×U[0.85,0.99]），与锚点宽度语义不同——"
-                    "冻结档的判定以 --scan-widths 的 C4 + 攒批判定线为准"
+                    "冻结档的判定以 --scan-widths 的 C4 + 攒批判定线为准",
+                    "judgment_batch": judgment_batch_blk,
                 }
                 if anchor_mode
                 else {}
