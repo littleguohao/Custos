@@ -50,21 +50,35 @@ VERDICTS = ("candidate", "falsified", "untested", "provisional")
 C4_STATES = ("confirmed_pass", "confirmed_fail", "provisional", "indeterminate")
 
 
-def q95(pool: list[float]) -> Optional[float]:
-    """合并随机分布的 95% 分位（inclusive 线性插值）——C4 的标尺（单一来源）。
-
-    **分位随样本数收敛**；它替代的「累积最大值」随样本数发散（棘轮——
-    同一个好基因组的 C4 通过率取决于第几批被发现：8 抽样 21.3% → 264
-    抽样 1.6%，owner review 实测）。**但小池同样失真（反方向）**：池=8 时
-    q95≈最大值，零假设过线率实测 13.76%（~5% 的 2.7 倍）——故各判据都有
-    最小池护栏（min_pool，v0.269 族）：池满后零假设各批 ≈5% 假过线
-    （实测 pool=160 → 5.35%），未满只记 provisional 不停手。
-    """
-    if not pool:
+def perm_threshold(pool: list[float], alpha: float) -> Optional[float]:
+    """置换检验判定线（单一来源，v0.385 审计 CK-2）：返回池内**第 k 大**值，
+    k = max(1, ⌊α·(n+1)⌋)；候选 **> 判定线** ⇔ 经验 p = (1+#{臂≥候选})/(n+1) ≤ α
+    （k≥1 时精确成立，假过线率 ≤ α）。n+1 < 1/α 时取不到 α ⇒ k=1 = 池最大值
+    （最严，假过线率 1/(n+1)，由各判据 min_pool 护栏兜底）。
+    替代旧的 inclusive 线性插值 q95：阈值位置 (n−1)·0.95 的期望秩偏低，零假设
+    假过线 n=50 实测 6.74%、n=20 为 9.26%（非名义 5%）。空池 ⇒ None。"""
+    vals = sorted((float(x) for x in pool if x == x), reverse=True)  # 剔 NaN
+    if not vals:
         return None
-    if len(pool) == 1:
-        return pool[0]
-    return statistics.quantiles(pool, n=100, method="inclusive")[94]
+    k = max(1, int(alpha * (len(vals) + 1) + 1e-9))
+    return vals[min(k, len(vals)) - 1]
+
+
+def q95(pool: list[float]) -> Optional[float]:
+    """C4 标尺 = ``perm_threshold(pool, 0.05)``（v0.385 起；名字保留兼容各终端）。
+
+    n=50 ⇒ 第 2 大值；n=200 ⇒ 第 10 大值。历史：v0.266 起是 inclusive 线性插值
+    分位，小池过松（见 perm_threshold）；更早的「累积最大值」随样本数发散。
+    """
+    return perm_threshold(pool, 0.05)
+
+
+def batch_threshold(pool: list[float], m: int) -> Optional[float]:
+    """判定段攒批判定线 q(1−0.05/m)（攒批协议，m = 本批名册候选数）：
+    ``perm_threshold(pool, 0.05/m)``。m<1 ⇒ ValueError（名册不可为空）。"""
+    if m < 1:
+        raise ValueError(f"批次候选数 m 须 ≥1，得 {m}")
+    return perm_threshold(pool, 0.05 / m)
 
 
 def verdict_four_state(
@@ -170,7 +184,9 @@ def cluster_ids(recs: list[dict], *, max_gap: int = 5) -> list[int]:
     ids = [-1] * len(recs)
     by_code: dict[str, list[int]] = {}
     for idx, r in enumerate(recs):
-        by_code.setdefault(str(r.get("code")), []).append(idx)
+        # 簇键 = (code, 段)：v2 挖掘 A∪B 合并池里同码两段的 bar 序号 i 各自从 0 起，
+        # 只按 code 分组会把相隔二十年的信号判成相邻（v0.385 审计 CK-5）
+        by_code.setdefault(f"{r.get('code')}|{r.get('_seg', '')}", []).append(idx)
     cid = -1
     for code in by_code:
         idxs = by_code[code]

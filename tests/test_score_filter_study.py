@@ -116,9 +116,9 @@ class TestQ95:
         import statistics
 
         xs = list(range(100))
-        assert kit.q95([float(x) for x in xs]) == pytest.approx(
-            statistics.quantiles(xs, n=100, method="inclusive")[94]
-        )
+        # v0.385：置换判定线 = 第 ⌊0.05·101⌋=5 大 = 95（旧 inclusive 插值 94.05）
+        assert kit.q95([float(x) for x in xs]) == 95.0
+        assert statistics.quantiles(xs, n=100, method="inclusive")[94] < 95.0
 
 
 def _fake_score(cand, weights=None):

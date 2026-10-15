@@ -629,6 +629,9 @@ def objective_of(
     m, e, rdd = row.get("margin"), row.get("expectancy_R"), row.get("ret_over_dd")
     if m is None or e is None or rdd is None:
         return None
+    # NaN 等同缺失（v0.385 审计 CK-3）：0.0×NaN=NaN，且 NaN 参与排序比较会抢第一
+    if any(isinstance(v, float) and v != v for v in (m, e, rdd)):
+        return None
     return weights[0] * m + weights[1] * e + weights[2] * rdd
 
 
@@ -679,7 +682,8 @@ def rank_rows(
     **v2.1**：门改**相对**——参照档 = 同 (scorer, gate) 组合内 ``ref_exit``
     档行（默认 pct5_trail08，事先固定不经过挑选）；组合内缺该档 ⇒ 取组合
     **首行**（grid 顺序首档=基准档）；多行组合参照档本体自比恒真标
-    ``True``。**v0.306**：组合只有一行 ⇒ ``rdd_gate="self_ref"``（门未
+    ``True``；组合内有多行同名参照档时取**最后一行**（正常网格不出现）。
+    **v0.306**：组合只有一行 ⇒ ``rdd_gate="self_ref"``（门未
     检验），且排序落在真过门行**之后**——CLI 第一名是「可直接拷 live
     EXIT_RULES」的行，不能让没经过门检验的组合拿。
     """

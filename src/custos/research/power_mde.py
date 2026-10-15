@@ -31,13 +31,18 @@ R39 a1/a2 / R37 b1 都是跑完才发现桶太薄、CI 太宽）。本模块把�
 - ⚠️ **本式忽略 margin 的 payoff 噪声 ⇒ SE 是下界**——真实 MDE 只会
   更大（写功效节时连带本注记，不得只报数不报偏）。
 
-MDE = k × SE（k=2 默认 ≈ 双侧 95% 检测门槛）。
+MDE = k × SE。**v0.385 起 k=2.8 默认**（=1.96+0.84：双侧 α=5% 下 80% 功效——
+MDE 的通行定义）；旧默认 k=2 只是检测门槛，对应功效仅约 52%（审计 CK-6 实测 53.6%），
+MDE 偏小约 40%。要复算旧口径显式传 k=2。
 """
 
 from __future__ import annotations
 
 import argparse
 import math
+
+# 双侧 α=0.05（1.96）+ 80% 功效（0.84）——v0.385 审计 CK-6
+MDE_K = 2.8
 from typing import Optional
 
 #: ρ_pair 场景锚（配对=C5 γ 分析用值 0.75；**组间（不配对）比较 ⇒ 0**——
@@ -71,9 +76,9 @@ def se_margin(wr: float, n: int, rho_pair: float, deff: float = 1.0) -> float:
 
 
 def mde(
-    wr: float, n: int, rho_pair: float, deff: float = 1.0, *, k: float = 2.0
+    wr: float, n: int, rho_pair: float, deff: float = 1.0, *, k: float = MDE_K
 ) -> float:
-    """最小可检测效应 = k × SE（k=2 默认 ≈ 双侧 95%）。"""
+    """最小可检测效应 = k × SE（k=2.8 默认 = 双侧 95% 下 80% 功效）。"""
     return k * se_margin(wr, n, rho_pair, deff)
 
 
@@ -83,7 +88,7 @@ def table(
     *,
     rhos: tuple[float, ...] = RHO_TIER_SCENARIOS,
     deffs: tuple[float, ...] = DEFF_SCENARIOS,
-    k: float = 2.0,
+    k: float = MDE_K,
 ) -> list[dict[str, float]]:
     """逐 (ρ_pair × deff) 场景的 SE/MDE 表（功效节贴表用）。"""
     return [
@@ -117,7 +122,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         "缺省 1.0 是无日簇效应下界——越高 SE 越大）",
     )
     ap.add_argument(
-        "--k", type=float, default=2.0, help="MDE 倍数（默认 2 ≈ 双侧 95%%）"
+        "--k",
+        type=float,
+        default=MDE_K,
+        help="MDE 倍数（默认 2.8 = 双侧 95%% 下 80%% 功效；旧口径传 2）",
     )
     args = ap.parse_args(argv)
     rhos = tuple(float(x) for x in str(args.rho).split(",") if x.strip())

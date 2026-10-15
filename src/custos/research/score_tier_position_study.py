@@ -542,10 +542,19 @@ def run_study(
 
     # ── 簇划分（kit.cluster_ids 单源，v0.335）：(code, date)→簇 id——
     # 交易经 (code, entry_date) 回挂信号所属簇（信号⇄交易一一对应）──
+    # 簇键带段标签（v0.385 审计 CK-5：A/B 两段 i 各自从 0 起，跨段不可判邻）
+    seg_tagged = {
+        "mining": [
+            {**r, "_seg": name}
+            for name, _s, _e in mining_segs
+            for r in segments[name]["subset"]
+        ],
+        "judgment": [{**r, "_seg": "judgment"} for r in segments["judgment"]["subset"]],
+    }
     cluster_maps = {
         w: {
             (r["code"], r["date"]): cid
-            for r, cid in zip(pools[w], kit.cluster_ids(pools[w]))
+            for r, cid in zip(seg_tagged[w], kit.cluster_ids(seg_tagged[w]))
         }
         for w in ("mining", "judgment")
     }

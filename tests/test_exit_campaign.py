@@ -89,7 +89,8 @@ class TestQ95:
 
     def test_inclusive_interpolation(self):
         # inclusive 法：位置 = 0.95×(n−1)；pool=1..100 → 94.05 位 → 95.05
-        assert kit.q95(list(range(1, 101))) == pytest.approx(95.05)
+        # v0.385：置换判定线 = 第 ⌊0.05·101⌋=5 大（旧 inclusive 插值 95.05 偏松）
+        assert kit.q95(list(range(1, 101))) == 96
 
     def test_quantile_converges_where_max_diverges(self):
         pool = [0.5] * 79 + [0.99]
