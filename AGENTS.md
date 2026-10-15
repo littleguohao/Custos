@@ -180,7 +180,9 @@ uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 �
      旧键冻结拒写；读挖掘段不登记），判定口径用 `load_window.touches_judgment`
      （**相交制**——判定子窗也登记，勿用精确相等 == SEG_JUDGMENT），`synthetic`
      在函数**入口**快照；且须过 `judgment_batch` 批次门（--batch-id/--candidate-id +
-     冻结配置哈希，候选不在批/已读/批已关一律拒；synthetic 快照豁免）；
+     冻结配置哈希，候选不在批/已读/批已关一律拒；**过闸即写 claim 占位**——崩溃/中断
+     也算已消耗，需重读开新批；哈希剔除 count——resolve_count 随日漂移；synthetic
+     快照豁免）；
   5. 宇宙经 `universe.resolve`（缺省=规则构造全量个股，`--codes-file` 仅兼容通道）；
      报告接 `provenance.build`（宇宙三件套）与 `cost_sensitivity`；
   6. 带零假设校准两连测 + 回归哨兵（`tests/test_null_calibration.py`，collect_all 口径

@@ -10,12 +10,15 @@
   append-only 事件日志、每日首写快照——与 window_usage.jsonl 同纪律：
   生产机写入并提交；测试经 conftest 改道 tmp）；
 - 事件行：``open``（batch_id/candidates[{id,config_hash,unit,note}]/m）/
-  ``read``（candidate_id/tool/tag/read_at）/``close``（手动关 + 末位候选
-  读完自动关）；
+  ``claim``（**过闸即占位**，v0.375 #99②——候选/哈希/claim_at；此后再次过闸
+  一律拒绝，**宁可错杀：崩溃/中断也算已消耗**，需重读由 owner 手动开新批）/
+  ``read``（跑完登记，candidate_id/tool/tag/read_at）/``close``（手动关 +
+  末位候选读完自动关——按 read 计；claimed-未读 的候选会挡住自动关批）；
 - 门禁：7+1 个研究终端在**数据加载之前**调 ``gate_judgment_read``——
   合成运行（注入件非 None，入口快照）不查批；判定窗与 SEG_JUDGMENT 不相交
   （legacy 旧窗）不查批；否则要求 --batch-id/--candidate-id 且
-  ``check_read`` 五路校验全过；收尾 record_use 处补 ``mark_read``。
+  ``claim_read`` 六路校验全过（过闸即写 claim）；收尾 record_use 处补
+  ``mark_read``（read 是完成记录，自身已堵重读，故不要求先有 claim）。
 
 fail-closed：所有状态机违例 raise ValueError（中文错因），CLI/各终端 ap.error
 转 exit 2。登记文件损坏行跳过不炸（同台账容错），但**坏行会导致重放状态不可信
@@ -50,6 +53,10 @@ _BOOKKEEP_KEYS = {
     "candidate_id",
     "print_config_hash",
     "func",
+    # 「count」（v0.375，#99①）：缺省时 resolve_count 按「窗口起点→今天」的
+    # 工作日数推算，**随日漂移**——冻结次日即失配。count 只影响起点可达性、
+    # 不影响读数（基线 runbook 同口径），可达性由 check_reach 兜底 ⇒ 不进指纹。
+    "count",
 }
 
 
@@ -72,7 +79,7 @@ def _load_events(path: Optional[Path]) -> list[dict]:
         except ValueError:
             print(f"[WARN] 批次登记坏行跳过: {ln[:80]}", file=sys.stderr)
             continue
-        if isinstance(ev, dict) and ev.get("ev") in ("open", "read", "close"):
+        if isinstance(ev, dict) and ev.get("ev") in ("open", "claim", "read", "close"):
             out.append(ev)
     return out
 
@@ -102,10 +109,13 @@ def _replay(events: list[dict]) -> dict[str, dict[str, Any]]:
                 "candidates": {c["id"]: c for c in ev.get("candidates", [])},
                 "m": ev.get("m"),
                 "closed_at": None,
+                "claims": {},
                 "reads": {},
             }
         elif bid not in batches:
-            continue  # read/close 落在未知批上（坏行）——重放跳过，写入侧另行校验
+            continue  # claim/read/close 落在未知批上（坏行）——重放跳过，写入侧另行校验
+        elif ev["ev"] == "claim":
+            batches[bid]["claims"][str(ev.get("candidate_id"))] = ev
         elif ev["ev"] == "read":
             batches[bid]["reads"][str(ev.get("candidate_id"))] = ev
         else:  # close
@@ -183,9 +193,10 @@ def check_read(
     *,
     path: Optional[Path] = None,
 ) -> bool:
-    """五路校验（各一句中文错因，fail-closed raise ValueError）：
+    """六路校验（各一句中文错因，fail-closed raise ValueError）：
 
-    批不存在 / 批已关 / 候选不在批 / 配置哈希不匹配 / 候选已读。全过 ⇒ True。
+    批不存在 / 批已关 / 候选不在批 / 配置哈希不匹配 / 候选已读 / 候选已认领
+    （claim 占位，含崩溃未读完的情形）。全过 ⇒ True。
     """
     batches = _replay(_load_events(path))
     b = _batch(batches, batch_id)
@@ -210,7 +221,41 @@ def check_read(
             f"候选 {candidate_id!r} 已于 {b['reads'][str(candidate_id)].get('read_at')} "
             "读过判定段——一批只读一次"
         )
+    if str(candidate_id) in b["claims"]:
+        raise ValueError(
+            f"候选 {candidate_id!r} 已于 "
+            f"{b['claims'][str(candidate_id)].get('claim_at')} 过闸认领（claim）——"
+            "宁可错杀：崩溃/中断也算已消耗本次读取，需重读由 owner 手动开新批次"
+        )
     return True
+
+
+def claim_read(
+    batch_id: str,
+    candidate_id: str,
+    cfg_hash: str,
+    tool: str,
+    *,
+    path: Optional[Path] = None,
+) -> None:
+    """过闸即占位（v0.375，#99②）：六路校验全过后立即写 ``claim`` 事件。
+
+    为什么不在跑完才登记（旧 mark_read-only 形态）：过闸到 read 之间崩溃/
+    Ctrl-C 会让候选保持「未读」⇒「一批只读一次」被绕开。宁可错杀——占位后
+    再次过闸一律拒绝，确需重读由 owner 手动开新批次。
+    """
+    check_read(batch_id, candidate_id, cfg_hash, path=path)
+    _append(
+        {
+            "ev": "claim",
+            "batch_id": batch_id,
+            "candidate_id": str(candidate_id),
+            "config_hash": str(cfg_hash),
+            "tool": str(tool),
+            "claim_at": cn_now().isoformat(timespec="seconds"),
+        },
+        path,
+    )
 
 
 def mark_read(
@@ -266,18 +311,21 @@ def close_batch(batch_id: str, *, path: Optional[Path] = None) -> None:
 
 
 def status(batch_id: Optional[str] = None, *, path: Optional[Path] = None) -> dict:
-    """批状态汇总：{batch_id: {m, read: [...], unread: [...], closed_at}}。"""
+    """批状态汇总：{batch_id: {m, read, claimed, unread, closed_at}}。"""
     batches = _replay(_load_events(path))
     out = {}
     for bid, b in batches.items():
         if batch_id and bid != batch_id:
             continue
         read = sorted(b["reads"])
+        claimed = sorted(b["claims"])
         out[bid] = {
             "opened_at": b["opened_at"],
             "m": b["m"],
             "closed_at": b["closed_at"],
             "read": read,
+            "claimed": claimed,
+            "in_flight": sorted(set(claimed) - set(read)),  # 认领未读完（含崩溃）
             "unread": sorted(set(b["candidates"]) - set(read)),
         }
     return out
@@ -297,7 +345,8 @@ def gate_judgment_read(
     tool: str,
 ) -> bool:
     """判定段批次门（fail-closed，ap.error ⇒ exit 2）。返回 True = 已过闸
-    （调用方收尾补 mark_read）；False = 不查（合成运行 / 判定窗与受保护段
+    （**过闸即写 claim 占位**——v0.375 #99②，崩溃/中断也算已消耗；调用方
+    收尾补 mark_read）；False = 不查（合成运行 / 判定窗与受保护段
     不相交——legacy 旧窗已并入挖掘 B，读挖掘段自由）。
 
     ``synthetic`` 必须在**函数入口快照**（任何注入件非 None ⇒ 合成 ⇒ 不查批
@@ -317,7 +366,7 @@ def gate_judgment_read(
             "--print-config-hash 打印指纹，judgment_batch open 入批后同批一次读出）"
         )
     try:
-        check_read(args.batch_id, args.candidate_id, config_hash(tool, args))
+        claim_read(args.batch_id, args.candidate_id, config_hash(tool, args), tool)
     except ValueError as exc:
         ap.error(f"判定段批次锁拒绝：{exc}")
     args._judgment_gated = True  # 收尾 record_use 处凭此补 mark_read（跨函数传递）
@@ -376,9 +425,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                 return 0
             for bid, b in st.items():
                 state = "已关" if b["closed_at"] else "开放中"
+                inflight = f"，认领未读完 {b['in_flight']}" if b["in_flight"] else ""
                 print(
                     f"{bid}: {state}，m={b['m']}，已读 {len(b['read'])}"
-                    f" / 未读 {b['unread'] or '无'}"
+                    f"{inflight} / 未读 {b['unread'] or '无'}"
                 )
         return 0
     except ValueError as exc:

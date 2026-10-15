@@ -121,6 +121,53 @@ class TestCli:
 
 
 # ---------------------------------------------------------------------------
+# claim 占位（v0.375，#99②：过闸即写 claim，宁可错杀——崩溃/中断也算已消耗）
+# ---------------------------------------------------------------------------
+
+
+class TestClaim:
+    def test_claim_written_at_gate_and_blocks_reentry(self):
+        _open2()
+        jb.claim_read("b1", "cand_a", "ha", tool="t")
+        rows = [
+            json.loads(ln)
+            for ln in jb.REGISTRY.read_text(encoding="utf-8").splitlines()
+            if ln.strip()
+        ]
+        assert [r["ev"] for r in rows] == ["open", "claim"]
+        assert rows[1]["candidate_id"] == "cand_a"
+        # 再次过闸一律拒绝（含「claim 后未 read」= 模拟崩溃/Ctrl-C）
+        with pytest.raises(ValueError, match="宁可错杀"):
+            jb.claim_read("b1", "cand_a", "ha", tool="t")
+        with pytest.raises(ValueError, match="宁可错杀"):
+            jb.check_read("b1", "cand_a", "ha")
+
+    def test_claim_then_read_completes(self):
+        _open2()
+        jb.claim_read("b1", "cand_a", "ha", tool="t")
+        jb.mark_read("b1", "cand_a", tool="t", tag="x")  # 跑完补 read
+        st = jb.status("b1")["b1"]
+        assert st["read"] == ["cand_a"] and st["in_flight"] == []
+        assert st["closed_at"] is None  # cand_b 未读 ⇒ 不关批
+
+    def test_crash_after_claim_blocks_auto_close(self):
+        """claimed-未读完 的候选挡住自动关批（owner 手动关/开新批）。"""
+        _open2()
+        jb.claim_read("b1", "cand_a", "ha", tool="t")  # 崩溃：无 read
+        jb.claim_read("b1", "cand_b", "hb", tool="t")
+        jb.mark_read("b1", "cand_b", tool="t", tag="x")
+        st = jb.status("b1")["b1"]
+        assert st["in_flight"] == ["cand_a"]
+        assert st["closed_at"] is None  # read 数(1) < m(2) ⇒ 不自动关
+
+    def test_mark_read_without_claim_allowed(self):
+        """read 是完成记录、自身已堵重读，不强制先有 claim（簿记宽松方向）。"""
+        _open2()
+        jb.mark_read("b1", "cand_a", tool="t", tag="x")
+        assert jb.status("b1")["b1"]["read"] == ["cand_a"]
+
+
+# ---------------------------------------------------------------------------
 # 配置哈希
 # ---------------------------------------------------------------------------
 
@@ -142,6 +189,13 @@ class TestConfigHash:
         a = self._ns(out="x.json", batch_id="b1", candidate_id="c", note_none=None)
         b = self._ns()
         assert jb.config_hash("t", a) == jb.config_hash("t", b)
+
+    def test_count_excluded(self):
+        """#99①：count 缺省由 resolve_count 按「起点→今天」推算、随日漂移——
+        进指纹会让冻结次日即失配。count 只影响起点可达性（check_reach 兜底）。"""
+        h_today = jb.config_hash("t", self._ns(count=7288))
+        h_next_month = jb.config_hash("t", self._ns(count=7310))
+        assert h_today == h_next_month
 
     def test_tool_prefix_in_print(self, capsys):
         ns = self._ns()

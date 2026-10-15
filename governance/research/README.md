@@ -286,7 +286,10 @@ append-only、生产机写入提交）：
 2. **开批**：`uv run python -m custos.research judgment_batch open --batch-id b1 \
    --candidate r36_adx_gt_60:<hash>:R36:备注 [--candidate ...]`（批次号只增不复用，空名册拒）；
 3. **跑数**：原命令加 `--batch-id b1 --candidate-id <id>`——候选不在批/哈希不匹配/已读/批已关
-   一律 exit 2；合成运行（注入件）与判定窗不接触（legacy 窗）不查批；
+   一律 exit 2；**过闸即写 claim 占位**（v0.375 #99②：宁可错杀，崩溃/中断也算已消耗，
+   需重读由 owner 手动开新批），跑完补 read；合成运行（注入件）与判定窗不接触
+   （legacy 窗）不查批。配置哈希剔除 count（v0.375 #99①：resolve_count 自动推算随日
+   漂移，count 只影响起点可达性，check_reach 兜底）；
 4. **关批**：末位候选读完自动关；手动 `judgment_batch close --batch-id b1`；
    `status [--batch-id]` 查批状态/已读/未读清单。
 

@@ -731,7 +731,7 @@ class TestProductionRecordUse:
             for ln in jb.REGISTRY.read_text(encoding="utf-8").splitlines()
             if ln.strip()
         ]
-        assert [r["ev"] for r in rows] == ["open", "read", "close"]
+        assert [r["ev"] for r in rows] == ["open", "claim", "read", "close"]
         assert rows[1]["tool"] == "score_tier_position_study"
 
     def test_production_without_batch_rejected(self):

@@ -886,7 +886,7 @@ class TestProductionRecordUse:
             for ln in jb.REGISTRY.read_text(encoding="utf-8").splitlines()
             if ln.strip()
         ]
-        assert [r["ev"] for r in rows] == ["open", "read", "close"]
+        assert [r["ev"] for r in rows] == ["open", "claim", "read", "close"]
         assert (
             rows[1]["candidate_id"] == "c1" and rows[1]["tool"] == "bear_regime_study"
         )
