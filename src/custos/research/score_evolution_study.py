@@ -221,6 +221,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--random-seed", type=int, default=DEFAULT_RANDOM_SEED, help="随机臂采样种子"
     )
     ap.add_argument(
+        "--tie-seed",
+        type=int,
+        default=0,
+        help="组合层平分破序种子（v0.384/#105：V0 调权格的单腿二值分大量平分，"
+        "换种子多抽估平分噪声；只作用于进程内 V0 格与 V0 臂，DSL 格走 cell 子进程不受影响）",
+    )
+    ap.add_argument(
         "--n-random",
         type=int,
         default=None,
@@ -736,7 +743,12 @@ def _make_v0_runner(args: Any, codes: list[str], exit_spec: dict) -> CellRunner:
                 print("[WARN] V0 臂：0 候选（宇宙/窗口/数据有问题？）", file=sys.stderr)
                 return None
             tsum = bt.summarize_realized(cands)  # 已实现口径（v0.383）
-            pf = bt.simulate_portfolio_topn(cands, top_n=args.top_n, **_V0_PORTFOLIO)
+            pf = bt.simulate_portfolio_topn(
+                cands,
+                top_n=args.top_n,
+                tie_seed=getattr(args, "tie_seed", 0),
+                **_V0_PORTFOLIO,
+            )
             margin = sg._margin(
                 {"win": tsum.get("win_rate"), "payoff": tsum.get("payoff_ratio")}
             )
@@ -1126,7 +1138,11 @@ class _V0LatticeEvaluator:
             cands.append({**it["trade"], "score": final_score})
         taken: list[dict] = []
         pf = bt.simulate_portfolio_topn(
-            cands, top_n=self._args.top_n, taken_out=taken, **_V0_PORTFOLIO
+            cands,
+            top_n=self._args.top_n,
+            taken_out=taken,
+            tie_seed=getattr(self._args, "tie_seed", 0),
+            **_V0_PORTFOLIO,
         )
         tsum = bt.summarize_realized(taken)  # 已实现口径（v0.383）
         margin = sg._margin(

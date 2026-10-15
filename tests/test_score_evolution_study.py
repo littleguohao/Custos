@@ -1542,3 +1542,38 @@ class TestProductionRecordUse:
         assert len(calls) == 1
         assert calls[0]["args"][:2] == ("R34", "judgment_2017_2021")
         assert calls[0]["kwargs"]["synthetic"] is False
+
+
+class TestTieSeed:
+    """#105（v0.384 起平分哈希破序）：--tie-seed 透传到进程内 V0 格组合层。"""
+
+    def test_tie_seed_flag_accepted_and_recorded(self, tmp_path):
+        fake = FakeRunner(default=_reading(0.5))
+        rep = _run_v0l(
+            tmp_path,
+            fake,
+            SpyCollector({MINING: _v0l_collected_mining()}),
+            "--tie-seed",
+            "3",
+        )
+        assert rep["top_genome"] is not None
+
+    def test_tie_seed_reaches_portfolio(self, monkeypatch, tmp_path):
+        from custos.research import backtest_factors as bt
+
+        seen: list[int] = []
+        orig = bt.simulate_portfolio_topn
+
+        def spy(*a, **k):
+            seen.append(k.get("tie_seed"))
+            return orig(*a, **k)
+
+        monkeypatch.setattr(bt, "simulate_portfolio_topn", spy)
+        _run_v0l(
+            tmp_path,
+            FakeRunner(default=_reading(0.5)),
+            SpyCollector({MINING: _v0l_collected_mining()}),
+            "--tie-seed",
+            "7",
+        )
+        assert seen and set(seen) == {7}
