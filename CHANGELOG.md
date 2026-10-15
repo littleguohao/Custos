@@ -384,6 +384,7 @@
 | 2026-10-15 | v0.379 | **R44 工程落点（TODO #100）**：plan_rules_replay 加 --stop-anchor signal_low 锚点（stop_override=信号日最低价×(1−x)，x=0 逐位等价钉测+防御剔除记数）+ --scan-widths 只读挖掘 A∪B 的 8 档扫描（不读判定段/不过批次门/不入台账，钉测在案）；C1 参照档 n_taken≥100 / C2 x*=合并 margin 最高过门档且两窗 Δ>0 / C3 邻档平滑+选档一致 / C4 随机宽度臂每臂 max-of-8；margin 收益率口径主判据；R41 原模式金样逐位不变 | owner 2026-10-15（R44 预注册 v0.376） | 钉测 13+校准 3（哨兵 35% 假过线 decisive） |
 | 2026-10-15 | v0.380 | **0AMV 手工录入即确认（TODO #96 修订，推翻 v0.378 的 manual=candidate+--confirm）**：collector `--amv` 落盘即 quality=confirmed + source=manual + as_of=录入日，照常驱动 regime 转移；删 `--confirm` 旗标、merge 撤 manual 特判；daily_pipeline `--amv-pct` 旁路补同款超阈值 `--confirm-extreme`；阈值 import 单源 | owner 2026-10-15（忘带旗标 ⇒ 静默不翻转比录错更危险） | 钉测改写 |
 | 2026-10-15 | v0.381 | **第一批候选预注册**：R36 adx_gt_60 v2 重测（冻结配置不重选，挖掘 B 前置核对 + 判定段冻结臂池）、R39 ADX v2 重测（全量宇宙 + A∪B，挖掘内预演过线才入批）、新立 R45（空头区间 J<13 × 敞口 ≤30% × 4×4 出场）；README 加冻结与开批流程；R44 先验跑数前修订；TODO #102/#103 | owner 2026-10-15 | 文档 |
+| 2026-10-15 | v0.382 | **rdd 门符号感知（审计 2026-10-15 CK-1）**：`m2._ret_over_dd`（strategy_grid/fes/exit_campaign/score_* 单源）收益<0 时改用 收益×回撤——原 收益/回撤 亏损时对回撤单调递增，rdd 相对门在熊市窗反向（回撤越大越易过门）；两轴单调、0 处连续；三份 legacy 金样只 ret_over_dd 读数变、判决不变，已重捕 | 审计 | 钉测 +3 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

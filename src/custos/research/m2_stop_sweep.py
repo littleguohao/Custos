@@ -1803,22 +1803,28 @@ def _print_cross_group(groups: dict[str, list[dict]]) -> None:
 
 
 def _ret_over_dd(pf: dict) -> Optional[float]:
-    """收益/最大回撤。``simulate_portfolio`` 已经算好（`return_over_maxdd`），
-    旧结果文件里没有则现算。
+    """风险调整收益（**符号感知**的收益/最大回撤）——rdd 门与排序的单一来源。
+
+    收益 ≥0 ⇒ ``收益 / 回撤``（原口径）；收益 <0 ⇒ ``收益 × 回撤``（v0.382）。
+    ⚠️ 为什么：亏损时 ``收益/回撤`` 对回撤**单调递增**——回撤越大比值越接近 0、
+    看起来越好，rdd 相对门在熊市窗口方向反转（审计 2026-10-15 实测：参照
+    −20%/回撤40% 下，两轴都更优的 −5%/8% 被拒、−10%/60% 放行）。``收益×回撤``
+    在两轴上都单调（收益↑ 值↑、回撤↑ 值↓）且在收益=0 处与原口径连续。
+    报告里「收益/回撤」列仍按引擎原值展示（``return_over_maxdd``），本函数只管比较。
 
     为什么必须看它：按 `total_return` 排序会**系统性偏袒高敞口方案**——同一份幂律
     收益序列，敞口翻倍则收益与回撤同向放大，总收益榜首往往只是杠杆最大的那个。
-    这恰好与本脚本自己的结论（「决定亏损幅度的是总敞口」）相反着用。
     """
     if not isinstance(pf, dict):
         return None
-    v = pf.get("return_over_maxdd")
-    if isinstance(v, (int, float)):
-        return float(v)
     tr, dd = pf.get("total_return"), pf.get("max_drawdown")
-    if isinstance(tr, (int, float)) and isinstance(dd, (int, float)) and dd > 0:
-        return tr / dd
-    return None
+    num = (int, float)
+    if isinstance(tr, num) and isinstance(dd, num) and dd > 0:
+        return tr / dd if tr >= 0 else tr * dd
+    v = pf.get("return_over_maxdd")
+    if isinstance(v, num) and v >= 0:
+        return float(v)  # 无回撤明细的旧产物：非负值两口径一致
+    return None  # 负值且无回撤明细 ⇒ 无法换算，fail-closed
 
 
 def _print_portfolio(rows: list[dict]) -> None:
