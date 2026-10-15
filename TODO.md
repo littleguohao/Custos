@@ -16,7 +16,7 @@
 | 88 | 首次月度交易反思（2026-09 月），跑顺「月报 → TRADE_LESSONS」流程；之后按月执行，节奏见 MASTER_WORKFLOW §七 | P2 | 生产机 | 读 2026-09 月报 JSON（无则先补跑 `monthly_review`），按模板写 E3 并核对 L1~L7 | owner 2026-10-12；[TRADE_LESSONS](TRADE_LESSONS.md) |
 | 104 | R10 margin 按已实现口径重算：生产机原批次结果文件跑 `m2_stop_sweep --report-only`（v0.383 起汇总行自动剔 open_end），回填 R10 重跑行；「可用 margin 只在叠 0AMV」若不再成立按纪律就地标 🔄 | P2 | 生产机 | report-only 重算并贴表 | R10 头部审计注记 |
 | 105 | R36 adx_gt_60 入批前重建：单腿 {0,5} 分平分按代码序截断——候选读数按 `--tie-seed` 0~19 多抽报分布，零假设池在同口径下重建（依赖 #102 冻结配置读数模式），过线才入第一批 | P1 | coder | #102 落地后出命令 | R36 头部审计注记、v2 重测节 |
-| 102 | 判定段判决件剩余部分（第一批开批的前置）：判定线件 `kit.batch_threshold` 已落地（v0.385）；还差 m 从 judgment_batch 名册读（不可手填）+ 各终端判定段读数接它 + score_evolution_study「冻结配置读数」模式（读候选 + r36_p3_c4review 50 臂 best 配置、只读指定段、过批次门） | P1 | coder | 实现 + 钉测 | research README 冻结与开批流程；R36/R39 v2 节 |
+| 102 | 判定段判决件（B 方案：冻结臂判定段同次重读池）：已完成：batch_m/judgment_line（v0.389）、R44 prr（v0.391）、R40/R45 bear（v0.392）、R39 fes（v0.393）；剩 score_evolution「冻结配置读数」模式（R36：候选 V0 格 + r36_p3_c4review 50 臂 best DSL 配置判定段重读）与 regime_style（R43） | P1 | coder | 补齐剩余两终端 + 钉测 | research README 攒批协议；R36/R39/R44 |
 | 103 | R45 工具：扩展 bear_regime_study——信号日最低价锚定止损、4×4 出场网格、组合敞口 ≤30%、只读挖掘段扫描模式、随机入场臂同上限同预算 max-of-16 | P2 | coder | 实现 + 钉测（见 R45 工程落点） | R45 |
 | 106 | R36 已判路线复核：①Phase 3 配比路 64 格结构截断（倍率 3 零覆盖）——是否重设计格子另立预注册由 owner 定；②Phase 4 p2_sole 随机剔除臂对齐后（v0.386）重算 C4 | P3 | owner | 定是否重开 ①；② 生产机重跑 r36_p4 | R36 头部审计注记 |
 | 107 | R1/R2 组合层 baseline 对照按 `--tie-seed` 0~19 重跑报区间（baseline 恒 0 分，原读数是代码序截断的单次抽签） | P3 | 生产机 | 出命令后重跑 | R1/R2 头部审计注记 |
