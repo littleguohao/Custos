@@ -14,6 +14,8 @@
 | # | 事项 | 优先级 | 卡在 | 下一步 | 出处 |
 |---|---|---|---|---|---|
 | 88 | 首次月度交易反思（2026-09 月），跑顺「月报 → TRADE_LESSONS」流程；之后按月执行，节奏见 MASTER_WORKFLOW §七 | P2 | 生产机 | 读 2026-09 月报 JSON（无则先补跑 `monthly_review`），按模板写 E3 并核对 L1~L7 | owner 2026-10-12；[TRADE_LESSONS](TRADE_LESSONS.md) |
+| 102 | 判定段判决件（第一批开批的前置）：criteria_kit 加判定线 q(1−0.05/m)，m 从 judgment_batch 名册读；各终端判定段读数接它；score_evolution_study 加「冻结配置读数」模式（读候选 + r36_p3_c4review 50 臂 best 配置、只读指定段、过批次门） | P1 | coder | 实现 + 钉测（m 来自名册不可手填、N=50 时分位口径） | research README 冻结与开批流程；R36/R39 v2 节 |
+| 103 | R45 工具：扩展 bear_regime_study——信号日最低价锚定止损、4×4 出场网格、组合敞口 ≤30%、只读挖掘段扫描模式、随机入场臂同上限同预算 max-of-16 | P2 | coder | 实现 + 钉测（见 R45 工程落点） | R45 |
 | 101 | 选股练习台账（owner 长期跟踪选股成功率）：`pick_practice add 600000 000001`（只传代码，日期缺省当天）写 append-only `data/trades/pick_practice.jsonl`；入场=T+1 开盘，出场按 live EXIT_RULES + BBI 清仓（simulate_b1_trade 现行参数）逐日滚动；`pick_practice report` 出累计/按月胜率、盈亏比、均收、持有天数（open 单单列）；不建对照池；live 跟踪显式豁免 holdout、不作研究判据 | P2 | coder | 实现 + 钉测（T+1 开盘入场、未出场标 open） | owner 2026-10-15 |
 | 93 | R43 工具实现 `regime_style_study`（区间段切分 / 停牌过滤 / 38 维 as-of 特征 / 五分位价差 / C1~C4 伪区间段零假设 / 板块层），带零假设两连测与回归哨兵 | P2 | 生产机 | 工具 v0.368 已落地；功效节数值待 #91 回填后定稿，跑数待生产机发令 | owner 2026-10-14；[R43](governance/research/R43_regime_sector_style.md) |
 | 92 | v2 切换后基线重测 + 全量宇宙耗时实测：定案=切换后第一步基线重测（R1/R4/R11 量级，**只在两段挖掘上做**；判定段基线留到首批候选判定时同次读出）；实测全量 ~5500 票 × count(2000 年起推算) × 三段 warm 耗时 | P2 | 生产机 | 命令与读数口径已写死于 research README『基线重测 runbook』；耗时埋点 v0.364 已落地；runbook v0.365 已补 SEG_A_START 规则+板块缺数据语义+2012 子窗；生产机执行回填 | owner 2026-10-13（定案 v0.355）；#89/#90 遗留 |

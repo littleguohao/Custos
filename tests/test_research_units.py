@@ -45,8 +45,9 @@ def test_units_exist():
     # 预注册落档）
     # 2026-10-14：+R43（0AMV 区间段板块与股票风格，预注册落档）
     # 2026-10-15：+R44（J 日最低价锚定止损宽度寻优，预注册落档）
-    assert len(UNITS) == 43, (
-        f"预期 43 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
+    # 2026-10-15：+R45（空头区间 J<13 × 30% 仓位 × 出场网格，预注册落档）
+    assert len(UNITS) == 44, (
+        f"预期 44 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
     )
 
 
