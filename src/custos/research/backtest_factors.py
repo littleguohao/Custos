@@ -4035,6 +4035,30 @@ def _trades_summary_lines(
     return lines
 
 
+def is_unrealized_reason(reason: Any) -> bool:
+    """未实现出场（读数口径单源，v0.383 审计）：``open_end*``（窗末仍持仓、按最后
+    收盘价标记）与 ``*_unfillable``（连续不可卖、持到数据末按最后收盘标记）——
+    两者都是浮动盈亏不是平仓结果；``+scaled`` 后缀先剥再判。"""
+    base = str(reason or "").split("+")[0]
+    return base.startswith("open_end") or base.endswith("_unfillable")
+
+
+def realized_trades(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """剔除未实现出场后的交易子集（见 :func:`is_unrealized_reason`）。"""
+    return [t for t in trades if not is_unrealized_reason(t.get("reason"))]
+
+
+def summarize_realized(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    """已实现口径汇总 = ``summarize_trades(realized_trades(trades))`` + 剔除计数
+    ``n_unrealized``。**margin / 胜率 / 盈亏比 / 期望一律用它**（v0.383）：
+    含窗末浮盈的全体读数在 open_end 偏正的窗口会造假过线（R11 已证偏正；
+    审计实测 m2 判定行在合成数据上可变号）。组合层模拟仍用全体交易（逐日盯市）。"""
+    real = realized_trades(trades)
+    out = summarize_trades(real)
+    out["n_unrealized"] = len(trades) - len(real)
+    return out
+
+
 def summarize_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
     """交易级汇总：胜率、每笔期望、盈亏比、均持仓、按出场原因分解。"""
     if not trades:

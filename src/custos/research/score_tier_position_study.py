@@ -192,7 +192,7 @@ def _margin_of(trades: list[dict]) -> Optional[float]:
 
     if not trades:
         return None
-    tsum = bt.summarize_trades(trades)
+    tsum = bt.summarize_realized(trades)  # 已实现口径（v0.383）
     return sg._margin({"win": tsum.get("win_rate"), "payoff": tsum.get("payoff_ratio")})
 
 

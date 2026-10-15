@@ -140,7 +140,7 @@ def _eval_pool(
     pf = bt.simulate_portfolio_topn(
         cands, top_n=top_n, taken_out=taken, **ses._V0_PORTFOLIO
     )
-    tsum = bt.summarize_trades(taken)
+    tsum = bt.summarize_realized(taken)  # 已实现口径（v0.383）
     margin = sg._margin(
         {"win": tsum.get("win_rate"), "payoff": tsum.get("payoff_ratio")}
     )

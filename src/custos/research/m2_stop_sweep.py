@@ -1163,6 +1163,25 @@ def _resolve_sample(avail: dict[int, int], sample: Optional[int]) -> Optional[in
     return sample
 
 
+def _realized_view(s: dict) -> dict:
+    """结果文件汇总的**已实现口径**视图（v0.383 审计）：有逐笔 ⇒ 用
+    ``summarize_realized`` 重算 n/胜率/期望/盈亏比等（剔 open_end / *_unfillable），
+    无逐笔（``--summary-only`` 旧产物）⇒ 原样返回并标 ``_realized=False``。
+    此前 margin 取的是含窗末浮盈的全体读数（R10「已实现口径」只落在累计 R 上）。"""
+    trades = s.get("_trades") or []
+    if not trades or not all(
+        isinstance(t, dict) and "reason" in t and "ret" in t for t in trades
+    ):
+        return {**s, "_realized": False}  # 无逐笔 / 逐笔缺字段 ⇒ 无法重算
+    from custos.research import backtest_factors as bt  # noqa: PLC0415
+
+    try:
+        real = bt.summarize_realized(trades)
+    except (KeyError, TypeError):  # 旧产物逐笔字段不全 ⇒ 无法重算，如实标注
+        return {**s, "_realized": False}
+    return {**s, **real, "_realized": True}
+
+
 def _collect_row(group: str, name: str, s: dict, sample: int) -> dict:
     """把 ``_load`` 读出的一个结果文件组装成汇总行（dict 字段与键序固定）。
 
@@ -1171,9 +1190,12 @@ def _collect_row(group: str, name: str, s: dict, sample: int) -> dict:
     不被改动，hoist 成局部变量逐位等价（`_trades_ref` 仍是同一个 list 对象，不复制）。
     """
     trades = s.get("_trades") or []
+    s = _realized_view(s)
     return {
         "name": name,
         "n": s.get("n"),
+        "realized": s.get("_realized"),
+        "n_unrealized": s.get("n_unrealized"),
         "win": s.get("win_rate"),
         "exp": s.get("expectancy"),
         "expR": s.get("expectancy_R"),

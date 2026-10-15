@@ -46,7 +46,7 @@ def margin_block(trades: list[dict[str, Any]]) -> dict[str, Any]:
     from custos.research import backtest_factors as bt  # noqa: PLC0415
     from custos.research import strategy_grid as sg  # noqa: PLC0415
 
-    tsum = bt.summarize_trades(trades)
+    tsum = bt.summarize_realized(trades)  # 已实现口径（v0.383）
     return {
         "margin": sg._margin(
             {"win": tsum.get("win_rate"), "payoff": tsum.get("payoff_ratio")}

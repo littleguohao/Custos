@@ -732,7 +732,7 @@ def _make_v0_runner(args: Any, codes: list[str], exit_spec: dict) -> CellRunner:
             if not cands:
                 print("[WARN] V0 臂：0 候选（宇宙/窗口/数据有问题？）", file=sys.stderr)
                 return None
-            tsum = bt.summarize_trades(cands)
+            tsum = bt.summarize_realized(cands)  # 已实现口径（v0.383）
             pf = bt.simulate_portfolio_topn(cands, top_n=args.top_n, **_V0_PORTFOLIO)
             margin = sg._margin(
                 {"win": tsum.get("win_rate"), "payoff": tsum.get("payoff_ratio")}
@@ -1062,7 +1062,9 @@ class _V0LatticeEvaluator:
             if not collected:
                 self._pool_cache[key] = None
             else:
-                tsum = bt.summarize_trades([dict(it["trade"]) for it in collected])
+                tsum = bt.summarize_realized(
+                    [dict(it["trade"]) for it in collected]
+                )  # 已实现口径（v0.383）
                 self._pool_cache[key] = {
                     "n": tsum.get("n"),
                     "win_rate": tsum.get("win_rate"),
@@ -1123,7 +1125,7 @@ class _V0LatticeEvaluator:
         pf = bt.simulate_portfolio_topn(
             cands, top_n=self._args.top_n, taken_out=taken, **_V0_PORTFOLIO
         )
-        tsum = bt.summarize_trades(taken)
+        tsum = bt.summarize_realized(taken)  # 已实现口径（v0.383）
         margin = sg._margin(
             {"win": tsum.get("win_rate"), "payoff": tsum.get("payoff_ratio")}
         )

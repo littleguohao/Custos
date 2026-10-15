@@ -92,6 +92,7 @@ from custos.research.m2_stop_sweep import (
     _cap_jobs,
     _load,
     _margin,
+    _realized_view,
     _ret_over_dd,
 )
 
@@ -591,7 +592,7 @@ def load_cell_row(
     cell: dict[str, Any], path: pathlib.Path, reused: bool
 ) -> dict[str, Any]:
     """读一个格子的结果文件，组装排名行（键名固定，测试钉住）。"""
-    s = _load(path)
+    s = _realized_view(_load(path))  # margin 等 = 已实现口径（v0.383）
     pf = s.get("_portfolio") or {}
     return {
         "scorer": cell["scorer"],

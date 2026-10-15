@@ -1035,7 +1035,7 @@ def make_v0_replay_evaluator(args: Any, ap: argparse.ArgumentParser) -> Evaluato
                 cands.append({**tr, "score": score})
         if not cands:
             return None
-        tsum = bt.summarize_trades(cands)
+        tsum = bt.summarize_realized(cands)  # 已实现口径（v0.383）
         pf = bt.simulate_portfolio_topn(cands, top_n=args.top_n, **V0_PORTFOLIO)
         return {
             "row": {

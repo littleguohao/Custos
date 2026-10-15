@@ -218,7 +218,7 @@ def combine_readings(
 
     if not trades:
         return None
-    tsum = bt.summarize_trades(trades)
+    tsum = bt.summarize_realized(trades)  # margin 等 = 已实现口径（v0.383）
     taken: list[dict] = []
     pf = bt.simulate_portfolio_topn(
         trades, top_n=top_n, taken_out=taken, **V0_PORTFOLIO
@@ -242,6 +242,7 @@ def combine_readings(
         "payoff_ratio": tsum.get("payoff_ratio"),
         "win_rate": tsum.get("win_rate"),
         "n": tsum.get("n"),
+        "n_unrealized": tsum.get("n_unrealized"),
         "n_taken": pf.get("n_taken"),
         "ret_over_dd": row["ret_over_dd"],
         "trade_set_note": "margin=全候选交易(collect_all) / rdd=topN 组合选中子集"
