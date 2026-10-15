@@ -23,7 +23,7 @@ live 侧板块本就只做候选池密度榜的情境标注（非进场过滤）
 | [03_execution_discipline.md](03_execution_discipline.md) | 人 | ✅ | 执行纪律：卖出时间窗 / 等信号 / 浮盈转亏保护 |
 | [04_pullback_rotation.md](04_pullback_rotation.md) | 人（设计上）| 🔴 **零实现** | 大盘回调后的资金切换与四类分层 |
 | [05_pit_recovery.md](05_pit_recovery.md) | 人 | ✅ | 补坑：大坑 / 小坑 / 小洞 |
-| [90_research_summary.md](90_research_summary.md) | —（摘要）| ⚠️ 量级待重跑 | 一轮回测的执行摘要 |
+| [90_regime_overview.md](90_regime_overview.md) | —（总览）| ✅ live 对照 | 按 0AMV 区间的入场 / 止损 / 止盈 / 仓位：live 现行 × 研究结论 × 在研 |
 
 ## 代码依赖
 
@@ -46,5 +46,4 @@ live 侧板块本就只做候选池密度榜的情境标注（非进场过滤）
 ## 已知问题
 
 1. 🔴 `04_pullback_rotation.md` 零实现却被 `02_holding_check.md` §七 依赖（待办 #26）
-2. ⚠️ `90_research_summary.md` 的收益量级数字待重跑
-3. ⚠️ 止损层级未写定（与 CZ）
+2. ⚠️ 止损层级未写定（与 CZ）

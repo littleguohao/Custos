@@ -376,7 +376,7 @@ append-only、生产机写入提交）：
 
 ## 研究工具目录
 
-**按 0AMV 区间看入场 / 止损 / 止盈 / 仓位的现行规则与研究状态**：[`regime_playbook.md`](regime_playbook.md)（判毕或 live 改规则时同步更新）。
+**按 0AMV 区间看入场 / 止损 / 止盈 / 仓位的现行规则与研究状态**：[`strategy/b1/90_regime_overview.md`](../strategy/b1/90_regime_overview.md)（判毕或 live 改规则时同步更新）。
 
 
 全量清单：`uv run python -m custos.research`（按 引擎/驱动/研究/诊断 分组，含模式开关）。

@@ -263,7 +263,7 @@ class TestStrategyDocsFlagUnstableNumbers:
     """
 
     DOCS = (
-        "governance/strategy/b1/90_research_summary.md",
+        "governance/strategy/b1/90_regime_overview.md",
         "governance/strategy/b1/01_swing_rules.md",
     )
 
@@ -300,7 +300,7 @@ class TestSummaryTracksRerunState:
     ⇒ 单元完成重跑后，凡在摘要页点名它「待重跑」的措辞都必须同步。
     """
 
-    SUMMARY = "governance/strategy/b1/90_research_summary.md"
+    SUMMARY = "governance/strategy/b1/90_regime_overview.md"
 
     def _rerun_table(self) -> str:
         s = (RESEARCH / "README.md").read_text(encoding="utf-8")

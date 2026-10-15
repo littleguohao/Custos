@@ -33,7 +33,7 @@ strategy/
 | 策略上下文目录 | 无前缀、小写短名 | `b1/` `cz/` |
 | 非策略目录 | `_` 前缀 | `_factors/` `_shared/` |
 | 规则文档 | `NN_lower_snake.md`，NN 给**阅读顺序** | `01_swing_rules.md` |
-| 附录 / 摘要 | `90+` | `90_research_summary.md` |
+| 附录 / 摘要 | `90+` | `90_regime_overview.md` |
 | 已废 | `99_deprecated_*` —— **废弃状态写在文件名里** | （当前无）|
 | 代码消费的配置 | `UPPER_SNAKE.json`（与 `contracts/` 一致）| （当前无，`CZ_SECTOR_PREFERENCE.json` 已随 v0.80 移除）|
 

@@ -378,6 +378,7 @@
 | 2026-10-14 | v0.374 | **判定段批次锁落地（TODO #95）**：新模块 judgment_batch（judgment_batches.jsonl 入库 append-only；open/五路拒/mark_read 末位自动关批/close/status）；7+1 终端加 --batch-id/--candidate-id/--print-config-hash（冻结配置哈希与门同状态）；门禁 synthetic 快照豁免+相交制，缺批/五路不过 ⇒ exit 2；evolution_loop 可经 --final-judge 读判定段却从不登记=既存漏洞，同装门+补 record_use；conftest 重定向 REGISTRY | owner 2026-10-14 | 钉测：状态机/五路拒/门豁免+8 终端生产方向 |
 | 2026-10-15 | v0.375 | **#99 批次锁两处补修（owner review）**：①配置哈希剔除 count——resolve_count 缺省按「起点→今天」推算随日漂移，冻结次日即失配、流程跑不通（count 只影响起点可达性，check_reach 兜底）；②过闸即写 claim 事件占位，此后再次过闸一律拒绝（旧形态 mark_read 跑完才登记，中途崩溃/Ctrl-C 可绕开「一批只读一次」）——宁可错杀：崩溃也算已消耗，重读须 owner 手动开新批；status 加 claimed/in_flight；7 处终端钉测事件序列同步 open→claim→read→close | owner review #95 | 钉测 +5（隔日哈希不变/claim 再入拒/崩溃挡自动关批等） |
 | 2026-10-15 | v0.376 | **研究目录新增 regime_playbook.md**（0AMV 做多 / 空头 × 入场 / 止损 / 止盈 / 仓位：live 现行+代码位置、研究结论、在研项，含 N 型结构止损只在 live 等四处缺口）；**R44 预注册**（J 日最低价 × (1−x)，x 5%~20% 8 档 vs pct10，收益率口径 margin + rdd 门，工具 #100）；#97 并入 R44 结案；catalog 止损/持仓计划段改指向 playbook | owner | 治理守卫绿 |
+| 2026-10-15 | v0.377 | **三份总览文档合并（owner 拍板）**：`_shared/factor_exit_catalog.md`（止损/止盈/回流节）+ `b1/90_research_summary.md`（过期研究摘要）+ `research/regime_playbook.md` → **`b1/90_regime_overview.md`**（按 0AMV 区间的现行规则 × 研究状态 + 出场规则目录 + 持仓状态机信号表）；因子注册表清单迁入 `_factors/README.md`；_shared 回归跨策略裁决规则；注册表与 7 处引用、摘要页守卫测试同步 | owner | 治理守卫绿 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

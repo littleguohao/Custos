@@ -29,7 +29,7 @@ LLM 不进 live 交易决策与执行链路——live 保持纯脚本（研究�
   买入时计划点位持久化（选股 stop_loss_ref 不再断链）
 - **研究→live 回流**——`research/strategy_grid.py` 因子×出场联合寻优，
   优胜配置的键名与 live `EXIT_RULES.json` 一致可直接拷入；**调任何分值/阈值先回测**
-- 三件套全景：[`_shared/factor_exit_catalog.md`](governance/strategy/_shared/factor_exit_catalog.md)
+- 三件套全景：[`b1/90_regime_overview.md`](governance/strategy/b1/90_regime_overview.md)（按 0AMV 区间的现行规则 × 研究状态）· 因子清单 [`_factors/README.md`](governance/strategy/_factors/README.md)
 
 **决策与风控哲学**：
 
