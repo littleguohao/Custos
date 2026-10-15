@@ -125,6 +125,7 @@
   真实 |t| > q95 才 confirmed_pass。——这同时处理了多重比较（族内 max-of-K）和「该风格在所有
   时期都占优、并非 regime 专属」两件事。
 - **结局**：`verdict_four_state`；C1~C4 全过 = candidate，进判定段第一批。
+- **判定段读数（v0.395 跑数前修订，owner 选 B）**：入批候选 = 挖掘段 candidate 的（方向, 维度/指数, 符号），写成 `--judgment-read bear:<维度>:<±>[,…]`（板块指数 `bear:sector:<代码>:<±>`），先 `--print-config-hash` 冻结、开批后加 `--batch-id/--candidate-id` 重跑。统计量 = 符号 × 判定段同向区间段价差 t；零假设池 = 同次运行在判定段放置的伪区间段、**同一维度**的符号化 t（候选已冻结，不取族内 max）；判定线 = `judgment_batch.judgment_line`（m 来自名册）。段数 < `--min-segs` ⇒ untested；统计量 ≤0 或同号段占比 < 0.6 ⇒ falsified。
 - **附带读数（不作判据）**：早期可识别——段内前 5 / 10 个交易日的风格价差对段剩余收益价差
   的同号率；段长加权口径；绝对收益为正占比。
 

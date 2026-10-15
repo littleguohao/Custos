@@ -10,6 +10,8 @@ import struct
 
 import numpy as np
 import pandas as pd
+import json
+
 import pytest
 
 from custos.research import regime_style_study as rs
@@ -873,3 +875,112 @@ def _calib_run(seed: int, edge: bool, **inj):
     )
     kw.update(inj)
     return rs.run_study(_calib_args(), **kw)
+
+
+# ---------------------------------------------------------------------------
+# 判定段读数模式（v0.395，owner 选 B；R43 入批）
+# ---------------------------------------------------------------------------
+
+
+def _judgment_fixture(seed=0):
+    blocks = [("中性", 5)] + [("空头", 10), ("中性", 5)] * 4
+    days_j, states_j = _blocks_days(blocks, "2018-01-02")
+    regime = _regime_of(days_j, states_j)
+    full = [d.strftime("%Y-%m-%d") for d in pd.bdate_range("2016-01-04", "2019-06-28")]
+    rng = np.random.RandomState(seed)
+    frames = {}
+    for k in range(12):
+        c = f"6000{k:02d}"
+        r = rng.normal(0.0002, 0.01, len(full))
+        frames[c] = _mk_df(full, (10 + k) * np.exp(np.cumsum(r)))
+    return regime, frames
+
+
+def _jinj(regime, frames):
+    return dict(
+        bars_loader=lambda codes, count, start, end: frames,
+        regime=regime,
+        codes=sorted(frames),
+        sector_bars={},
+        sector_types={},
+        shares_fn=lambda c: None,
+        xdxr_fn=lambda c: None,
+        pit_records=[],
+    )
+
+
+def test_parse_judgment_specs():
+    out = rs.parse_judgment_specs("bear:price:+,bull:sector:880301:-")
+    assert [c["kind"] for c in out] == ["style", "sector"]
+    assert out[1]["sign"] == -1 and out[1]["key"] == "880301"
+    with pytest.raises(ValueError):
+        rs.parse_judgment_specs("bear:nope:+")
+
+
+def test_judgment_read_preview(tmp_path):
+    regime, frames = _judgment_fixture()
+    out = tmp_path / "r43j.json"
+    rc = rs.main(
+        [
+            "--out",
+            str(out),
+            "--judgment-read",
+            "bear:price:+",
+            "--min-segs",
+            "3",
+            "--min-stocks",
+            "6",
+            "--min-group",
+            "1",
+            "--n-random",
+            "8",
+        ],
+        **_jinj(regime, frames),
+    )
+    assert rc == 0
+    rep = json.loads(out.read_text(encoding="utf-8"))
+    c = rep["candidates"][0]
+    assert rep["n_real_segs"]["bear"] == 4 and c["n_segs"] == 4
+    assert c["line"] is None and c["verdict"] in {"falsified", "no_batch"}
+    assert len(c["pool"]) <= 8
+
+
+def test_judgment_read_batch_line(tmp_path, monkeypatch):
+    from custos.research import judgment_batch as jb
+
+    reg = tmp_path / "jb.jsonl"
+    jb.open_batch(
+        "b1", [{"id": "r43", "config_hash": "t:x", "unit": "R43"}] * 1, path=reg
+    )
+    monkeypatch.setattr(jb, "REGISTRY", reg)
+    regime, frames = _judgment_fixture()
+    out = tmp_path / "r43j.json"
+    rc = rs.main(
+        [
+            "--out",
+            str(out),
+            "--judgment-read",
+            "bear:price:+",
+            "--min-segs",
+            "3",
+            "--min-stocks",
+            "6",
+            "--min-group",
+            "1",
+            "--n-random",
+            "8",
+            "--batch-id",
+            "b1",
+            "--c4-min-pool",
+            "3",
+        ],
+        **_jinj(regime, frames),
+    )
+    assert rc == 0
+    c = json.loads(out.read_text(encoding="utf-8"))["candidates"][0]
+    assert c["line"]["m"] == 1
+
+
+def test_mining_mode_rejects_batch_args():
+    with pytest.raises(SystemExit):
+        rs.main(["--batch-id", "b1"])

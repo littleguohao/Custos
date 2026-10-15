@@ -1475,6 +1475,221 @@ def run_study(
     return report
 
 
+def parse_judgment_specs(text: str) -> list[dict[str, Any]]:
+    """判定段候选清单解析：逗号分隔 ``方向:维度:符号``（风格维）或
+    ``方向:sector:指数代码:符号``（板块指数）；符号 ∈ {+,-} = 挖掘段过线方向。"""
+    out: list[dict[str, Any]] = []
+    for raw in [x.strip() for x in text.split(",") if x.strip()]:
+        parts = raw.split(":")
+        if len(parts) == 3 and parts[0] in DIRECTIONS and parts[1] in ALL_DIMS:
+            kind, key, sg = "style", parts[1], parts[2]
+        elif len(parts) == 4 and parts[0] in DIRECTIONS and parts[1] == "sector":
+            kind, key, sg = "sector", parts[2], parts[3]
+        else:
+            raise ValueError(
+                f"判定段候选格式非法: {raw!r}（方向:维度:± 或 方向:sector:代码:±）"
+            )
+        if sg not in ("+", "-"):
+            raise ValueError(f"候选 {raw!r} 符号须为 + 或 -")
+        out.append(
+            {
+                "id": raw,
+                "dir": parts[0],
+                "kind": kind,
+                "key": key,
+                "sign": 1 if sg == "+" else -1,
+            }
+        )
+    if not out:
+        raise ValueError("--judgment-read 候选清单为空")
+    return out
+
+
+def _signed_t_and_frac(
+    series: list[float], sign: int
+) -> tuple[Optional[float], Optional[float]]:
+    t = _t_stat(series)
+    if t is None or not series:
+        return None, None
+    frac = sum(1 for x in series if (x >= 0) == (sign > 0)) / len(series)
+    return sign * t, frac
+
+
+def run_judgment_read(
+    args: Any,
+    cands: list[dict[str, Any]],
+    *,
+    bars_loader: Optional[Callable] = None,
+    regime: Optional[dict[str, str]] = None,
+    codes: Optional[list[str]] = None,
+    vipdoc_dates: Optional[dict[str, np.ndarray]] = None,
+    sector_bars: Optional[dict[str, pd.DataFrame]] = None,
+    sector_types: Optional[dict[str, str]] = None,
+    shares_fn: Optional[Callable] = None,
+    xdxr_fn: Optional[Callable] = None,
+    pit_records: Optional[list[dict]] = None,
+    pseudo_draw_fn: Optional[Callable] = None,
+) -> dict[str, Any]:
+    """判定段读数（v0.395，owner 2026-10-15 选 B；R43 入批）。
+
+    候选 = 挖掘段过线、冻结了方向与符号的（维度/指数），**判定段不再挑选**：
+    统计量 = 符号 × 判定段同向区间段价差（超额）的 t；零假设池 = 同次运行在判定段
+    按同规则放置的伪区间段（段长采自判定段真实段长），**同一维度**的符号化 t
+    （不取族内 max——候选已冻结，两边都不挑选）。判决：段数 < --min-segs ⇒ untested；
+    统计量 ≤0 或同号段占比 < C2_SAME_SIGN_FRAC ⇒ falsified；带 --batch-id ⇒
+    judgment_line confirmed_pass ⇒ candidate，否则 provisional；无批次号 ⇒ no_batch。
+    """
+    from custos.research import backtest_factors as bt  # noqa: PLC0415
+
+    js, je = lw.SEG_JUDGMENT
+    if regime is None:
+        regime = bt.load_amv_regime(since="1990-01-01")
+    segs_all = split_regime_segments(regime)
+    real: dict[str, list[dict[str, Any]]] = {d: [] for d in DIRECTIONS}
+    for sg_ in segs_all:
+        if (
+            sg_["n_days"] >= args.min_seg_days
+            and js <= sg_["start"]
+            and sg_["end"] <= je
+        ):
+            real[sg_["dir"]].append({**sg_, "window": "J"})
+    j_days = [d for d in sorted(regime) if js <= d <= je]
+    if not any(real.values()) or not j_days:
+        return {}
+    draw_fn = pseudo_draw_fn or draw_pseudo_placements
+    pseudo = {
+        dr: draw_fn(
+            real[dr], j_days, n_draws=args.n_random, seed=args.c4_seed + 7000 + di
+        )
+        for di, dr in enumerate(DIRECTIONS)
+        if real[dr]
+    }
+    feature_dates = {sg_["start"] for d in DIRECTIONS for sg_ in real[d]}
+    for pz in pseudo.values():
+        for draw in pz["draws"]:
+            feature_dates.update(sg_["start"] for sg_ in draw)
+    if codes is None:
+        ns = argparse.Namespace(
+            codes_file=args.codes_file,
+            universe_local=args.universe_local,
+            universe_sample=args.universe_sample,
+            seed=args.seed,
+            codes=args.codes,
+        )
+        codes = _universe.resolve(ns, _build_parser())
+        args.universe_meta = ns.universe_meta
+    else:
+        args.universe_meta = _universe.universe_meta(codes, "injected")
+    count = 0
+    if bars_loader is None:
+        bars_loader = bt._load_bars_local
+        count = lw.count_for_start(min(feature_dates)) + 260
+    ctx = _build_ctx(
+        codes,
+        feature_dates,
+        bars_loader=bars_loader,
+        count=count,
+        shares_fn=shares_fn or _default_shares_fn,
+        xdxr_fn=xdxr_fn or _default_xdxr_fn,
+        pit_records=pit_records if pit_records is not None else _default_pit_records(),
+        susp_bar_frac=args.susp_bar_frac,
+        vipdoc_dates=vipdoc_dates,
+    )
+    if not ctx["stocks"]:
+        return {}
+    need_sector = any(c["kind"] == "sector" for c in cands)
+    sector = _load_sectors(sector_bars, sector_types) if need_sector else {}
+
+    def _style_series(res: list, dim: str) -> list[float]:
+        return _window_dir_spreads(res, dim)
+
+    def _sector_series(res: list, code: str) -> list[float]:
+        return [r["excess"][code] for r in res if r and code in r["excess"]]
+
+    style_real = {
+        dr: _seg_eval_batch(
+            real[dr], ctx, min_stocks=args.min_stocks, min_group=args.min_group
+        )
+        for dr in DIRECTIONS
+    }
+    style_pseudo = {
+        dr: [
+            _seg_eval_batch(
+                d, ctx, min_stocks=args.min_stocks, min_group=args.min_group
+            )
+            for d in pz["draws"]
+        ]
+        for dr, pz in pseudo.items()
+    }
+    sector_real: dict[str, list] = {}
+    sector_pseudo: dict[str, list] = {}
+    if sector:
+        for dr in DIRECTIONS:
+            sector_real[dr] = [
+                eval_segment_sector(x, sector, min_sectors=args.min_sectors)
+                for x in real[dr]
+            ]
+            sector_pseudo[dr] = [
+                [
+                    eval_segment_sector(x, sector, min_sectors=args.min_sectors)
+                    for x in d
+                ]
+                for d in (pseudo.get(dr) or {"draws": []})["draws"]
+            ]
+
+    batch_id = str(getattr(args, "batch_id", "") or "")
+    results: list[dict[str, Any]] = []
+    for c in cands:
+        dr, sign = c["dir"], c["sign"]
+        if c["kind"] == "style":
+            series = _style_series(style_real[dr], c["key"])
+            draws = [_style_series(r, c["key"]) for r in style_pseudo.get(dr, [])]
+        else:
+            series = _sector_series(sector_real.get(dr, []), c["key"])
+            draws = [_sector_series(r, c["key"]) for r in sector_pseudo.get(dr, [])]
+        stat, frac = _signed_t_and_frac(series, sign)
+        pool = [v for d in draws if (v := _signed_t_and_frac(d, sign)[0]) is not None]
+        line = None
+        if batch_id:
+            from custos.research import judgment_batch as jb  # noqa: PLC0415
+
+            line = jb.judgment_line(batch_id, stat, pool, min_pool=args.c4_min_pool)
+        if len(series) < args.min_segs:
+            verdict = "untested"
+        elif stat is None or stat <= 0 or (frac or 0) < C2_SAME_SIGN_FRAC:
+            verdict = "falsified"
+        elif line is None:
+            verdict = "no_batch"
+        else:
+            verdict = (
+                "candidate" if line["state"] == "confirmed_pass" else "provisional"
+            )
+        results.append(
+            {
+                **c,
+                "n_segs": len(series),
+                "mean": statistics.mean(series) if series else None,
+                "signed_t": stat,
+                "frac_same_sign": frac,
+                "pool": pool,
+                "line": line,
+                "verdict": verdict,
+            }
+        )
+    return {
+        "schema": "regime_style_judgment/v1",
+        "mode": "judgment_read",
+        "window": {"start": js, "end": je},
+        "n_real_segs": {d: len(real[d]) for d in DIRECTIONS},
+        "pseudo_dropped": {d: pz["n_dropped"] for d, pz in pseudo.items()},
+        "candidates": results,
+        "universe": args.universe_meta,
+        "rule": "统计量 = 符号×判定段同向段价差 t；池 = 判定段同次伪段同维度符号化 t（不取族 max）；"
+        "段数 < --min-segs ⇒ untested；统计量≤0 或同号占比<0.6 ⇒ falsified；"
+        "带 --batch-id ⇒ judgment_line（m 来自名册）confirmed_pass ⇒ candidate 否则 provisional",
+    }
+
+
 def _default_shares_fn(code: str) -> Optional[list[dict]]:
     from custos.datasource.local_tdx import adjust_factors  # noqa: PLC0415
 
@@ -1677,11 +1892,80 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--out", default=str(LOGS / "regime_style_study.json"), help="产物 JSON 路径"
     )
+    ap.add_argument(
+        "--judgment-read",
+        default="",
+        help="判定段读数模式（v0.395，R43 入批）：逗号分隔冻结候选 方向:维度:± 或 "
+        "方向:sector:指数代码:±（符号=挖掘段过线方向）；读 2017~2021 判定段，须过批次门",
+    )
+    ap.add_argument("--batch-id", default="", help="判定段批次号（攒批协议）")
+    ap.add_argument("--candidate-id", default="", help="批内候选 id")
+    ap.add_argument(
+        "--print-config-hash",
+        action="store_true",
+        help="冻结入批：打印本次配置哈希后退出（不碰数据）",
+    )
     return ap
 
 
+def _main_judgment(
+    args: Any, ap: argparse.ArgumentParser, argv: Optional[list[str]], injections: dict
+) -> int:
+    from custos.research import judgment_batch as jb  # noqa: PLC0415
+    from custos.research import window_usage as wu  # noqa: PLC0415
+
+    try:
+        cands = parse_judgment_specs(args.judgment_read)
+    except ValueError as exc:
+        ap.error(str(exc))
+    if args.print_config_hash:
+        return jb.print_config_hash_and_exit(args, "regime_style_study")
+    synthetic = any(v is not None for v in injections.values())  # 入口快照
+    jb.gate_judgment_read(
+        args,
+        ap,
+        synthetic=synthetic,
+        judgment_span=lw.SEG_JUDGMENT,
+        tool="regime_style_study",
+    )
+    args.cmdline = " ".join(sys.argv if argv is None else ["regime_style_study", *argv])
+    report = run_judgment_read(args, cands, **injections)
+    if not report:
+        print(
+            "[FAIL] 判定段 0 合格段（或 0 票有数据）——空结果不写产物", file=sys.stderr
+        )
+        return 2
+    tag = Path(args.out).stem
+    k = wu.record_use(
+        "R43", "judgment_2017_2021", tag, "判定段读数（攒批）", synthetic=synthetic
+    )
+    if getattr(args, "_judgment_gated", False):
+        jb.mark_read(
+            args.batch_id, args.candidate_id, tool="regime_style_study", tag=tag
+        )
+    report["window_usage"] = {"window": "judgment_2017_2021", "k": k}
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", encoding="utf-8") as fh:
+        json.dump(report, fh, ensure_ascii=False, indent=2)
+    for c in report["candidates"]:
+        print(
+            f"[R43 判定段] {c['id']}: 段 {c['n_segs']} t±={c['signed_t']} 池 {len(c['pool'])} "
+            f"线 {(c['line'] or {}).get('threshold')} ⇒ {c['verdict']}"
+        )
+    print(f"[OK] 写出 {out}")
+    return 0
+
+
 def main(argv: Optional[list[str]] = None, **injections: Any) -> int:
-    args = _build_parser().parse_args(argv)
+    ap = _build_parser()
+    args = ap.parse_args(argv)
+    if args.judgment_read:
+        return _main_judgment(args, ap, argv, injections)
+    if args.batch_id or args.print_config_hash:
+        ap.error(
+            "--batch-id/--print-config-hash 只用于 --judgment-read（挖掘模式不读判定段）"
+        )
     args.cmdline = " ".join(sys.argv if argv is None else ["regime_style_study", *argv])
     report = run_study(args, **injections)
     if not report:
