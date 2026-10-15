@@ -1328,3 +1328,24 @@ class TestArmJudgmentCount:
             judgment_counts={"gA": 0},
         )
         assert seen == [] and out["judgment"] is None
+
+
+class TestBatchJudgmentLine:
+    """v0.392（owner 选 B）：带 --batch-id ⇒ 判定半窗判定线 = batch_threshold(pool_j, m)。"""
+
+    def test_batch_line(self, monkeypatch, tmp_path):
+        from custos.research import criteria_kit as kit
+        from custos.research import judgment_batch as jb
+
+        reg = tmp_path / "jb.jsonl"
+        jb.open_batch(
+            "b1",
+            [{"id": f"c{k}", "config_hash": f"t:{k}", "unit": "R40"} for k in range(3)],
+            path=reg,
+        )
+        monkeypatch.setattr(jb, "REGISTRY", reg)
+        spec = _mk_per_code({"j_low": 120, "j_low_adx25": 4})
+        rep = _run(spec, _replay_winner_gate, gates="j_low,j_low_adx25", batch_id="b1")
+        pools = rep["pools"]
+        assert pools["batch_m"] == 3
+        assert pools["q95_judgment"] == kit.batch_threshold(pools["judgment"], 3)

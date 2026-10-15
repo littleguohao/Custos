@@ -691,12 +691,24 @@ def _run_random_arms(
 
     c4_pool = kit.assemble_c4_pool(args.n_random, _arm)
     pool_m = c4_pool["pool"]
+    # 判定半窗判定线（v0.392，owner 选 B）：入批读数（带 --batch-id）⇒ 冻结臂判定窗
+    # 重读池的攒批判定线 q(1−0.05/m)，m 只从名册读；否则（legacy / 合成）q95。
+    batch_id = str(getattr(args, "batch_id", "") or "")
+    if batch_id:
+        from custos.research import judgment_batch as jb  # noqa: PLC0415
+
+        batch_m: Optional[int] = jb.batch_m(batch_id)
+        q95_j = kit.batch_threshold(pool_j, batch_m)
+    else:
+        batch_m = None
+        q95_j = kit.q95(pool_j)
     return {
         "rng": rng,
         "pool_m": pool_m,
         "pool_j": pool_j,
         "q95_m": kit.q95(pool_m),
-        "q95_j": kit.q95(pool_j),
+        "q95_j": q95_j,
+        "batch_m": batch_m,
         "evaluated": c4_pool["evaluated"],
         "gate_pass": c4_pool["gate_pass"],
         "entry_accounting": entry_accounting,
@@ -911,6 +923,8 @@ def _build_report(
             "judgment": arms["pool_j"],
             "q95_mining": arms["q95_m"],
             "q95_judgment": arms["q95_j"],
+            # 有值 ⇒ q95_judgment 实为攒批判定线 q(1−0.05/m)（v0.392）
+            **({"batch_m": arms["batch_m"]} if arms.get("batch_m") else {}),
             "entry_accounting": entry_accounting,  # n_requested/n_returned（打分失败跳过照实记）
             "score_cache_size": {w: len(c) for w, c in arms["score_caches"].items()},
             "arm_construction": "对等纪律（v0.302）+ 预算对等（v0.307）："
