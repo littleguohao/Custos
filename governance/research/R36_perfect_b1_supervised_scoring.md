@@ -630,8 +630,22 @@ Phase 0 已完成：
   注册表）；②不过 ⇒ falsified；③不过 ⇒ provisional。
 - **宇宙差异注记**：候选与 50 臂都在 s2999 上选型、在全量宇宙上读判定段，两边对称；全量宇宙比
   s2999 多出的票对两边同样是样本外。
-- **工程**：score_evolution_study 需「冻结配置读数」模式（读候选 + 臂 best 配置、只读指定段、过
-  批次门）与判定线判决件——TODO #102。
+- **平分噪声（v0.394 跑数前修订，审计 E1 / TODO #105）**：候选单腿分值只有 {0,5}，top-N 截断几乎全平分 ⇒
+  候选与等倍率格各按平分种子 0~19 读 20 次，统计量 = **Δmargin 中位数**，并报全分布；过门率（候选
+  objective 非 None 的种子占比）< 50% ⇒ 视同 rdd 门不过。C1 = 候选 n_taken 中位数 ≥100。
+- **池**：过门臂 < 40 ⇒ provisional（原池 50 臂，判定段部分臂可能过不了门）。
+- **工程（v0.394 已落地）**：`score_evolution_study --frozen-read <r36_p3_c4review 报告> --v0-lattice`，
+  读数窗 = `--judgment-start/--judgment-end`；gate/exit/top_n/rank_window 与原报告不一致拒跑。命令：
+  ```bash
+  # ① 挖掘 B 前置核对（不过批次门、不入台账）
+  uv run python -m custos.research score_evolution_study --v0-lattice \
+    --frozen-read artifacts/logs/score_evolution/r36_p3_c4review/_score_evolution__r36_p3_c4review.json \
+    --mining-start 2022-01-01 --mining-end 2024-07-31 \
+    --judgment-start 2022-01-01 --judgment-end 2026-09-04 --tag r36_v2_preB
+  # ② 入批：同命令把读数窗换成 2017-01-01~2021-12-31、tag 换 r36_v2_j，先 --print-config-hash 冻结，
+  #    开批后加 --batch-id <bN> --candidate-id r36_adx_gt_60 逐字重跑
+  ```
+  （原报告 top_genome 若不是 adx_gt_60 单腿格，以原报告为准并在回填区注明。）
 
 ## 附录 · Phase 1 实施方案（生产机命令，v0.241 工具化落地，跑前 owner 复核）
 

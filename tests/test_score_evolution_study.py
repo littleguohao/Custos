@@ -1577,3 +1577,83 @@ class TestTieSeed:
             "7",
         )
         assert seen and set(seen) == {7}
+
+
+class TestFrozenRead:
+    """v0.394（R36 v2 重测，owner 选 B）：冻结配置读数——候选/臂都不重选，只读指定窗。"""
+
+    def _frozen_report(self, tmp_path):
+        fake = FakeRunner(default=_reading(0.5))
+        _run_v0l(tmp_path, fake, SpyCollector({MINING: _v0l_collected_mining()}))
+        return tmp_path / "t1" / "_score_evolution__t1.json"
+
+    def _argv(self, tmp_path, frozen, *extra):
+        return [
+            "--v0-lattice",
+            "--mining-start",
+            MINING[0],
+            "--mining-end",
+            MINING[1],
+            "--judgment-start",
+            JUDGMENT[0],
+            "--judgment-end",
+            JUDGMENT[1],
+            "--codes",
+            "600000,600001",
+            "--top-n",
+            "1",
+            "--out-dir",
+            str(tmp_path),
+            "--tag",
+            "fz",
+            "--frozen-read",
+            str(frozen),
+            "--frozen-tie-seeds",
+            "3",
+            *extra,
+        ]
+
+    def test_preview_no_batch(self, tmp_path):
+        frozen = self._frozen_report(tmp_path)
+        fake = FakeRunner(default=_reading(0.2))
+        col = SpyCollector({JUDGMENT: _v0l_collected_judgment()})
+        rc = ses.main(self._argv(tmp_path, frozen), cell_runner=fake, v0l_collector=col)
+        assert rc == 0
+        rep = json.loads(
+            (tmp_path / "fz" / "_score_evolution__fz.json").read_text(encoding="utf-8")
+        )
+        assert rep["config"]["mode"] == "frozen_read" and rep["line"] is None
+        assert len(rep["candidate"]["per_seed"]) == 3
+        assert col.calls == [JUDGMENT]  # 只读指定窗，不碰挖掘窗（不重选）
+        assert rep["verdict"] in {"untested", "falsified", "no_batch"}
+        # 臂读数 = 冻结 best 在本窗各读一次
+        assert all(c[0].startswith("expr:") for c in fake.calls)
+
+    def test_config_mismatch_refused(self, tmp_path):
+        frozen = self._frozen_report(tmp_path)
+        with pytest.raises(SystemExit):
+            ses.main(
+                self._argv(tmp_path, frozen, "--rank-window", "60"),
+                cell_runner=FakeRunner(default=_reading(0.2)),
+                v0l_collector=SpyCollector({JUDGMENT: _v0l_collected_judgment()}),
+            )
+
+    def test_batch_line(self, tmp_path, monkeypatch):
+        from custos.research import judgment_batch as jb
+
+        reg = tmp_path / "jb.jsonl"
+        jb.open_batch(
+            "b1", [{"id": "r36", "config_hash": "t:x", "unit": "R36"}], path=reg
+        )
+        monkeypatch.setattr(jb, "REGISTRY", reg)
+        frozen = self._frozen_report(tmp_path)
+        rc = ses.main(
+            self._argv(tmp_path, frozen, "--batch-id", "b1"),
+            cell_runner=FakeRunner(default=_reading(0.2)),
+            v0l_collector=SpyCollector({JUDGMENT: _v0l_collected_judgment()}),
+        )
+        assert rc == 0
+        rep = json.loads(
+            (tmp_path / "fz" / "_score_evolution__fz.json").read_text(encoding="utf-8")
+        )
+        assert rep["line"]["m"] == 1 and rep["line"]["min_pool"] == ses.FROZEN_MIN_POOL

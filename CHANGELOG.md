@@ -396,6 +396,7 @@
 | 2026-10-15 | v0.391 | **R44 判定段攒批判决（TODO #102，B 方案）**：plan_rules_replay 锚点模式在判定段同次重抽随机宽度臂（逐信号 U[5%,20%] 单次抽，N=200 过门臂）建池，报告加 `criteria.judgment_batch`（候选 Δ、池、judgment_line、批判决）；无 --batch-id 只报池；R44 判据补池口径 | owner 2026-10-15 | 钉测 +2 |
 | 2026-10-15 | v0.392 | **R40/R45 判定段攒批判定线（TODO #102，B 方案）**：bear_regime_study 带 --batch-id 时 C2 判定半窗判定线 = `kit.batch_threshold`(冻结臂判定窗重读池, m)，m 只从名册读，报告 pools 加 batch_m；无批次号沿用 q95 | owner 2026-10-15 | 钉测 +1 |
 | 2026-10-15 | v0.393 | **R39 判定段攒批判决（TODO #102，B 方案）**：factor_exit_study 带 --batch-id 时随机分桶臂把冻结（分桶方案, 映射）在判定段同次重读（整簇随机赋桶重抽、独立随机流不扰挖掘池），报告加 `criteria.judgment_batch`；R39 v2 节补池口径 | owner 2026-10-15 | 钉测 +2 |
+| 2026-10-15 | v0.394 | **R36 冻结配置读数（TODO #102/#105，B 方案）**：score_evolution `--frozen-read <v0-lattice 报告>` 候选 top_genome 与随机 DSL 臂 best 都不重选、只读指定窗；候选/等倍率按 `--frozen-tie-seeds`（默认 20）读、取 Δmargin 中位数；臂冻结重读成池、带 --batch-id 走 judgment_line；口径与原报告不一致拒跑；R36 v2 节写入命令与细则 | owner 2026-10-15 | 钉测 +3 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

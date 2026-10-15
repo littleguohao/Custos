@@ -221,6 +221,20 @@ def _build_parser() -> argparse.ArgumentParser:
         "--random-seed", type=int, default=DEFAULT_RANDOM_SEED, help="随机臂采样种子"
     )
     ap.add_argument(
+        "--frozen-read",
+        default="",
+        help="冻结配置读数模式（R36 v2 重测，v0.394，TODO #102/#105）：读一份既有 "
+        "--v0-lattice 报告，候选 = 其 top_genome（不重选）、零假设臂 = 其 arms.random 各臂 "
+        "best（腿+权重冻结，不重选），只在 --judgment-start/--judgment-end 窗读数；须配 "
+        "--v0-lattice；gate/exit/top_n/rank_window 须与原报告一致（不一致拒跑）",
+    )
+    ap.add_argument(
+        "--frozen-tie-seeds",
+        type=int,
+        default=20,
+        help="冻结读数模式下候选/等倍率读数的平分破序种子数（0..N-1，取中位数作统计量，默认 20）",
+    )
+    ap.add_argument(
         "--tie-seed",
         type=int,
         default=0,
@@ -428,6 +442,22 @@ def _validate_single_window(w: Window) -> None:
     if s > e:
         raise ValueError(f"窗口起止倒挂: start={w.start} > end={w.end}")
     msg = _lw.mining_violation(w.start, w.end)
+    if msg:
+        raise ValueError(msg)
+
+
+def _validate_single_window_any(w: Window) -> None:
+    """冻结读数窗校验：日期 + 不倒挂 + 落在某一 v2 段内（判定段或挖掘段；holdout 拒）。"""
+    from datetime import date  # noqa: PLC0415
+    from custos.research import load_window as _lw  # noqa: PLC0415
+
+    try:
+        s0, e0 = date.fromisoformat(w.start), date.fromisoformat(w.end)
+    except ValueError as exc:
+        raise ValueError(f"窗口日期须为 YYYY-MM-DD: {w}") from exc
+    if s0 > e0:
+        raise ValueError(f"窗口起止倒挂: start={w.start} > end={w.end}")
+    msg = _lw.segment_violation(w.start, w.end)
     if msg:
         raise ValueError(msg)
 
@@ -2627,7 +2657,25 @@ def main(
                 "--addon-leg 须配 --v0-lattice（骨架=V0 等权，DSL 模式无骨架可加）"
             )
         legs, legs_source = _resolve_legs(args, ap)
-    mining, judgment = _validate_windows(args, ap)
+    frozen_rep: Optional[dict] = None
+    if args.frozen_read:
+        # 冻结读数模式（v0.394）：只读 --judgment-* 窗；挖掘参数不参与（不重选）
+        if not args.v0_lattice:
+            ap.error("--frozen-read 须配 --v0-lattice")
+        if not (args.judgment_start and args.judgment_end):
+            ap.error("--frozen-read 须给 --judgment-start/--judgment-end（读数窗）")
+        judgment = Window(args.judgment_start, args.judgment_end)
+        try:
+            _validate_single_window_any(judgment)
+        except ValueError as exc:
+            ap.error(f"读数窗非法: {exc}")
+        mining = Window(args.mining_start, args.mining_end)
+        try:
+            frozen_rep = json.loads(Path(args.frozen_read).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            ap.error(f"--frozen-read 读不了: {exc}")
+    else:
+        mining, judgment = _validate_windows(args, ap)
     if args.print_config_hash:
         # 冻结入批流程（TODO #95）：哈希必须与批次门同状态（参数归一化之后）
         from custos.research import judgment_batch as jb  # noqa: PLC0415
@@ -2662,7 +2710,16 @@ def main(
     runner = cell_runner or _make_cell_runner(
         args, str(codes_path), out_dir / "grid_cells"
     )
-    if args.v0_lattice:
+    rep: Optional[dict[str, Any]]
+    if frozen_rep is not None:
+        evaluator = _V0LatticeEvaluator(args, codes, exit_spec, collector=v0l_collector)
+        try:
+            _frozen_check_config(frozen_rep, args, exit_spec)
+        except ValueError as exc:
+            ap.error(str(exc))
+        assert judgment is not None
+        rep = _run_frozen_read(args, frozen_rep, judgment, exit_spec, runner, evaluator)
+    elif args.v0_lattice:
         evaluator = _V0LatticeEvaluator(args, codes, exit_spec, collector=v0l_collector)
         rep = _run_v0_lattice_study(
             args,
@@ -2768,9 +2825,180 @@ def main(
     out = out_dir / f"_score_evolution__{tag}.json"
     with out.open("w", encoding="utf-8") as fh:
         json.dump(rep, fh, ensure_ascii=False, indent=2, allow_nan=True)
-    _print_summary(rep)
+    if rep["config"].get("mode") == "frozen_read":
+        c = rep["candidate"]
+        print(
+            f"\n[R36 冻结读数] 窗 {rep['window']['start']}~{rep['window']['end']}｜"
+            f"候选 Δmargin 中位 {c['delta_median']}（过门率 {c['gate_rate']:.0%}，"
+            f"n_taken 中位 {c['n_taken_median']}）｜池 {len(rep['pool'])}｜"
+            f"判定线 {(rep['line'] or {}).get('threshold')} ⇒ {rep['verdict']}"
+        )
+    else:
+        _print_summary(rep)
     print(f"\n[INFO] 汇总 → {out}")
     return 0
+
+
+#: 冻结读数池最小过门臂数（R36 v2 节写死：原池 50 臂，判定段过门 <40 ⇒ provisional）
+FROZEN_MIN_POOL = 40
+
+
+def _frozen_check_config(frozen: dict, args: Any, exit_spec: dict) -> None:
+    """原报告与本次口径一致性（gate/exit/top_n/rank_window）——不一致 ⇒ ValueError。"""
+    cfg = frozen.get("config") or {}
+    if cfg.get("mode") not in ("v0_lattice", "v0_lattice_addon"):
+        raise ValueError(
+            f"--frozen-read 只接受 --v0-lattice 报告（得 mode={cfg.get('mode')!r}）"
+        )
+    diffs = {
+        k: (cfg.get(k), v)
+        for k, v in (
+            ("gate", args.gate),
+            ("exit", exit_spec),
+            ("top_n", args.top_n),
+            ("rank_window", args.rank_window),
+        )
+        if cfg.get(k) != v
+    }
+    if diffs:
+        raise ValueError(f"冻结读数口径与原报告不一致（原值, 本次）: {diffs}")
+
+
+def _median(xs: list[float]) -> Optional[float]:
+    import statistics  # noqa: PLC0415
+
+    return statistics.median(xs) if xs else None
+
+
+def _run_frozen_read(
+    args: Any,
+    frozen: dict,
+    window: Window,
+    exit_spec: dict,
+    runner: CellRunner,
+    evaluator: "_V0LatticeEvaluator",
+) -> dict[str, Any]:
+    """冻结配置读数（v0.394，owner 2026-10-15 选 B；R36 v2 重测节）。
+
+    - 候选 = 原报告 top_genome 倍率向量（**不重选**）；对照 = 等倍率（live 默认权重）；
+      两者按 ``--frozen-tie-seeds`` 个平分种子各读一次（#105：单腿 {0,5} 分大量平分），
+      统计量 = Δmargin（候选−等倍率）的**中位数**，并报全分布与过门率；
+    - 零假设池 = 原报告每条随机 DSL 臂的 best（腿+权重冻结，不重选）在本窗读一次，
+      池元素 = 臂 margin − 等倍率 margin 中位数（同一常数平移，与候选同参照）；
+      臂 objective=None（rdd 门不过/无读数）不进池；
+    - 判决（R36 v2 节写死）：C1 候选 n_taken 中位数 ≥100（否则 untested）；候选 Δ 中位数 >0
+      且过门率 ≥ 50%（否则 falsified）；带 --batch-id ⇒ judgment_line（m 来自名册）
+      confirmed_pass ⇒ candidate，否则 provisional；无批次号 ⇒ 预览（no_batch）。
+    """
+    legs = list(frozen["legs"])
+    top = frozen.get("top_genome") or {}
+    w_top = tuple(float(x) for x in top["weights"])
+    w_eq = tuple(1.0 for _ in legs)
+    seeds = list(range(max(1, int(args.frozen_tie_seeds))))
+    per_seed: list[dict[str, Any]] = []
+    orig_seed = getattr(args, "tie_seed", 0)
+    try:
+        for sd in seeds:
+            args.tie_seed = sd
+            rt = evaluator.evaluate(w_top, legs, window)
+            re_ = evaluator.evaluate(w_eq, legs, window)
+            mt = (rt or {}).get("margin")
+            me = (re_ or {}).get("margin")
+            per_seed.append(
+                {
+                    "tie_seed": sd,
+                    "top_margin": mt,
+                    "equal_margin": me,
+                    "delta": (mt - me) if mt is not None and me is not None else None,
+                    "top_gate": bool(rt and rt.get("objective") is not None),
+                    "top_n_taken": (rt or {}).get("n_taken"),
+                }
+            )
+    finally:
+        args.tie_seed = orig_seed
+    deltas = [x["delta"] for x in per_seed if x["delta"] is not None]
+    eq_med = _median(
+        [x["equal_margin"] for x in per_seed if x["equal_margin"] is not None]
+    )
+    cand = _median(deltas)
+    gate_rate = sum(1 for x in per_seed if x["top_gate"]) / len(per_seed)
+    n_taken_med = _median([float(x["top_n_taken"] or 0) for x in per_seed])
+
+    pool: list[float] = []
+    arms_out: list[dict[str, Any]] = []
+    for i, arm in enumerate((frozen.get("arms") or {}).get("random") or []):
+        best = arm.get("best")
+        if not best:
+            arms_out.append({"arm": i, "status": "no_best"})
+            continue
+        try:
+            expr = compile_composite(
+                list(arm["legs"]), list(best["weights"]), rank_window=args.rank_window
+            )
+        except ValueError as exc:
+            arms_out.append({"arm": i, "status": "compile_error", "error": str(exc)})
+            continue
+        rd = runner(
+            f"expr:{expr}", args.gate, exit_spec, start=window.start, end=window.end
+        )
+        ok = bool(
+            rd and rd.get("objective") is not None and rd.get("margin") is not None
+        )
+        if ok and eq_med is not None:
+            pool.append(rd["margin"] - eq_med)  # type: ignore[index]
+        arms_out.append(
+            {
+                "arm": i,
+                "status": "ok" if ok else "gate_fail",
+                "margin": (rd or {}).get("margin"),
+            }
+        )
+
+    line = None
+    batch_id = str(getattr(args, "batch_id", "") or "")
+    if batch_id:
+        from custos.research import judgment_batch as jb  # noqa: PLC0415
+
+        line = jb.judgment_line(batch_id, cand, pool, min_pool=FROZEN_MIN_POOL)
+    if n_taken_med is None or n_taken_med < 100:
+        verdict = "untested"
+    elif cand is None or cand <= 0 or gate_rate < 0.5:
+        verdict = "falsified"
+    elif line is None:
+        verdict = "no_batch"
+    else:
+        verdict = "candidate" if line["state"] == "confirmed_pass" else "provisional"
+    return {
+        "version": 1,
+        "config": {
+            "mode": "frozen_read",
+            "objective_version": _objective_version(),
+            "frozen_from": str(args.frozen_read),
+            "frozen_tag": (frozen.get("provenance") or {}).get("tag")
+            or frozen.get("tag"),
+            "gate": args.gate,
+            "exit": exit_spec,
+            "top_n": args.top_n,
+            "rank_window": args.rank_window,
+            "tie_seeds": seeds,
+        },
+        "window": {"start": window.start, "end": window.end},
+        "candidate": {
+            "weights": list(w_top),
+            "per_seed": per_seed,
+            "delta_median": cand,
+            "gate_rate": gate_rate,
+            "n_taken_median": n_taken_med,
+            "equal_margin_median": eq_med,
+        },
+        "pool": pool,
+        "arms": arms_out,
+        "line": line,
+        "verdict": verdict,
+        "rule": "C1 候选 n_taken 中位数≥100 否则 untested；Δmargin 中位数>0 且过门率≥50% 否则 "
+        "falsified；带 --batch-id ⇒ judgment_line（冻结臂本窗重读池，m 来自名册）"
+        "confirmed_pass ⇒ candidate，否则 provisional；无批次号 = 预览 no_batch",
+    }
 
 
 def _now_tag() -> str:
