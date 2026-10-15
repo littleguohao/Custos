@@ -32,7 +32,7 @@
 | 涨跌家数 | ✅ | 880005 | `collect_incremental_market.py`（mootdx Reader 本地） | 盘后 EOD | up_count / down_count |
 | 停板家数 | ✅ | 880006 | 同上 | 盘后 EOD | 涨停/跌停/炸板 |
 | 平均股价 | ✅ | 880001 | 同上 | 盘后 EOD | ⚠️ 成交额口径曾修（2b8936a） |
-| 0AMV 活跃市值 | ⚠️ | 指南针 `day.vdat` | `compass_amv.py` + `sync_compass_amv.py` | 盘后 | **决定 regime 的单点**。自动源不可用时退回人工录入 `0amv_observations.jsonl`；`amv_state` 仅在 `quality=='confirmed'` 时切换 |
+| 0AMV 活跃市值 | ⚠️ | 指南针 `day.vdat` | `compass_amv.py` + `sync_compass_amv.py` | 盘后 | **决定 regime 的单点**。vdat 自 2026-07-17 停更，此后每日靠手工录入 `market_timing_collector --amv`（v0.378 起：source=manual、不自动升 confirmed，`--confirm` 才生效、绝对值超 15% 需 `--confirm-extreme` 二次确认）；`amv_state` 仅在 `quality=='confirmed'` 时切换 |
 | 涨跌停对比 | ❌ | ~~tdx_screener~~ | — | — | LLM 工具，纯脚本模式未接入 |
 | 连板梯队 | ❌ | ~~tdx_screener~~ | — | — | `collect_incremental_market.py:197` 只留了一句 `note: "collected via tdx_screener in post-close enrichment"`，**是占位不是采集** |
 | 炸板率 | ❌ | ~~tdx_screener~~ | — | — | 同上 |

@@ -292,6 +292,47 @@ class TestReviewCoreMain:
         )
         assert "等待当日行情" in body
 
+    def test_manual_candidate_amv_labeled_not_upgraded(self, rc_env, monkeypatch):
+        """v0.378（TODO #96）：manual 手工读数计入「0AMV 可用」展示，但带
+        source/quality 标签——candidate（未 --confirm）不得冒充自动源真值。"""
+        _write(
+            rc_env,
+            "data/market/2026-08-07_market_timing_input.json",
+            {
+                "date": DAY,
+                "amv_0": {
+                    "effective_state": "中性",
+                    "amv_change_pct": 1.2,
+                    "source": "manual",
+                },
+            },
+        )
+        _run_rc(monkeypatch)
+        body = next((rc_env / "artifacts/reports/daily").glob("*/*.md")).read_text(
+            encoding="utf-8"
+        )
+        assert "+1.20%（manual·未确认）" in body
+
+    def test_auto_amv_has_no_manual_label(self, rc_env, monkeypatch):
+        """非 manual 来源的读数不加标签（默认夹具即自动源形态）。"""
+        _write(
+            rc_env,
+            "data/market/2026-08-07_market_timing_input.json",
+            {
+                "date": DAY,
+                "amv_0": {
+                    "effective_state": "中性",
+                    "quality": "confirmed",
+                    "amv_change_pct": 1.2,
+                },
+            },
+        )
+        _run_rc(monkeypatch)
+        body = next((rc_env / "artifacts/reports/daily").glob("*/*.md")).read_text(
+            encoding="utf-8"
+        )
+        assert "+1.20%" in body and "manual" not in body
+
 
 class TestReportAuditBlock:
     """可审计块（原待办 #29，已实现）：`report_id` / 策略版本 / 数据截止 / 输入清单。
@@ -384,6 +425,63 @@ class TestReportAuditBlock:
 
         result = check("final_review", payload)
         assert result["valid"], result["errors"]
+
+
+class TestAmvCrossingHint:
+    """v0.378（TODO #96）：confirmed 0AMV 跨过状态机阈值 ⇒ 报告头部醒目提示核对
+    （**不阻断**——报告照常产出）；manual 手工录入在 0AMV 行带来源标签。"""
+
+    def _write_amv(self, fcr_env, amv):
+        _write(
+            fcr_env / "data",
+            "market/2026-08-07_market_timing_input.json",
+            {
+                "date": DAY,
+                "amv_0": amv,
+                "a_share_indices": {},
+                "breadth": {},
+                "sentiment": {},
+            },
+        )
+
+    def _body(self, fcr_env):
+        return (
+            fcr_env
+            / "artifacts"
+            / "reports"
+            / "daily"
+            / DAY
+            / f"{DAY}_1700_final_review.md"
+        ).read_text(encoding="utf-8")
+
+    def test_crossing_value_gets_prominent_hint_and_manual_label(
+        self, fcr_env, monkeypatch
+    ):
+        self._write_amv(
+            fcr_env,
+            {
+                "effective_state": "做多",
+                "quality": "confirmed",
+                "amv_change_pct": 4.5,
+                "source": "manual",
+            },
+        )
+        _run_fcr(monkeypatch)  # 不阻断：报告照常产出
+        body = self._body(fcr_env)
+        assert "0AMV 越线提示" in body and "+4.50%" in body
+        assert "不阻断" in body
+        assert "manual 手工录入" in body, "manual 来源必须在 0AMV 行可辨"
+        assert "有效状态：**做多**" in body
+
+    def test_within_threshold_no_hint_no_label(self, fcr_env, monkeypatch):
+        self._write_amv(
+            fcr_env,
+            {"effective_state": "中性", "quality": "confirmed", "amv_change_pct": 1.0},
+        )
+        _run_fcr(monkeypatch)
+        body = self._body(fcr_env)
+        assert "越线提示" not in body
+        assert "manual 手工录入" not in body, "非 manual 来源不加标签"
 
 
 class TestZeroAmvGate:

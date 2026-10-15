@@ -841,8 +841,9 @@ def main() -> None:
     input_errors = validate_quote_snapshot(target_date, positions, quote_snapshot)
     _strict_check(args.strict, input_errors, "input")
     market = load(MARKET / f"{target_date}_market_timing_input.json", {})
-    regime = market.get("amv_0", {}).get("effective_state") or "未知"
-    amv_value = market.get("amv_0", {}).get("amv_change_pct")
+    amv_section = market.get("amv_0", {})
+    regime = amv_section.get("effective_state") or "未知"
+    amv_value = amv_section.get("amv_change_pct")
     total_assets = estimate_total_assets(positions)
     # 持仓计划（v0.83 Phase C）：只喂影子判定与 §2.1 对比渲染，不进任何既有字段。
     plan_positions = load_plans().get("positions", {})
@@ -863,7 +864,18 @@ def main() -> None:
         quote_snapshot.get("indices", []) if isinstance(quote_snapshot, dict) else []
     )
     amv_numeric = optional_finite(amv_value)
-    amv_display = "缺失" if amv_numeric is None else f"{amv_numeric:+.2f}%"
+    # v0.378（TODO #96）：manual 手工读数计入「0AMV 可用」展示，但保留
+    # source/quality 标签——candidate（录入未带 --confirm）不驱动 regime 转移，
+    # 读者第一眼要分得清「指南针真值」与「人填的」。
+    if amv_numeric is None:
+        amv_display = "缺失"
+    elif amv_section.get("source") == "manual":
+        amv_display = (
+            f"{amv_numeric:+.2f}%（manual·"
+            f"{'已确认' if amv_section.get('quality') == 'confirmed' else '未确认'}）"
+        )
+    else:
+        amv_display = f"{amv_numeric:+.2f}%"
     advice_line = regime_advice(regime)
 
     # 可审计块（原待办 #29，已实现）：本报告实际读过的输入；风控依据回退旧文件时按实际来源登记

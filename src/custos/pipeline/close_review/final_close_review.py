@@ -32,6 +32,10 @@ from custos.core.fmt import pct_text  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 from custos.core.exit_rules import LOSS_REDUCTION_PCT  # noqa: E402  L0，−7% 减仓线唯一来源
 from custos.core.trades.position_plans import load_plans  # noqa: E402  L2，持仓计划影子读取
+from custos.pipeline.market_timing.amv_state import (  # noqa: E402  L3 同层，0AMV 阈值唯一来源
+    AMV_LONG_PCT,
+    AMV_SHORT_PCT,
+)
 
 REV = REVIEWS / "daily"
 # 盘后复盘 JSON 落点（v0.179 起）：.md 人读报告留 REV 下（文件名带 1700 时点标记），
@@ -820,6 +824,35 @@ def _check_amv_gate(amv: dict, args, today: list):
     return value, regime
 
 
+def _amv_source_label(amv: dict) -> str:
+    """0AMV 行的来源标签（v0.378，TODO #96）：manual 手工录入必须一眼可辨。
+
+    manual 能进本报告头部必已过 ``--confirm``（candidate 过不了盘后硬闸），
+    标签如实写明确认通道；自动源（compass/台账回退）无标签。
+    """
+    if amv.get("source") != "manual":
+        return ""
+    return "（manual 手工录入·已 --confirm 确认）"
+
+
+def _amv_crossing_alert(value) -> str | None:
+    """越线醒目提示（v0.378，TODO #96）：0AMV 跨过状态机阈值 ⇒ 报告头部提示核对。
+
+    阈值与 ``amv_state._resolve_state`` 同口径（严格大于/小于）。只提示、
+    **不阻断**——regime 翻转日录错代价最大，读数人第一眼要看到。
+    """
+    v = optional_finite(value)
+    if v is None:
+        return None
+    if v > AMV_LONG_PCT or v < AMV_SHORT_PCT:
+        return (
+            f"> ⚠️ **0AMV 越线提示**：当日值 {v:+.2f}% 跨过状态机阈值"
+            f"（>{AMV_LONG_PCT:+g}% 做多 / <{AMV_SHORT_PCT:+g}% 空头）——"
+            "regime 翻转日录错代价最大，请核对录入值（本条仅提示，不阻断报告）。"
+        )
+    return None
+
+
 def _code_maps(tech: list, positions: list, quote_snapshot: dict):
     """技术面/持仓/当日行情三个按裸代码索引的字典（行情只收 available 的）。"""
     tmap = {bare(x.get("code")): x for x in tech}
@@ -1011,6 +1044,7 @@ def main():
         ],
     )
     # ⚠️ 标题区角色行必须留在 main 本体：test_daily_report 用 inspect.getsource(main) 钉住它。
+    _amv_alert = _amv_crossing_alert(value)  # 越线提示（不阻断，v0.378）
     lines = [
         f"# {day} 最终盘后复盘",
         "",
@@ -1019,7 +1053,8 @@ def main():
         f"> 生成时间：{cn_now().strftime('%Y-%m-%d %H:%M:%S')}",
         *report_audit.render_md(audit),
         f"> 报告质量：**{'complete' if not enrichment.get('unavailable') and news.get('status') == 'complete' else 'degraded'}**",
-        f"> 0AMV当日变动：**{float(value):+.2f}%**；有效状态：**{regime}**",
+        f"> 0AMV当日变动：**{float(value):+.2f}%**{_amv_source_label(amv)}；有效状态：**{regime}**",
+        *([_amv_alert] if _amv_alert else []),
         f"> 今日实际交易：**{'无交易动作' if not today else str(len(today)) + '笔'}**",
         f"> 持仓确认：**{freshness.get('status')}** — {freshness.get('reason')}",
         "",

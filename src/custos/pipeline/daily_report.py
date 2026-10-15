@@ -545,6 +545,40 @@ def _section_overseas(overseas: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _amv_guard_lines(quality: dict) -> list[str]:
+    """0AMV 手工录入状态的报告顶部提示（v0.378，TODO #96）——只提示，**不阻断**报告。
+
+    指南针 vdat 自 2026-07-17 停更，每日 0AMV 全靠手工录入（collector ``--amv``）。
+    判据直接读 chief.market_quality 的 0AMV 检查项（新鲜度口径与门控单源，盘前
+    session 期望数据日=上一交易日）：
+    - ``stale``/``missing`` ⇒ 上一交易日起无新鲜读数 = **漏录**，顶部告警
+      （fail-closed 侧效应已由门控生效：regime 不转移、不授予加仓权）；
+    - ``candidate`` ⇒ manual 读数已录入但未经 ``--confirm`` 确认——计入
+      「0AMV 可用」展示，但不驱动 regime 转移。
+    """
+    checks = (quality or {}).get("checks") or []
+    chk = next(
+        (x for x in checks if isinstance(x, dict) and x.get("field") == "0AMV"), None
+    )
+    if not chk:
+        return []
+    q = chk.get("quality")
+    if q in {"missing", "stale"}:
+        return [
+            f"> ⚠️ **0AMV 漏录告警**：上一交易日起无新鲜 0AMV 读数（门控 0AMV={q}，"
+            f"最新数据日 {chk.get('as_of') or '无'}）——vdat 停更后每日靠手工录入，"
+            "请用 `market_timing_collector --date <数据日> --amv <值> --confirm` 补录；"
+            "本条仅告警不阻断报告，漏录期间 regime 不转移、权限不放宽。"
+        ]
+    if q == "candidate":
+        return [
+            "> ⚠️ 0AMV 为 **manual 手工读数（candidate，未经 --confirm 确认）**——"
+            "计入「0AMV 可用」展示，但不驱动 regime 转移、不授予加仓权限；"
+            "如需生效请带 `--confirm` 重录。"
+        ]
+    return []
+
+
 def _section_data_freshness(
     day: str,
     chief_path: Path,
@@ -606,6 +640,8 @@ def main():
         f"> 信息窗口：{inp['window_start']} 至 {inp['window_end']}（Asia/Shanghai）  ",
         f"> 生成时间：{cn_now().strftime('%Y-%m-%d %H:%M:%S')} Asia/Shanghai",
         *report_audit.render_md(audit),
+        # 0AMV 漏录/manual 未确认提示（v0.378，TODO #96）——顶部醒目、不阻断
+        *_amv_guard_lines(quality),
         "",
         "## 1. 今日核心结论",
         "",

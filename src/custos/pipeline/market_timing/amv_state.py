@@ -25,6 +25,12 @@ MARKET = MARKET_DIR
 STATE = MARKET / "0amv_regime_history.json"
 LEDGER = MARKET / "0amv_observations.jsonl"
 
+# 0AMV regime 切换阈值（**全链唯一来源**）：单日涨幅严格大于 +4% ⇒ 做多；
+# 单日跌幅严格小于 −2.3% ⇒ 空头；之间粘滞。collector 的越线提示、
+# final_close_review 的报告提示都从这里取——改这两个数 = 语义变更，须立项 + 回测。
+AMV_LONG_PCT = 4.0
+AMV_SHORT_PCT = -2.3
+
 
 # v0.156：quality 强弱序（candidate < confirmed）——升级必须落盘，不得被去重吞掉。
 # 先记 candidate 值 V、后报 confirmed 同值 V，旧判据会把 confirmed 吞掉，而读侧
@@ -151,13 +157,13 @@ def _prior_state(hist: dict, day: str, initial: str | None, amv: dict) -> str:
 def _resolve_state(prior: str, value, quality: str, confirmed: bool) -> tuple[str, str]:
     if value is None:
         return prior, "缺值，延续前态"
-    if float(value) > 4:
+    if float(value) > AMV_LONG_PCT:
         if confirmed:
             return "做多", "单日涨幅>4%（confirmed），切换/维持做多"
         return (
             prior if prior in ("空头", "做多") else "中性"
         ), f"单日涨幅>4%但读数未确认（quality={quality}），不驱动状态转移"
-    if float(value) < -2.3:
+    if float(value) < AMV_SHORT_PCT:
         if confirmed:
             return "空头", "单日跌幅<-2.3%（confirmed），切换/维持空头"
         return (
@@ -171,9 +177,9 @@ def _resolve_state(prior: str, value, quality: str, confirmed: bool) -> tuple[st
 
 
 def _daily_zone(value) -> str:
-    if value is not None and float(value) > 4:
+    if value is not None and float(value) > AMV_LONG_PCT:
         return "做多触发"
-    if value is not None and float(value) < -2.3:
+    if value is not None and float(value) < AMV_SHORT_PCT:
         return "空头触发"
     return "阈值内"
 

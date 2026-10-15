@@ -16,6 +16,17 @@ snapshot itself when rerun after 14:45.
 
 Usage:
 python market_timing_collector.py --date 2026-07-09 --amv 1.2
+
+0AMV 手工录入防护（v0.378，TODO #96）——compass vdat 自 2026-07-17 停更后
+每日 0AMV 全靠手工录入，录错直接污染 regime：
+- ``--amv`` 手工读数显式标 ``source="manual"``，quality 不置（=candidate）；
+  candidate 计入「0AMV 可用」展示，但**不驱动 regime 转移**（amv_state 只认
+  confirmed），merge 也不再替它自动升 confirmed。
+- ``--confirm``：owner 录入时显式确认 ⇒ quality=confirmed + as_of=录入日。
+  ⚠️ 行为变更：vdat 停更后 regime 转移要求录入时带 --confirm。
+- ``--confirm-extreme``：|amv| > EXTREME_AMV_PCT 时必须显式二次确认，
+  否则拒绝落盘（exit 2）。
+- 读数跨过状态机阈值（>+4 / <−2.3）⇒ stderr 醒目 WARN 提示核对（不阻断）。
 """
 
 from __future__ import annotations
@@ -23,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -36,8 +48,17 @@ from custos.datasource.breadth_basis import breadth_counts_real  # noqa: E402
 from custos.datasource.collect.collect_intraday_snapshot import (  # noqa: E402
     apply_intraday_to_indices,
 )
+from custos.pipeline.market_timing.amv_state import (  # noqa: E402  同包同层
+    AMV_LONG_PCT,
+    AMV_SHORT_PCT,
+)
 
 OUT_DIR = MARKET_DIR
+
+# 0AMV 手工录入的绝对值上限（v0.378，TODO #96）：超过即疑似录错（小数点错位/
+# 看错行），须 --confirm-extreme 二次确认。
+# ⚠️ 占位阈值：生产机按台账 |amv_change_pct| 的 p99.9×1.2 回填后改本常量。
+EXTREME_AMV_PCT = 15.0
 
 INDICES = {
     "上证指数": {"prefix": "sh", "code": "999999"},
@@ -135,9 +156,9 @@ def trend(rows: list[dict]) -> dict:
 def amv_zone(v):
     if v is None:
         return ""
-    if v > 4:
+    if v > AMV_LONG_PCT:
         return "做多"
-    if v < -2.3:
+    if v < AMV_SHORT_PCT:
         return "空头"
     return "中性"
 
@@ -329,11 +350,54 @@ def main():
     ap.add_argument("--date", default=cn_now().strftime("%Y-%m-%d"))
     ap.add_argument("--amv", type=float, default=None, help="0AMV 当日涨跌幅，百分比")
     ap.add_argument(
+        "--confirm",
+        action="store_true",
+        help="owner 录入时显式确认：quality=confirmed + source=manual + as_of=录入日。"
+        "vdat 停更后每日 0AMV 全靠手工录入，regime 转移只认 confirmed——要生效必须带它。",
+    )
+    ap.add_argument(
+        "--confirm-extreme",
+        action="store_true",
+        help=f"二次确认超阈值读数：绝对值 > {EXTREME_AMV_PCT}%% 时必须显式给本旗标，"
+        "否则拒绝落盘（exit 2）——超阈值读数疑似小数点错位/看错行。",
+    )
+    ap.add_argument(
         "--out",
         default="",
         help="可选输出路径；为空则写入正式 market_timing_input.json",
     )
     args = ap.parse_args()
+
+    # ── 0AMV 手工录入防护（v0.378，TODO #96）────────────────────────
+    # 在任何采集/落盘之前拦：超阈值未二次确认 ⇒ 拒绝落盘 exit 2（fail-closed）；
+    # 跨过状态机阈值 ⇒ 醒目 WARN 提示核对（不阻断，regime 翻转日录错代价最大）。
+    if args.amv is not None:
+        if abs(args.amv) > EXTREME_AMV_PCT and not args.confirm_extreme:
+            print(
+                f"[REFUSED] 0AMV 录入值 {args.amv:+.2f}% 超出绝对值阈值 "
+                f"±{EXTREME_AMV_PCT:g}%——疑似录入错误（小数点错位/看错行）。"
+                "若数值确认无误，带 --confirm-extreme 重新录入（二次确认）。",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        if abs(args.amv) > EXTREME_AMV_PCT:
+            print(
+                f"[WARN] 0AMV 超阈值读数 {args.amv:+.2f}% 已经 --confirm-extreme "
+                "二次确认，照常落盘。",
+                file=sys.stderr,
+            )
+        if args.amv > AMV_LONG_PCT or args.amv < AMV_SHORT_PCT:
+            print(
+                f"[WARN] ⚠️ 0AMV 录入值 {args.amv:+.2f}% 跨过状态机阈值"
+                f"（>{AMV_LONG_PCT:+g}% 做多 / <{AMV_SHORT_PCT:+g}% 空头）——"
+                "regime 翻转日录错代价最大，请核对数值。",
+                file=sys.stderr,
+            )
+    elif args.confirm or args.confirm_extreme:
+        print(
+            "[WARN] 未给 --amv，--confirm/--confirm-extreme 无读数可确认，旗标忽略。",
+            file=sys.stderr,
+        )
 
     breadth, sentiment, turnover, quality = derive_market_fields(args.date)
 
@@ -350,11 +414,21 @@ def main():
         "amv_0": {
             "amv_change_pct": args.amv,
             "amv_zone": amv_zone(args.amv),
-            # as_of 故意留 None：08:50 手工 --amv 的读数属哪个数据日无法自证（0AMV 是盘后
-            # 指标，盘前能看到的最新值其实是 T-1），编一个 as_of 等于给门控一个假的新鲜度。
-            # 这里也不置 quality=confirmed，门控按 candidate 处理。唯一会把 amv_0 标
-            # confirmed 的是 merge_incremental_market（数据日可证），as_of 由它写。
-            "as_of": None,
+            # as_of 只在 --confirm 时写（=录入日，owner 显式确认该读数属于本数据日）；
+            # 不带 --confirm 刻意留 None：手工读数属哪个数据日无法自证（0AMV 是盘后
+            # 指标，盘前能看到的最新值其实是 T-1），编一个 as_of 等于给门控一个假的
+            # 新鲜度。另一个会把 amv_0 标 confirmed 的写方是 merge_incremental_market
+            # （数据日可证，as_of 由它写）——但 v0.378 起它对 manual 来源不再自动升级。
+            "as_of": args.date if (args.amv is not None and args.confirm) else None,
+            # v0.378（TODO #96）：手工录入显式标 source="manual"——保留来源标签，
+            # merge 不替它自动升 confirmed，报告展示带 manual 标签。
+            **({"source": "manual"} if args.amv is not None else {}),
+            # --confirm：owner 显式确认 ⇒ confirmed（candidate 不驱动 regime 转移）。
+            **(
+                {"quality": "confirmed"}
+                if (args.amv is not None and args.confirm)
+                else {}
+            ),
             "note": "0AMV > 4% = 做多；0AMV < -2.3% = 空头",
         },
         "overseas_market": {

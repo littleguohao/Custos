@@ -6,6 +6,11 @@ Extracted from the post-close runner (former steps 4-5) so the post-close
 Prints the same [OK]/[WARN] lines the in-process code used to print.
 Missing input files are a silent no-op (exit 0), matching the original
 behavior.
+
+v0.378（TODO #96）：0AMV 自动升 confirmed 不再覆盖 **manual 手工读数**
+（collector ``--amv`` 写入 source="manual" 的节）——手工读数要升 confirmed
+只能录入时带 ``--confirm``；自动源（amv_0day / 台账 confirmed 观测回退）
+对非 manual 节维持原样。
 """
 
 from __future__ import annotations
@@ -230,6 +235,10 @@ def _autofix_amv_quality(target: str, market_path: Path, status: dict) -> int | 
     """步骤 2:amv_0day 已写但 quality 缺失时自动置 confirmed。
 
     返回 None 表示继续;返回退出码表示 main 应立即返回。
+
+    v0.378（TODO #96）：**manual 来源不再自动升 confirmed**——collector ``--amv``
+    手工读数（source="manual"）要升 confirmed 只能录入时带 ``--confirm``；
+    自动源（amv_0day / 台账 confirmed 观测回退）对非 manual 节维持原样。
     """
     if not market_path.exists():
         return None
@@ -247,45 +256,60 @@ def _autofix_amv_quality(target: str, market_path: Path, status: dict) -> int | 
                 amv_day, amv_as_of = ledger_obs
                 amv_source = "0amv_observations"
         if amv_day is not None and amv.get("quality") != "confirmed":
-            amv["amv_change_pct"] = amv_day
-            amv["quality"] = "confirmed"
-            # as_of 必须写:0AMV 是门控里权重 35 的块,没有 as_of 就无法做陈旧校验
-            # (market_quality_gate 的 stale_as_of 只在 as_of 存在时才生效,
-            # 于是一个"确认过但其实是上周的"0AMV 会拿满分并授予加仓权)。
-            amv["as_of"] = amv_as_of
-            if not amv.get("effective_state"):
-                # ⚠️ 这是 amv_state 跑之前的**临时占位**，必须尊重状态机的锁定语义：
-                # 「进入空头后须有 confirmed 的 >+4% 才能出来，**阈值之间的读数不得把
-                #   regime 重置为中性**」（见 amv_state 模块 docstring）。
-                # 原实现在阈值之间直接写「中性」，把锁定的空头重置了 ——
-                # 而「中性」在加仓白名单 {做多, 中性} 里 ⇒ 空头期可能被授予加仓权。
-                # 这里改为：只有跨阈值才敢给方向，否则**延续已知锁定前态**，
-                # 前态未知就留「未知」让下游 fail-closed（风控优先于买入）。
-                prior = str(amv.get("prior_effective_state") or "")
-                amv["effective_state"] = _placeholder_effective_state(amv_day, prior)
-            mkt["amv_0"] = amv
-            # ⚠️ 落盘前校验：这一步把 amv_0 的 quality 置 confirmed 并写
-            # effective_state / as_of ——**只校验这三个它自己写的字段**。
-            # `effective_state` 的枚举域正是审计 B1 的所在：写成「空头触发」这种
-            # 未归一的值，会让下游精确等值比较落空、`allow_add=False` 漏置。
-            # `amv_zone` 是 collector 派生的，不该由 merge 背责。
-            require(
-                "market_timing_input",
-                mkt,
-                only=("amv_0.quality", "amv_0.effective_state", "amv_0.as_of"),
-            )
-            write_json_atomic(market_path, mkt)  # 读-改-写的共享文件
-            print(
-                f"[OK] 0AMV quality auto-set to confirmed (value={amv_day}%, as_of={amv_as_of}, "
-                f"regime={amv['effective_state']}, source={amv_source})"
-            )
-            status.update(
-                {
-                    "amv_confirmed": True,
-                    "amv_as_of": amv_as_of,
-                    "amv_source": amv_source,
-                }
-            )
+            if str(amv.get("source") or "") == "manual":
+                # manual 手工读数不自动升级（vdat 停更后每日全靠它，typo 直接污染
+                # regime）——确认通道只有录入时 --confirm。本节原样保留
+                # candidate + source 标签，留 WARN 指引重录。
+                print(
+                    f"[WARN] 0AMV 为 manual 手工读数（值={amv.get('amv_change_pct')}），"
+                    "不自动升 confirmed（v0.378 起）；如确认无误请用 "
+                    "market_timing_collector --date "
+                    f"{target} --amv <值> --confirm 重录。",
+                    file=sys.stderr,
+                )
+                status["amv_manual_candidate"] = True
+            else:
+                amv["amv_change_pct"] = amv_day
+                amv["quality"] = "confirmed"
+                # as_of 必须写:0AMV 是门控里权重 35 的块,没有 as_of 就无法做陈旧校验
+                # (market_quality_gate 的 stale_as_of 只在 as_of 存在时才生效,
+                # 于是一个"确认过但其实是上周的"0AMV 会拿满分并授予加仓权)。
+                amv["as_of"] = amv_as_of
+                if not amv.get("effective_state"):
+                    # ⚠️ 这是 amv_state 跑之前的**临时占位**，必须尊重状态机的锁定语义：
+                    # 「进入空头后须有 confirmed 的 >+4% 才能出来，**阈值之间的读数不得把
+                    #   regime 重置为中性**」（见 amv_state 模块 docstring）。
+                    # 原实现在阈值之间直接写「中性」，把锁定的空头重置了 ——
+                    # 而「中性」在加仓白名单 {做多, 中性} 里 ⇒ 空头期可能被授予加仓权。
+                    # 这里改为：只有跨阈值才敢给方向，否则**延续已知锁定前态**，
+                    # 前态未知就留「未知」让下游 fail-closed（风控优先于买入）。
+                    prior = str(amv.get("prior_effective_state") or "")
+                    amv["effective_state"] = _placeholder_effective_state(
+                        amv_day, prior
+                    )
+                mkt["amv_0"] = amv
+                # ⚠️ 落盘前校验：这一步把 amv_0 的 quality 置 confirmed 并写
+                # effective_state / as_of ——**只校验这三个它自己写的字段**。
+                # `effective_state` 的枚举域正是审计 B1 的所在：写成「空头触发」这种
+                # 未归一的值，会让下游精确等值比较落空、`allow_add=False` 漏置。
+                # `amv_zone` 是 collector 派生的，不该由 merge 背责。
+                require(
+                    "market_timing_input",
+                    mkt,
+                    only=("amv_0.quality", "amv_0.effective_state", "amv_0.as_of"),
+                )
+                write_json_atomic(market_path, mkt)  # 读-改-写的共享文件
+                print(
+                    f"[OK] 0AMV quality auto-set to confirmed (value={amv_day}%, as_of={amv_as_of}, "
+                    f"regime={amv['effective_state']}, source={amv_source})"
+                )
+                status.update(
+                    {
+                        "amv_confirmed": True,
+                        "amv_as_of": amv_as_of,
+                        "amv_source": amv_source,
+                    }
+                )
         if status["status"] == "skipped":
             status["status"] = "ok"
     except SystemExit as e:

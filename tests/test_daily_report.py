@@ -302,6 +302,80 @@ class TestNonTradingDayReport:
             )
 
 
+class TestAmvGuardAlert:
+    """v0.378（TODO #96）：0AMV 手工录入状态的盘前报告顶部提示——**不阻断**：
+    漏录（门控 0AMV=stale/missing）⇒ 告警行；manual candidate ⇒ 可用性提示行；
+    confirmed ⇒ 无提示。判据读 chief.market_quality.checks（与门控单源）。"""
+
+    DAY = "2026-10-15"
+
+    def _chief(self, amv_quality):
+        return {
+            "market_state": "防守",
+            "risk_level": "普通",
+            "total_position_range": "40%-60%",
+            "new_position_permission": "禁止",
+            "market_score": 55,
+            "market_quality": {
+                "status": "degraded" if amv_quality != "confirmed" else "pass",
+                "quality_score": 0.7,
+                "checks": [
+                    {"field": "0AMV", "quality": amv_quality, "as_of": "2026-10-14"}
+                ],
+            },
+            "position_freshness": {"status": "confirmed", "reason": "x"},
+            "position_gate": {"allow_precise_quantity": False},
+            "holding_actions": [],
+        }
+
+    def _setup(self, tmp_path, monkeypatch, amv_quality):
+        import json
+
+        data = tmp_path / "data"
+        for sub in ("decisions", "market", "holdings", "trades"):
+            (data / sub).mkdir(parents=True)
+        (data / "decisions" / f"{self.DAY}_chief_decision.json").write_text(
+            json.dumps(self._chief(amv_quality), ensure_ascii=False), encoding="utf-8"
+        )
+        (data / "market" / f"{self.DAY}_market_timing_input.json").write_text(
+            json.dumps({"overseas_market": {"details": {}}}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(dr, "DATA", data)
+        monkeypatch.setattr(dr, "PLAN", tmp_path / "plans")
+        monkeypatch.setattr(dr, "REVIEW_JSON_DIR", tmp_path / "review_json")
+        monkeypatch.setattr(dr, "REVIEWS", tmp_path / "reviews")
+        monkeypatch.setattr(dr, "load_premarket_intelligence", lambda day: {})
+        monkeypatch.setattr(dr, "premarket_intelligence_path", lambda day: None)
+        return tmp_path / "plans" / self.DAY / f"{self.DAY}_0905_daily_report.md"
+
+    def _render(self, monkeypatch):
+        import sys
+
+        monkeypatch.setattr(sys, "argv", ["x", "--date", self.DAY])
+        dr.main()  # 不抛异常 = 返回码不变（报告照常产出）
+
+    def test_missing_entry_alert_at_top_not_blocking(self, tmp_path, monkeypatch):
+        out = self._setup(tmp_path, monkeypatch, "stale")
+        self._render(monkeypatch)
+        text = out.read_text(encoding="utf-8")
+        assert "0AMV 漏录告警" in text and "2026-10-14" in text
+        assert "## 1. 今日核心结论" in text, "告警不得阻断报告主体"
+        assert text.index("0AMV 漏录告警") < text.index("## 1."), "告警须在报告顶部"
+
+    def test_manual_candidate_note(self, tmp_path, monkeypatch):
+        out = self._setup(tmp_path, monkeypatch, "candidate")
+        self._render(monkeypatch)
+        text = out.read_text(encoding="utf-8")
+        assert "manual 手工读数" in text and "漏录告警" not in text
+
+    def test_confirmed_amv_no_alert(self, tmp_path, monkeypatch):
+        out = self._setup(tmp_path, monkeypatch, "confirmed")
+        self._render(monkeypatch)
+        text = out.read_text(encoding="utf-8")
+        assert "漏录告警" not in text and "manual 手工读数" not in text
+
+
 class TestMarketOutlookSection:
     """§2.3 跨平台热点与A股刺激方向研判（v0.256）：market_outlook 在场才渲染；
     必须明文「仅供参考不进权限」——LLM 研判不是交易依据。"""
