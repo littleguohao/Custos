@@ -99,6 +99,9 @@
 
 ## 二、止损方案（`exit_rules.stop_rules`）
 
+> **按 0AMV 区间（做多 / 空头）区分的现行规则、研究结论与在研项**统一见
+> [`research/regime_playbook.md`](../../research/regime_playbook.md)；本节只列规则目录。
+
 | rule_id | enabled | 参数 | 说明 |
 |---|---|---|---|
 | `hard_loss` | ✅ live | pnl_pct = **−10%** | 单票亏损超 −10% → P0 强制风控评估（清仓） |
@@ -126,7 +129,7 @@ BBI 破位、0AMV 空头区间反弹减仓最高优先等）——它们是**持
 
 **持仓计划持久化**（v0.82）：买入导入时把止损/止盈计划落盘 `data/trades/position_plans.json`
 （止损价取 ≤ 买入日最近 stock_pool 的 `stop_loss_ref`，兜底 entry×0.93），14:45/17:00 报告
-影子双跑对照（v0.83，TODO #60 观察 5 日后拍板是否并入正式判定）。
+影子双跑对照（v0.83）；是否并入正式判定的判据已改写（TODO #60：实现一致性 + K=20 独立事件），现状见 regime_playbook。
 
 ## 四、研究 → live 回流通道
 
