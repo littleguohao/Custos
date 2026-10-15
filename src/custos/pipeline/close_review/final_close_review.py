@@ -825,14 +825,14 @@ def _check_amv_gate(amv: dict, args, today: list):
 
 
 def _amv_source_label(amv: dict) -> str:
-    """0AMV 行的来源标签（v0.378，TODO #96）：manual 手工录入必须一眼可辨。
+    """0AMV 行的来源标签（v0.378 引入，v0.380 修订）：manual 手工录入必须一眼可辨。
 
-    manual 能进本报告头部必已过 ``--confirm``（candidate 过不了盘后硬闸），
-    标签如实写明确认通道；自动源（compass/台账回退）无标签。
+    v0.380 起 manual 录入即确认（collector --amv 落盘即 confirmed），标签只标
+    来源、不再提确认通道；自动源（compass/台账回退）无标签。
     """
     if amv.get("source") != "manual":
         return ""
-    return "（manual 手工录入·已 --confirm 确认）"
+    return "（manual 手工录入）"
 
 
 def _amv_crossing_alert(value) -> str | None:

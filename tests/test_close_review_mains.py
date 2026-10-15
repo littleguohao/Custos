@@ -294,7 +294,7 @@ class TestReviewCoreMain:
 
     def test_manual_candidate_amv_labeled_not_upgraded(self, rc_env, monkeypatch):
         """v0.378（TODO #96）：manual 手工读数计入「0AMV 可用」展示，但带
-        source/quality 标签——candidate（未 --confirm）不得冒充自动源真值。"""
+        source/quality 标签——manual 标签不得冒充自动源真值（candidate 为 v0.378 当天历史形态）。"""
         _write(
             rc_env,
             "data/market/2026-08-07_market_timing_input.json",

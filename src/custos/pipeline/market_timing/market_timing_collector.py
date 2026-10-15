@@ -17,13 +17,13 @@ snapshot itself when rerun after 14:45.
 Usage:
 python market_timing_collector.py --date 2026-07-09 --amv 1.2
 
-0AMV 手工录入防护（v0.378，TODO #96）——compass vdat 自 2026-07-17 停更后
+0AMV 手工录入防护（v0.380，TODO #96 修订）——compass vdat 自 2026-07-17 停更后
 每日 0AMV 全靠手工录入，录错直接污染 regime：
-- ``--amv`` 手工读数显式标 ``source="manual"``，quality 不置（=candidate）；
-  candidate 计入「0AMV 可用」展示，但**不驱动 regime 转移**（amv_state 只认
-  confirmed），merge 也不再替它自动升 confirmed。
-- ``--confirm``：owner 录入时显式确认 ⇒ quality=confirmed + as_of=录入日。
-  ⚠️ 行为变更：vdat 停更后 regime 转移要求录入时带 --confirm。
+- **手工录入本身就算确认**（owner 2026-10-15 拍板，推翻 v0.378 的
+  manual=candidate+--confirm 设计——忘带确认旗标的静默不翻转比录错更危险）：
+  ``--amv`` 手工读数默认写 ``quality="confirmed"`` + ``source="manual"`` +
+  ``as_of=录入日``，照常驱动 regime 转移；真正的保护来自下面的范围校验与
+  越线提示，不多加容易忘的确认旗标。
 - ``--confirm-extreme``：|amv| > EXTREME_AMV_PCT 时必须显式二次确认，
   否则拒绝落盘（exit 2）。
 - 读数跨过状态机阈值（>+4 / <−2.3）⇒ stderr 醒目 WARN 提示核对（不阻断）。
@@ -346,14 +346,16 @@ def derive_market_fields(target_date: str) -> tuple[dict, dict, dict, dict]:
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    # allow_abbrev=False：否则旧习惯 --confirm 会被前缀匹配成 --confirm-extreme，
+    # 静默绕过超阈值二次确认（v0.380 删 --confirm 后的实测坑）。
+    ap = argparse.ArgumentParser(allow_abbrev=False)
     ap.add_argument("--date", default=cn_now().strftime("%Y-%m-%d"))
-    ap.add_argument("--amv", type=float, default=None, help="0AMV 当日涨跌幅，百分比")
     ap.add_argument(
-        "--confirm",
-        action="store_true",
-        help="owner 录入时显式确认：quality=confirmed + source=manual + as_of=录入日。"
-        "vdat 停更后每日 0AMV 全靠手工录入，regime 转移只认 confirmed——要生效必须带它。",
+        "--amv",
+        type=float,
+        default=None,
+        help="0AMV 当日涨跌幅，百分比。手工录入即确认（v0.380）：落盘 "
+        "quality=confirmed + source=manual + as_of=录入日，驱动 regime 转移。",
     )
     ap.add_argument(
         "--confirm-extreme",
@@ -368,7 +370,7 @@ def main():
     )
     args = ap.parse_args()
 
-    # ── 0AMV 手工录入防护（v0.378，TODO #96）────────────────────────
+    # ── 0AMV 手工录入防护（v0.380，TODO #96 修订）────────────────────
     # 在任何采集/落盘之前拦：超阈值未二次确认 ⇒ 拒绝落盘 exit 2（fail-closed）；
     # 跨过状态机阈值 ⇒ 醒目 WARN 提示核对（不阻断，regime 翻转日录错代价最大）。
     if args.amv is not None:
@@ -393,9 +395,9 @@ def main():
                 "regime 翻转日录错代价最大，请核对数值。",
                 file=sys.stderr,
             )
-    elif args.confirm or args.confirm_extreme:
+    elif args.confirm_extreme:
         print(
-            "[WARN] 未给 --amv，--confirm/--confirm-extreme 无读数可确认，旗标忽略。",
+            "[WARN] 未给 --amv，--confirm-extreme 无读数可确认，旗标忽略。",
             file=sys.stderr,
         )
 
@@ -414,19 +416,15 @@ def main():
         "amv_0": {
             "amv_change_pct": args.amv,
             "amv_zone": amv_zone(args.amv),
-            # as_of 只在 --confirm 时写（=录入日，owner 显式确认该读数属于本数据日）；
-            # 不带 --confirm 刻意留 None：手工读数属哪个数据日无法自证（0AMV 是盘后
-            # 指标，盘前能看到的最新值其实是 T-1），编一个 as_of 等于给门控一个假的
-            # 新鲜度。另一个会把 amv_0 标 confirmed 的写方是 merge_incremental_market
-            # （数据日可证，as_of 由它写）——但 v0.378 起它对 manual 来源不再自动升级。
-            "as_of": args.date if (args.amv is not None and args.confirm) else None,
-            # v0.378（TODO #96）：手工录入显式标 source="manual"——保留来源标签，
-            # merge 不替它自动升 confirmed，报告展示带 manual 标签。
-            **({"source": "manual"} if args.amv is not None else {}),
-            # --confirm：owner 显式确认 ⇒ confirmed（candidate 不驱动 regime 转移）。
+            # v0.380（TODO #96 修订，owner 拍板）：**手工录入本身就算确认**——
+            # --amv 落盘即 confirmed + as_of=录入日（merge 旧行为本就写 target 日，
+            # 「as_of 无法自证」的争议随 owner 拍板消解），source="manual" 保留
+            # 来源标签。保护不放在确认旗标上（忘带 ⇒ 静默不翻转，比录错更危险），
+            # 而放在上面的超阈值二次确认与越线提示。
+            "as_of": args.date if args.amv is not None else None,
             **(
-                {"quality": "confirmed"}
-                if (args.amv is not None and args.confirm)
+                {"source": "manual", "quality": "confirmed"}
+                if args.amv is not None
                 else {}
             ),
             "note": "0AMV > 4% = 做多；0AMV < -2.3% = 空头",

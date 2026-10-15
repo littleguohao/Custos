@@ -42,6 +42,13 @@ from custos.core.paths import (
 )
 from custos.core.contracts import require
 from custos.core.pipeline_kit import run_stage
+from custos.pipeline.market_timing.amv_state import (  # L4→L3，0AMV 阈值唯一来源
+    AMV_LONG_PCT,
+    AMV_SHORT_PCT,
+)
+from custos.pipeline.market_timing.market_timing_collector import (  # 超阈值口径单源
+    EXTREME_AMV_PCT,
+)
 
 PY = sys.executable
 # ⚠️ 路径**一律从 paths 导入**，不在这里重拼。
@@ -50,8 +57,26 @@ PY = sys.executable
 
 
 def apply_manual_market(
-    date: str, macro: str | None, amv_zone: str | None, amv_pct: float | None
+    date: str,
+    macro: str | None,
+    amv_zone: str | None,
+    amv_pct: float | None,
+    confirm_extreme: bool = False,
 ):
+    # v0.380（TODO #96 修订）：旁路不能比主路径少一道校验——与 collector 同款的
+    # 超阈值二次确认（EXTREME_AMV_PCT 单源在 collector）。拒绝 = 不写并记失败
+    # stage（照本函数既有失败语义，链不断）。
+    if amv_pct is not None and abs(amv_pct) > EXTREME_AMV_PCT and not confirm_extreme:
+        print(
+            f"[WARN] --amv-pct {amv_pct:+.2f}% 超出绝对值阈值 ±{EXTREME_AMV_PCT:g}%"
+            "且未给 --confirm-extreme——拒绝落盘（疑似录入错误；确认无误请带旗标重跑）。",
+            file=sys.stderr,
+        )
+        return {
+            "stage": "apply_manual_market",
+            "ok": False,
+            "message": f"amv_pct {amv_pct} 超阈值 ±{EXTREME_AMV_PCT:g}% 未给 --confirm-extreme 二次确认，拒绝落盘",
+        }
     path = MARKET_DIR / f"{date}_market_timing_input.json"
     if not path.exists():
         return {
@@ -79,7 +104,9 @@ def apply_manual_market(
             d["amv_0"]["amv_zone"] = amv_zone
         elif amv_pct is not None:
             d["amv_0"]["amv_zone"] = (
-                "做多" if amv_pct > 4 else ("空头" if amv_pct < -2.3 else "中性")
+                "做多"
+                if amv_pct > AMV_LONG_PCT
+                else ("空头" if amv_pct < AMV_SHORT_PCT else "中性")
             )
     dq = d.setdefault("data_quality", {})
     dq.setdefault("sources", []).append("daily_pipeline_manual_args")
@@ -203,7 +230,8 @@ def _write_pipeline_log(date: str, stages: list[dict]) -> Path:
 
 
 def _parse_args() -> argparse.Namespace:
-    ap = argparse.ArgumentParser()
+    # allow_abbrev=False：防 --confirm 前缀匹配成 --confirm-extreme（同 collector）
+    ap = argparse.ArgumentParser(allow_abbrev=False)
     ap.add_argument("--date", required=True)
     ap.add_argument(
         "--refresh-market",
@@ -218,6 +246,12 @@ def _parse_args() -> argparse.Namespace:
     ap.add_argument("--macro", choices=["double_wide", "none"], default=None)
     ap.add_argument("--amv-zone", choices=["做多", "中性", "空头"], default=None)
     ap.add_argument("--amv-pct", type=float, default=None)
+    ap.add_argument(
+        "--confirm-extreme",
+        action="store_true",
+        help="0AMV 超阈值二次确认：--amv-pct 绝对值超 EXTREME_AMV_PCT 时必须给，"
+        "并透传给 market_timing_collector（同义旗标，口径单源在 collector）。",
+    )
     ap.add_argument(
         "--reuse-discovery",
         action="store_true",
@@ -265,6 +299,8 @@ def _collect_market_stages(args: argparse.Namespace, stages: list[dict]) -> None
         ]
         if args.amv_pct is not None:
             cmd += ["--amv", str(args.amv_pct)]
+        if args.confirm_extreme:
+            cmd += ["--confirm-extreme"]
         stages.append(run_stage(cmd, "market_timing_collector"))
     else:
         stages.append(
@@ -279,7 +315,9 @@ def _collect_market_stages(args: argparse.Namespace, stages: list[dict]) -> None
     # 2. Manual market inputs
     if args.macro or args.amv_zone or args.amv_pct is not None:
         stages.append(
-            apply_manual_market(args.date, args.macro, args.amv_zone, args.amv_pct)
+            apply_manual_market(
+                args.date, args.macro, args.amv_zone, args.amv_pct, args.confirm_extreme
+            )
         )
 
     # 3. Overseas market and RSS discovery collectors. The 09:05 production

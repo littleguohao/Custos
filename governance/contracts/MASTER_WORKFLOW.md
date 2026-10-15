@@ -156,7 +156,7 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 
 1. 将新增成交追加至 `master_trade_ledger.csv`
 2. 更新并确认持仓数量与成本
-3. 写入 0AMV，并更新跨日有效状态（vdat 停更后手工录入：`market_timing_collector --date <日> --amv <值> --confirm`；不带 `--confirm` 的 manual 读数保持 candidate、不驱动 regime 转移（v0.378 起）；绝对值超 15% 须再加 `--confirm-extreme` 二次确认）
+3. 写入 0AMV，并更新跨日有效状态（vdat 停更后手工录入：`market_timing_collector --date <日> --amv <值>`，录入即确认（confirmed + source=manual，v0.380 起）；绝对值超 15% 须再加 `--confirm-extreme` 二次确认）
 4. 获取当日收盘大盘、板块、持仓行情
 5. 按收盘价重估持仓盈亏、市值和组合仓位
 6. 对照盘前报告、14:45建议与实际成交
@@ -335,7 +335,7 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 - 08:50：预采集公告、海外行情和RSS候选，不生成正式报告（每日执行；非交易日只跑海外/RSS 发现采集，行情底座不落休市日文件）
 - 09:05：复用08:50采集结果，执行质量门、决策、渲染、校验和投递（每日执行；非交易日出休市版：跳过门控/决策链，沿用最近交易日口径，省略 §4）
 - 14:45：采集尾盘行情，运行严格持仓检查并投递尾盘报告
-- 15:15：只提醒补充新增交易和0AMV（0AMV 录入：`market_timing_collector --amv <值> --confirm`；超 ±15% 需 `--confirm-extreme` 二次确认）
+- 15:15：只提醒补充新增交易和0AMV（0AMV 录入：`market_timing_collector --amv <值>`，录入即确认；超 ±15% 需 `--confirm-extreme` 二次确认）
 - 17:00：用户补数后运行确定性盘后流水线和最终复盘；18:00 独立运行每日选股链
 - 周日：周度复盘
 - 月末最后一个交易日数据确认后：月度复盘

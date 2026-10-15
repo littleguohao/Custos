@@ -109,8 +109,8 @@ SECTOR_STATES = {"退潮", "主升", "修复", "分歧", "震荡"}
 SECTOR_TRENDS = {"上涨", "横盘震荡", "下跌"}
 SECTOR_PERMISSIONS = {"支持", "观察", "回避"}
 # `amv_0.quality` 的取值域。confirmed 的写方：merge_incremental_market（自动源，
-# 数据日可证）与 collector --confirm（owner 手工录入显式确认，v0.378 TODO #96）；
-# collector 手工 --amv 不带 --confirm 时刻意不置，门控按 candidate 处理。
+# 数据日可证）与 collector --amv 手工录入（manual 录入即确认——v0.380 起，
+# TODO #96 修订；v0.378 当天的 --confirm 设计已被 owner 实测推翻）。
 AMV_QUALITY = {"confirmed", "candidate", "auto", "missing", "unknown"}
 # score_candidates 的分层域（A/B/C/D 四档，RESONANCE_MATRIX 的值域）
 BUCKETS = {"A", "B", "C", "D"}
@@ -396,10 +396,9 @@ SPECS: dict[str, dict] = {
                     # 唯一会写它的是 merge_incremental_market（数据日可证）。
                     "as_of": {"type": str, "required": True, "nullable": True},
                     # ⚠️ 以下两个**通常**由 merge_incremental_market 写（自动源
-                    # 数据日可证）；collector 手工 --amv 刻意不置（门控按 candidate
-                    # 处理），唯一例外是 collector --confirm（owner 录入时显式确认，
-                    # v0.378 TODO #96）⇒ `required=False`，
-                    # 但**出现时必须在域内** —— 这正是审计 B1 的所在：
+                    # 数据日可证）；v0.380 起 collector 手工 --amv 落盘即写
+                    # quality=confirmed（manual 录入即确认，TODO #96 修订）⇒
+                    # `required=False`，但**出现时必须在域内** —— 这正是审计 B1 的所在：
                     # `effective_state` 写成「空头触发」这种未归一的值，会让
                     # 下游精确等值比较落空、`allow_add=False` 漏置。
                     "quality": {"type": str, "required": False, "choices": AMV_QUALITY},
@@ -412,7 +411,7 @@ SPECS: dict[str, dict] = {
             },
             # `amv_0day` 由 sync_compass_amv 填充（指南针 0AMV 当日值），
             # merge_incremental_market 据此把 amv_0.quality 自动置 confirmed
-            # （v0.378 起 manual 手工读数除外——只能由 collector --confirm 升级）。
+            # （manual 手工录入自 v0.380 起在 collector 落盘时即 confirmed）。
             # 盘前无值 ⇒ 不设 required。
             "amv_0day": {
                 "type": (int, float),

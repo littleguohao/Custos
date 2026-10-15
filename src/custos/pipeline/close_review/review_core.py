@@ -864,9 +864,9 @@ def main() -> None:
         quote_snapshot.get("indices", []) if isinstance(quote_snapshot, dict) else []
     )
     amv_numeric = optional_finite(amv_value)
-    # v0.378（TODO #96）：manual 手工读数计入「0AMV 可用」展示，但保留
-    # source/quality 标签——candidate（录入未带 --confirm）不驱动 regime 转移，
-    # 读者第一眼要分得清「指南针真值」与「人填的」。
+    # manual 手工读数计入「0AMV 可用」展示，但保留 source/quality 标签——
+    # 读者第一眼要分得清「指南针真值」与「人填的」。candidate 分支兼容 v0.378
+    # 当天的历史形态（当日录入默认 candidate）；v0.380 起 manual 落盘即 confirmed。
     if amv_numeric is None:
         amv_display = "缺失"
     elif amv_section.get("source") == "manual":
