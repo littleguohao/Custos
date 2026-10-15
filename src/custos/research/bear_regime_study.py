@@ -697,8 +697,9 @@ def _run_random_arms(
     if batch_id:
         from custos.research import judgment_batch as jb  # noqa: PLC0415
 
-        batch_m: Optional[int] = jb.batch_m(batch_id)
-        q95_j = kit.batch_threshold(pool_j, batch_m)
+        m_roster = jb.batch_m(batch_id)
+        batch_m: Optional[int] = m_roster
+        q95_j = kit.batch_threshold(pool_j, m_roster)
     else:
         batch_m = None
         q95_j = kit.q95(pool_j)
