@@ -331,6 +331,55 @@ def status(batch_id: Optional[str] = None, *, path: Optional[Path] = None) -> di
     return out
 
 
+def batch_m(batch_id: str, *, path: Optional[Path] = None) -> int:
+    """批次名册人数 m（攒批判定线 q(1−0.05/m) 的 m **只从登记表读**，不可手填）。
+    批次不存在 ⇒ ValueError。"""
+    b = _replay(_load_events(path)).get(str(batch_id).strip())
+    if b is None:
+        raise ValueError(f"批次 {batch_id!r} 不存在——m 只能来自已开批的名册")
+    return int(b["m"])
+
+
+def judgment_line(
+    batch_id: str,
+    cand_delta: Optional[float],
+    pool_j: list[float],
+    *,
+    min_pool: int,
+    path: Optional[Path] = None,
+) -> dict[str, Any]:
+    """判定段攒批判决（v0.389，owner 2026-10-15 选 B）：候选判定段 Δ 与**冻结臂判定段
+    重读池** ``pool_j`` 比较，判定线 = ``kit.batch_threshold(pool_j, m)``，m 来自名册。
+
+    池语义写死：每条随机臂在挖掘段选型冻结后，**同一次运行**里把冻结配置拿到判定段
+    读一次（不重选），池元素 = 臂判定段 Δ（与候选同参照、同口径）。不得复用挖掘窗
+    C4 池（窗口不同、零假设不同）。状态：空池 indeterminate；池 < min_pool
+    provisional；Δ > 判定线 confirmed_pass；否则 confirmed_fail。"""
+    from custos.research import criteria_kit as kit  # noqa: PLC0415
+
+    m = batch_m(batch_id, path=path)
+    thr = kit.batch_threshold(pool_j, m)
+    if not pool_j:
+        state = "indeterminate"
+    elif len(pool_j) < min_pool:
+        state = "provisional"
+    elif cand_delta is not None and thr is not None and cand_delta > thr:
+        state = "confirmed_pass"
+    else:
+        state = "confirmed_fail"
+    return {
+        "batch_id": batch_id,
+        "m": m,
+        "alpha": 0.05 / m,
+        "threshold": thr,
+        "pool_size": len(pool_j),
+        "min_pool": min_pool,
+        "cand_delta": cand_delta,
+        "state": state,
+        "rule": "候选判定段 Δ > 冻结臂判定段重读池的第 ⌊(0.05/m)(n+1)⌋ 大（m=名册人数）",
+    }
+
+
 # ---------------------------------------------------------------------------
 # 门禁辅助（各研究终端共用）：入口快照 synthetic → 不相交不查 → 查批
 # ---------------------------------------------------------------------------

@@ -391,6 +391,7 @@
 | 2026-10-15 | v0.386 | **终端修复 a（审计 recent#1/#5/#9）**：bear_regime_study 随机臂判定窗抽样量改为冻结门在判定窗的实际信号数（原沿用挖掘窗 n_g ⇒ 臂分布偏窄、C2 判定半窗过松；只用计数不碰收益）；factor_exit_study 桶数由挖掘切点决定（判定窗够不到最高桶不再裸 StopIteration）、C1 兼容 JSON 字符串键 | 审计 | 钉测 +3 |
 | 2026-10-15 | v0.387 | **终端修复 b（审计 older#4/#7、recent#7/#10）**：score_filter 随机剔除臂只在有因子值的票里剔 floor(n_avail×X)（原按全池剔、缺值 67% 时多剔 3 倍抬高 q95）；score_evolution 单窗改 mining_violation（原可挖判定段且绕过台账/批次门）；load_amv_regime 从台账首日重放再截 since（原起点重置中性）；prr 止损距离分位下标修正 | 审计 | 钉测 +4 |
 | 2026-10-15 | v0.388 | **审计收尾（治理）**：R1/R2/R10/R36/R37/R40/R41 头部就地标审计注记（不翻判、标待重算范围）；R40 加 v2 重跑修订节（r40_a1 作废）；README 判据件同步（置换判定线、已实现 margin、符号感知 rdd）；TODO #104~#109 重算/重跑排期，#102 收窄为剩余部分 | owner 2026-10-15 | 文档 |
+| 2026-10-15 | v0.389 | **攒批判决件 B 方案（TODO #102 部分）**：`judgment_batch.batch_m`（m 只从名册读）+ `judgment_line`（候选判定段 Δ vs 冻结臂判定段重读池，判定线 batch_threshold）；README 写死判定线池口径；R40 v2 修订补两步走（legacy 四参 A 选 B 验 → 入批）；R42 标 MDE k=2.8 换算；vdat 兜底注释 | owner 2026-10-15 | 钉测 +2 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

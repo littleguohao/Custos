@@ -4158,6 +4158,8 @@ def load_amv_regime(
         full = _amv_regime_from_records(records)
         return {d: v for d, v in full.items() if d >= since}
     # ── 兜底（v0.150 前旧路径）：vdat 主序列 + 台账 confirmed 尾部拼接 ──
+    # ⚠️ 兜底仍从 since 起重放（起点重置中性），与上方台账路径「首日重放再截」语义不一致；
+    # 应急路径（台账丢失时才走）可接受，走到这里的读数不得与台账路径读数跨窗比较。
     try:
         from custos.datasource.local_tdx import compass_amv  # noqa: PLC0415
 
