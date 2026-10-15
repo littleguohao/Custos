@@ -97,6 +97,9 @@ J<13 信号日已是超跌极限位，不再另找结构低点（owner 2026-10-1
 
 ### 工程落点（TODO #100，coder）
 
+- ✅ 工具已落地（v0.379，`plan_rules_replay` 扩展：`--stop-anchor signal_low --stop-buffer-pct x`
+  锚点 + `--scan-widths` 挖掘段 8 档扫描模式），跑数待生产机发令。
+
 - `plan_rules_replay` 扩展止损锚点模式：`--stop-anchor signal_low --stop-buffer-pct x`
   ⇒ stop_override = 信号日最低价 × (1 − x)（R41 原「近 N 日最低价」模式保留）；
 - 加**只读挖掘段**的扫描模式（8 档 + 参照一次跑完、不读判定段、不过批次门），产出选档表与

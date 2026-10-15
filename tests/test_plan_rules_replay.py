@@ -27,6 +27,7 @@ import pytest
 from helpers_golden import norm_floats
 from custos.core.factors.b1_structure import STOP_LOOKBACK, _stop_ref
 from custos.research import backtest_factors as bt
+from custos.research import criteria_kit as kit
 from custos.research import factor_exit_study as fes
 from custos.research import load_window as lw
 from custos.research import plan_rules_replay as prr
@@ -1097,3 +1098,314 @@ class TestMiningInJudgmentSegmentRejected:
         )
         with pytest.raises(SystemExit):
             prr._check_windows(args, ap)
+
+
+# ---------------------------------------------------------------------------
+# R44（v0.379，TODO #100）：信号日最低价锚点 + 挖掘段 8 档宽度扫描
+# ---------------------------------------------------------------------------
+
+
+def _scan_args(**kw):
+    """run_width_scan 注入用 args（窗口写死挖掘 A∪B，四参不进 Namespace）。"""
+    base = dict(
+        tag="t",
+        cost_bps=25.0,
+        top_n=20,
+        seed=7,
+        scan_random=8,
+        scan_c4_min_pool=4,
+        codes="",
+        codes_file="",
+        count=2000,
+        universe_sample=0,
+        universe_local=False,
+        universe_seed=42,
+    )
+    base.update(kw)
+    return argparse.Namespace(**base)
+
+
+def _scan_fixture(n_sigs=150):
+    """两挖掘段各 n_sigs 个信号（单票 df 覆盖两段）。"""
+    days_a = [
+        d.strftime("%Y-%m-%d") for d in pd.bdate_range("2014-01-02", "2016-12-30")
+    ]
+    days_b = [
+        d.strftime("%Y-%m-%d") for d in pd.bdate_range("2022-01-03", "2026-09-04")
+    ]
+    days = days_a + days_b
+    n = len(days)
+    close = [100.0 + 0.01 * i for i in range(n)]
+    df = pd.DataFrame(
+        {
+            "date": days,
+            "close": close,
+            "low": [c - 2.0 for c in close],
+            "volume": [1000.0] * n,
+        }
+    )
+    ia = list(range(0, len(days_a), max(1, len(days_a) // n_sigs)))[:n_sigs]
+    ib = list(range(len(days_a), n, max(1, days_b.__len__() // n_sigs)))[:n_sigs]
+
+    def _mk(idxs):
+        sigs = [{"i": i, "date": days[i]} for i in idxs]
+        return {
+            "000001": {
+                "df": df,
+                "signals": sigs,
+                "scores": {days[i]: 50.0 for i in idxs},
+            }
+        }
+
+    return {
+        ("2000-01-01", "2016-12-31"): _mk(ia),
+        ("2022-01-01", "2026-09-04"): _mk(ib),
+    }
+
+
+def _scan_noise(seed: int):
+    """纯噪声重放工厂：ret 与止损宽度无关（逐笔 iid 有方差，键含 stop_override
+    与 **seed**——零假设校准的逐种子方差来自这里）。
+
+    定稿记录（v0.379）：salt="wscan6"——12 变体扫描取主测 5 种子 0/5
+    confirmed_pass 者；本变体 40 种子实测 3/40 = 7.5% ≈ 名义 5%（C4 池=25
+    臂 + max-of-8 选择效应的合理上偏；max-of-1 哨兵形态 40 种子实测
+    14/40 = 35%——哨兵 decisive）。"""
+
+    def _replay(subset, params):
+        out = []
+        for r in subset:
+            so = r["sig"].get("stop_override")
+            key = f"{r['code']}|{r['date']}|{so}|{sorted(params.items())}|{seed}|wscan6"
+            h = int.from_bytes(hashlib.md5(key.encode()).digest()[:4], "little") / 2**32
+            out.append(_trade_of(r, 0.06 if h < 0.4 else -0.035))
+        return out
+
+    return _replay
+
+
+def _scan_edge(seed: int):
+    """植入「x=10 固定宽度真更优」：该宽度 75% +0.08 / 25% −0.02（两侧保留，
+    防 payoff 无定义），其余宽度纯噪声。"""
+
+    def _replay(subset, params):
+        out = []
+        for r in subset:
+            so = r["sig"].get("stop_override")
+            key = f"{r['code']}|{r['date']}|{so}|{sorted(params.items())}|{seed}"
+            h = int.from_bytes(hashlib.md5(key.encode()).digest()[:4], "little") / 2**32
+            if (
+                so is not None
+                and abs((1.0 - so / r["anchor_low"]) * 100.0 - 10.0) < 0.01
+            ):
+                ret = 0.08 if h < 0.75 else -0.02
+            else:
+                ret = 0.06 if h < 0.4 else -0.035
+            out.append(_trade_of(r, ret))
+        return out
+
+    return _replay
+
+
+def _scan_run(seed, edge, **kw):
+    spec = _scan_fixture()
+    args = _scan_args(seed=seed, **kw)
+    return prr.run_width_scan(
+        args,
+        warm_fn=lambda s, e: spec[(s, e)],
+        replay_fn=_scan_edge(seed) if edge else _scan_noise(seed),
+    )
+
+
+class TestAnchorAttach:
+    """修①钉测：锚点 = 信号日最低价 × (1−x)；x=0 逐位等价；防御剔除记数。"""
+
+    def test_x0_equals_signal_low_exactly(self):
+        pc = _mk_per_code(n_codes=2, sigs_per_code=3)
+        subset, acc = prr.attach_anchor_stops(pc, 0.0)
+        df = pc["000000"]["df"]
+        lows = df["low"].astype(float).tolist()
+        for r in subset:
+            assert r["plan_stop"] == lows[r["sig"]["i"]]  # 逐位等价
+            assert r["anchor_low"] == lows[r["sig"]["i"]]
+        assert acc["n_anchor_ge_entry"] == 0
+
+    def test_defensive_drop_counted_when_low_eq_close(self):
+        """一字线信号（low == close）：x=0 时锚点 == 入场收盘 ⇒ 两边同剔记数。"""
+        pc = _mk_per_code(n_codes=2, sigs_per_code=3)
+        df = pc["000000"]["df"]
+        df.loc[df.index[10], "low"] = df.loc[df.index[10], "close"]  # 造一字线
+        subset0, acc0 = prr.attach_anchor_stops(pc, 0.0)
+        assert acc0["n_anchor_ge_entry"] == 1
+        assert all(r["sig"]["i"] != 10 for r in subset0 if r["code"] == "000000")
+        # x=5：锚点低于入场 ⇒ 不剔（防御条件与宽度方向一致，仅记数语义）
+        subset5, acc5 = prr.attach_anchor_stops(pc, 5.0)
+        assert acc5["n_anchor_ge_entry"] == 0
+        assert len(subset5) > len(subset0)
+
+    def test_lookback_mode_bit_unchanged(self):
+        """R41 原模式（缺省 lookback）逐位不变——既有金样钉测覆盖
+        （TestLegacyR40Compat::test_report_bit_identical_to_pre_switch），
+        这里只钉 attach 入口选择：缺省 stop_anchor ⇒ 走 _stop_ref。"""
+        pc = _mk_per_code(n_codes=2, sigs_per_code=3)
+        subset_ref, _ = prr.attach_plan_stops(pc, STOP_LOOKBACK)
+        subset_anchor, _ = prr.attach_anchor_stops(pc, 0.0)
+        # 两模式止损价不同源：_stop_ref 是近 10 日最低，锚点是当日 low
+        assert any(
+            a["plan_stop"] != b["plan_stop"] for a, b in zip(subset_anchor, subset_ref)
+        )
+
+
+def _blk(margin, gate=True, n_taken=150):
+    return {"margin": margin, "rdd_gate": gate, "n_taken": n_taken}
+
+
+def _readings_block(margins_by_x, ref_margin=0.10, gate=True, n_taken=150):
+    blk = {"ref": _blk(ref_margin, gate=True, n_taken=n_taken)}
+    for x, m in margins_by_x.items():
+        blk[f"x{x:g}"] = _blk(m, gate=gate, n_taken=n_taken)
+    return blk
+
+
+class TestScanJudges:
+    WINS = ["mining_a", "mining_b"]
+
+    def test_c1_below_100_untested(self):
+        readings = {
+            w: _readings_block({x: 0.12 for x in prr.WIDTH_GRID}, n_taken=99)
+            for w in self.WINS
+        }
+        c1 = prr._scan_c1(readings, self.WINS)
+        assert c1["ok"] is False
+        rep_verdict = kit.verdict_four_state(
+            c1_ok=c1["ok"], c2_ok=True, c3_ok=True, c4_state="confirmed_pass"
+        )
+        assert rep_verdict == "untested"  # C1 不过 ⇒ untested 优先
+
+    def test_c2_no_passing_falsified(self):
+        readings = {
+            w: _readings_block({x: 0.12 for x in prr.WIDTH_GRID}) for w in self.WINS
+        }
+        merged = _readings_block({x: 0.12 for x in prr.WIDTH_GRID}, gate=False)
+        c2 = prr._scan_c2(readings, merged, self.WINS)
+        assert c2["ok"] is False and c2["x_star"] is None
+        assert "无档过" in c2["reason"]
+        v = kit.verdict_four_state(
+            c1_ok=True, c2_ok=False, c3_ok=None, c4_state="confirmed_pass"
+        )
+        assert v == "falsified"
+
+    def test_c2_pass_and_x_star(self):
+        margins = {x: 0.10 for x in prr.WIDTH_GRID}
+        margins[10.0] = 0.20  # x=10 合并最优
+        readings = {w: _readings_block(dict(margins)) for w in self.WINS}
+        merged = _readings_block(dict(margins))
+        c2 = prr._scan_c2(readings, merged, self.WINS)
+        assert c2["ok"] is True and c2["x_star"] == 10.0
+        assert c2["merged_delta_margin"] == pytest.approx(0.10)
+
+    def test_c3_smooth_false(self):
+        # x*=10；邻档 x8 在 mining_b 的 Δmargin ≤ 0 ⇒ 平滑子项 False
+        margins = {x: 0.15 for x in prr.WIDTH_GRID}
+        margins[10.0] = 0.20
+        ra = _readings_block(dict(margins))
+        rb_m = dict(margins)
+        rb_m[8.0] = 0.05  # mining_b 的 x8 低于 ref(0.10) ⇒ Δ<0
+        rb = _readings_block(rb_m)
+        readings = {"mining_a": ra, "mining_b": rb}
+        c3 = prr._scan_c3(readings, self.WINS, 10.0)
+        assert c3["ok"] is False
+
+    def test_c3_consistency_false(self):
+        # x*=10；mining_b 最优档 = x20（相差 3 档 > 1）⇒ 一致性子项 False
+        margins = {x: 0.15 for x in prr.WIDTH_GRID}
+        margins[10.0] = 0.20
+        ra = _readings_block(dict(margins))
+        rb_m = dict(margins)
+        rb_m[20.0] = 0.30  # mining_b 最优跳到 x20
+        rb = _readings_block(rb_m)
+        readings = {"mining_a": ra, "mining_b": rb}
+        c3 = prr._scan_c3(readings, self.WINS, 10.0)
+        assert c3["ok"] is False
+        assert c3["window_best"]["mining_b"] == 20.0
+
+    def test_c3_pass_and_endpoint_single_side(self):
+        # x*=5（端点）：只查 x6 单侧；两窗最优都是 x5 ⇒ C3 过
+        margins = {x: 0.10 for x in prr.WIDTH_GRID}
+        margins[5.0] = 0.20
+        margins[6.0] = 0.15
+        readings = {w: _readings_block(dict(margins)) for w in self.WINS}
+        c3 = prr._scan_c3(readings, self.WINS, 5.0)
+        assert c3["ok"] is True
+        assert list(c3["smooth"].keys()) == ["x6"]  # 端点单侧
+
+
+class TestScanModeDiscipline:
+    """扫描模式 v2 纪律：不读判定段、不过批次门、window_usage 不登记。"""
+
+    def test_no_judgment_read_no_gate_no_ledger(self, monkeypatch):
+        from custos.research import judgment_batch as jb
+        from custos.research import window_usage as wu
+
+        calls = []
+        monkeypatch.setattr(
+            wu, "record_use", lambda *a, **k: calls.append(("record_use", a, k))
+        )
+        monkeypatch.setattr(
+            jb,
+            "gate_judgment_read",
+            lambda *a, **k: calls.append(("gate", a, k)) or False,
+        )
+        rep = _scan_run(seed=0, edge=False)
+        assert calls == [], "扫描模式不得触 record_use / 批次门"
+        assert rep["window_usage"]["window"] == "not_read"
+        assert rep["criteria"]["C4"]["state"] in kit.C4_STATES
+
+    def test_empty_guard_raises(self):
+        spec = {
+            k: {"000001": {"df": _mk_df(), "signals": [], "scores": {}}}
+            for k in _scan_fixture()
+        }
+        with pytest.raises(RuntimeError, match="空结果护栏"):
+            prr.run_width_scan(
+                _scan_args(),
+                warm_fn=lambda s, e: spec[(s, e)],
+                replay_fn=_scan_noise(0),
+            )
+
+    def test_scan_cli_mutex_flags(self, tmp_path):
+        # 互斥校验在 main 入口（fail-closed ap.error）
+        with pytest.raises(SystemExit):
+            prr.main(
+                ["--tag", "t", "--stop-anchor", "signal_low"]
+            )  # 缺 --stop-buffer-pct
+        with pytest.raises(SystemExit):
+            prr.main(["--tag", "t", "--stop-buffer-pct", "10"])  # 无 signal_low
+        with pytest.raises(SystemExit):
+            prr.main(
+                [
+                    "--tag",
+                    "t",
+                    "--scan-widths",
+                    "--stop-anchor",
+                    "signal_low",
+                    "--stop-buffer-pct",
+                    "10",
+                ]
+            )
+
+    def test_scan_main_route_and_write(self, tmp_path, monkeypatch):
+        """main 路由 --scan-widths ⇒ 产物 _plan_width_scan__{tag}.json。"""
+        spec = _scan_fixture()
+        rc = prr.main(
+            ["--tag", "scan_t", "--out-dir", str(tmp_path), "--scan-widths"],
+            warm_fn=lambda s, e: spec[(s, e)],
+            replay_fn=_scan_noise(0),
+        )
+        assert rc == 0
+        out = tmp_path / "scan_t" / "_plan_width_scan__scan_t.json"
+        assert out.exists()
+        rep = json.loads(out.read_text(encoding="utf-8"))
+        assert rep["mode"] == "width_scan" and rep["grid"] == [
+            float(x) for x in prr.WIDTH_GRID
+        ]

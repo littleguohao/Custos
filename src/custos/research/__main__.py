@@ -104,7 +104,10 @@ TOOLS: dict[str, tuple[str, str]] = {
         " scale_out_frac=0.5）；C1 不过=untested/C2=Δmargin 双窗正+rdd 相对门"
         "（参照=同窗现行版）/C3=lookback 扰动新子集两版重跑/C4=随机止损价臂"
         " N=50（预算对等=两边都不挑选）；v2 布局（v0.357）：缺省三段+隔离带，"
-        "legacy 显式窗兼容；check_reach 到达校验",
+        "legacy 显式窗兼容；check_reach 到达校验。R44 扩展（v0.379）："
+        "--stop-anchor signal_low 锚点（信号日最低价 ×(1−x)）+ --scan-widths"
+        " 挖掘段 8 档宽度扫描（只读挖掘 A∪B，不读判定段、不过批次门；C4 随机"
+        "宽度臂逐信号 U[5%,20%] 每臂 max-of-8 组）",
     ),
     "score_tier_position_study": (
         "driver",

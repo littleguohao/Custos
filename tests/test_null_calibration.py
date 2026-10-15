@@ -178,6 +178,50 @@ class TestSentinelMaxOf5:
 
 
 # ---------------------------------------------------------------------------
+# plan_rules_replay --scan-widths（R44 宽度扫描，v0.379）
+# ---------------------------------------------------------------------------
+
+
+def _r44_run(edge: bool, **kw):
+    kw.setdefault("scan_random", N_RANDOM)
+    kw.setdefault("scan_c4_min_pool", MIN_POOL)
+
+    def run(seed):
+        from test_plan_rules_replay import _scan_run
+
+        return _scan_run(seed, edge, **kw)
+
+    return run
+
+
+class TestPlanWidthScanCalibration:
+    """R44 零假设两连测：纯噪声（收益与止损宽度无关）confirmed_pass 5 种子 0/5
+    + 植入「x=10 固定宽度真更优」可识别（C4 confirmed_pass）。"""
+
+    def test_noise(self):
+        hn.assert_noise_calibration("plan_width_scan", _r44_run(False))
+
+    def test_edge_detected(self):
+        hn.assert_edge_detected("plan_width_scan", _r44_run(True))
+
+
+class TestSentinelScanMaxOf1:
+    """回归哨兵（抓选择效应）：随机臂换成 max-of-1（monkeypatch
+    ``prr.C4_ARM_DRAWS``=1，丢掉与 8 档网格对等的 max-of-8 预算）⇒ 零假设
+    校准**必须失败**——池标尺系统性偏低，纯噪声也能 confirmed_pass。"""
+
+    def test_calibration_catches_max_of_1(self, monkeypatch):
+        from custos.research import plan_rules_replay as prr
+
+        monkeypatch.setattr(prr, "C4_ARM_DRAWS", 1)
+        with pytest.raises(AssertionError, match="零假设校准失败"):
+            hn.assert_noise_calibration(
+                "plan_width_scan[max-of-1 哨兵]",
+                _r44_run(False, scan_random=25, scan_c4_min_pool=20),
+            )
+
+
+# ---------------------------------------------------------------------------
 # regime_style_study（R43 终端，v0.368）
 # ---------------------------------------------------------------------------
 

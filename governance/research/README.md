@@ -392,7 +392,7 @@ append-only、生产机写入提交）：
 | `exit_c5_terminal` / `score_c5_terminal` | R37 / R36 | 🔄 已退役（v0.356，勿用于新判决——pre2019 终审由判定段 2017~2021 + holdout 接替，与判据件表对齐；保留只为复现 R36/R37） |
 | `factor_exit_study` | R39 | 因子分桶→出场档 80 格枚举，主基准 uniform-best |
 | `bear_regime_study` | R40 | 空头区间 46 门×5 档，随机入场臂基准 |
-| `plan_rules_replay` | R41 | 计划止损 vs 现行出场配对回放（引擎信号级 `stop_override` 钩子） |
+| `plan_rules_replay` | R41 / R44 | 计划止损 vs 现行出场配对回放（引擎信号级 `stop_override` 钩子）；R44 扩展：`--stop-anchor signal_low` 锚点 + `--scan-widths` 挖掘段 8 档宽度扫描（不读判定段） |
 | `score_tier_position_study` | R42 | V0 分档单调性与加权 expectancy_R |
 | `regime_style_study` | R43 | 0AMV 区间段风格/板块描述性条件化（41 维 as-of 价差 + 伪段 C4；不接交易引擎） |
 | `plan_shadow_review` | #60 | live 影子台账分歧段事后打分（N=5/10） |
