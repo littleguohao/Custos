@@ -88,7 +88,10 @@ class TestRandomFilterDay:
     def test_seed_reproducible(self):
         import random
 
-        items = [_item(f"{i:06d}", "2023-01-04") for i in range(20)]
+        # v0.386：随机臂只在有因子值的票里剔（与因子臂同口径）⇒ 用例须带 fval
+        items = [
+            {**_item(f"{i:06d}", "2023-01-04"), "fval": float(i)} for i in range(20)
+        ]
         a = sf._random_filter_day(items, 0.30, random.Random(7))
         b = sf._random_filter_day(items, 0.30, random.Random(7))
         assert [i["code"] for i in a] == [i["code"] for i in b]

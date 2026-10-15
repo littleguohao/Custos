@@ -157,7 +157,8 @@ def attach_plan_stops(
         "n_score_missing": n_score_missing,
         "n_subset": len(subset),
         "stop_distance_quantiles": {
-            q: (dists[min(len(dists) - 1, int(len(dists) * p))] if dists else None)
+            # 最近秩下标 round((n−1)p)（v0.386 审计 recent#10：原 int(n·p) 偏右一格）
+            q: (dists[int(round((len(dists) - 1) * p))] if dists else None)
             for q, p in (
                 ("p5", 0.05),
                 ("p25", 0.25),

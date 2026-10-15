@@ -4150,9 +4150,13 @@ def load_amv_regime(
     拼接）——vdat 停更于 2026-07-17，兜底只为防台账丢失，正常不该走到。
     best-effort：都缺返回 {}。
     """
-    records = _amv_ledger_records(since, None)
+    # 状态机从台账**首日**起重放再截到 since（v0.386 审计 recent#7）：原从 since 起
+    # 重放 ⇒ 起点重置为「中性」，同一天的 regime 随窗口起点而变（锁定的空头被清掉），
+    # 跨单元/跨窗口的信号集不可比。
+    records = _amv_ledger_records("0000-00-00", None)
     if records:
-        return _amv_regime_from_records(records)
+        full = _amv_regime_from_records(records)
+        return {d: v for d, v in full.items() if d >= since}
     # ── 兜底（v0.150 前旧路径）：vdat 主序列 + 台账 confirmed 尾部拼接 ──
     try:
         from custos.datasource.local_tdx import compass_amv  # noqa: PLC0415

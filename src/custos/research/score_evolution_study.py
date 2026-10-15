@@ -406,8 +406,11 @@ def _validate_windows(args: Any, ap: argparse.ArgumentParser) -> tuple[Window, A
 
 
 def _validate_single_window(w: Window) -> None:
-    """单窗校验：日期格式 + 起止不倒挂 + 段检查（v2 布局，v0.358——
-    load_window.segment_violation 单源；无第二窗，不做相交判定）。"""
+    """单窗校验：日期格式 + 起止不倒挂 + **挖掘窗**段检查（单窗 = 只挖掘不判定）。
+
+    v0.386（审计 older#7）：改用 ``mining_violation``（与判定段 2017~2021 相交即拒）——
+    原 ``segment_violation`` 只查「落在某段内」，单窗可直接挖判定段，且单窗分支
+    不登记窗口台账、不过批次门，等于绕过攒批协议。"""
     from datetime import date  # noqa: PLC0415
     from custos.research import load_window as _lw  # noqa: PLC0415
 
@@ -417,7 +420,7 @@ def _validate_single_window(w: Window) -> None:
         raise ValueError(f"窗口日期须为 YYYY-MM-DD: {w}") from exc
     if s > e:
         raise ValueError(f"窗口起止倒挂: start={w.start} > end={w.end}")
-    msg = _lw.segment_violation(w.start, w.end)
+    msg = _lw.mining_violation(w.start, w.end)
     if msg:
         raise ValueError(msg)
 

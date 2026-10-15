@@ -100,15 +100,24 @@ def _filter_day(items: list[dict], x: float) -> list[dict]:
 
 
 def _random_filter_day(items: list[dict], x: float, rng: random.Random) -> list[dict]:
-    """单日随机剔除（P4-C4 零假设臂）：同 X 同池随机剔 floor(n×X) 名。"""
+    """单日随机剔除（P4-C4 零假设臂）：**与因子臂同口径**——只在有因子值的票里
+    随机剔 floor(n_avail×X) 名，缺值票照因子臂 fail-open 全保留。
+
+    v0.386（审计 older#4）：原实现按全池 floor(n×X) 剔且缺值票也可被剔——缺值率 m
+    下随机臂多剔 1/(1−m) 倍（m=67% ⇒ 3 倍），零假设池 q95 被系统性抬高、C4 对候选
+    偏严（R36 Phase 4 p2_sole 缺值率 50~67%，正贴线死在 C4）。"""
     if x <= 0:
         return list(items)
-    n_drop = int(len(items) * x)
+    avail = [
+        j
+        for j, it in enumerate(items)
+        if isinstance(it.get("fval"), (int, float)) and math.isfinite(it["fval"])
+    ]
+    n_drop = int(len(avail) * x)
     if n_drop <= 0:
         return list(items)
-    idx = list(range(len(items)))
-    rng.shuffle(idx)
-    drop = set(idx[:n_drop])
+    rng.shuffle(avail)
+    drop = set(avail[:n_drop])
     return [it for j, it in enumerate(items) if j not in drop]
 
 

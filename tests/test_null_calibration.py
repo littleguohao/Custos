@@ -116,7 +116,13 @@ class TestSentinelMaxOf5:
 
     @staticmethod
     def _run_arm_max_of_5(
-        gate_counts, exits, draw_entries, replay_mining, top_n, judgment_reader=None
+        gate_counts,
+        exits,
+        draw_entries,
+        replay_mining,
+        top_n,
+        judgment_reader=None,
+        judgment_counts=None,
     ):
         """v0.307 前的退化臂构造（仅哨兵复刻，勿用于生产）。"""
         n = sum(gate_counts.values())

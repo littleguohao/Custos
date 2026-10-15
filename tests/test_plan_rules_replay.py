@@ -804,8 +804,8 @@ class TestLegacyR40Compat:
     #: 改前（v0.356 代码）同夹具同参数报告的金样哈希（_normalize_volatile 后；
     #: v0.359 按浮点归一化口径重捕——CI 异构 CPU 浮点末位差会让全精度哈希必挂）
     _GOLDEN_SHA256 = {
-        "<full>": "0719b99ce878508b5f8c5ba6a3b091b3de8114d2481e87fc06718eb67703ddcb",
-        "accounting": "f4e5b0b6f8aa6ab614fd26ecc1f46a54782e5ef7f8842a3243c7f83b728131a8",
+        "<full>": "bc3030d0f6288588e84b781c9c226ae6f5954ac3c0e2876d7ad13b72a2eb34ed",
+        "accounting": "73f712a187edb80bee527f0c5e20c3818107dfe4023a118a4ba71678acf4aedd",
         "cost_sensitivity": "7bb383079ec9f41adcd638cecc948686239e657f51a07bc2bfa9caef86f79f23",
         "criteria": "95aa950228677312ce3cf8102a2e826d0c221221563fd8ae8b8a8cdec7c9c299",
         "forward_holdout_note": "3f7068aca87896dac440f9b7b068f1907e8e94112691bfd04a7f21789211d806",
