@@ -26,13 +26,15 @@
 
 | 单元 | 状态 | 下一步 |
 |---|---|---|
-| R40 空头区间做多 | r40_a1 改门后重发车 | 生产机跑完回填 |
+| R40 空头区间做多 | r40_a1 已停、不作数（审计） | 按 v2 重跑修订在挖掘段重跑（#109） |
 | R44 止损宽度 | 预注册，工具 ✅ | #92 后回填功效节 → 生产机挖掘段 8 档扫描 |
 | R45 空头区间 J<13 × 30% 仓位 | 预注册 | coder 扩展 bear_regime_study（#103）；#91/#92 后回填功效节 |
 | R43 区间段板块/风格 | 预注册 | #91 定段数后回填功效节；coder 实现工具（#93） |
 | R39 因子×出场 | ADX 判毕 untested；v2 重测预注册 | 生产机挖掘内预演（A 选 B 验）过 C1~C4 才入第一批 |
 | R36 adx_gt_60 | v2 重测预注册 | 挖掘 B 前置核对 + 判定段冻结配置读数（#102 工具）|
 | R35 打分存在性 | 开题 | owner 拍板终局（R42「中段最好」是新证据） |
+
+**审计 2026-10-15**（代码已修 v0.382~0.387）：rdd 门亏损时方向反转、margin 含 open_end、组合层平分按代码号截断、q95 小池偏松等——受影响单元头部已就地标注，重算/重跑见 TODO #104~#109。
 
 **长期限制**：2021 后无退市股（R14），近窗无法去幸存者偏差；判定窗已被反复读取，
 其「样本外」资格在打折（见「研究纪律 · 窗口与数据」）。
@@ -384,9 +386,9 @@ append-only、生产机写入提交）：
 | 件 | 位置 | 要点 |
 |---|---|---|
 | 四态结局 | `criteria_kit.verdict_four_state` | C1 不过 ⇒ **untested** 优先；C2/C3 为 None ⇒ provisional；falsified 只来自 C2/C3 False 或 C4 confirmed_fail |
-| C4 池与状态 | `criteria_kit.assemble_c4_pool` / `c4_state_of` / `q95` | N 指**过门臂数**，重抽至满或 10×N；空池 indeterminate（不放行）；池未满 provisional；随机臂与候选**同预算**（同样的挑选次数） |
+| C4 池与状态 | `criteria_kit.assemble_c4_pool` / `c4_state_of` / `q95` / `batch_threshold` | 判定线 = 置换检验次序统计量（第 ⌊α(n+1)⌋ 大，v0.385；批次 α=0.05/m）；N 指**过门臂数**，重抽至满或 10×N；空池 indeterminate（不放行）；池未满 provisional；随机臂与候选**同预算**（同样的挑选次数） |
 | 簇打乱 | `criteria_kit.cluster_ids` / `cluster_draw` | collect_all 口径交易成簇（同票相邻 ≤5 bar），C4 打乱/赋桶按**整簇**，不按笔 |
-| 搜索标量 | `strategy_grid.search_objective` | objective **v2.1**：margin 单量 + rdd **相对门**（候选 ≥ 事先固定的参照档）；参照缺失 fail-closed；v1/v2 读数不跨版本引用，续跑跨版本被拒 |
+| 搜索标量 | `strategy_grid.search_objective` | objective **v2.1**：margin 单量（**已实现交易**，v0.383）+ rdd **相对门**（候选 ≥ 事先固定的参照档；rdd 符号感知——收益<0 用 收益×回撤，v0.382）；参照缺失 fail-closed；v1/v2 读数不跨版本引用，续跑跨版本被拒 |
 | C5 终审 | 🔄 已退役（v0.356）：pre2019 终审由判定段 2017~2021 + holdout 接替；`exit_c5_terminal`/`score_c5_terminal` 标 stale（可复现 R36/R37，勿用于新判决） | 已判结论不改 |
 | 溯源 | `provenance.build` | git sha+dirty / 判据版本 / 预注册 blob hash / **宇宙规则+n_codes+名单 sha256** / 数据末日 / 命令行 |
 | 成本副读数 | `cost_sensitivity` | 25/50bps 双报，翻号标「成本敏感」 |

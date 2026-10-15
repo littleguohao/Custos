@@ -21,6 +21,7 @@
 > `pipeline/screening/enrich_candidates.py`（stop_loss_ref 产出）、
 > `governance/contracts/EXIT_RULES.json`（现行出场）｜判据纪律：R12（预注册）
 > R13（可复现）｜工程：`backtest_factors`（引擎执行语义单源）
+> **⚠️ 审计 2026-10-15（v0.382~0.387 已修代码）**：C3「4/4 翻转」判的是「扰动后 C2 成立」，基线 C2 已不过时 C3 必不过，不是独立灵敏度证据（结局 falsified 由 C2 决定，不变）；判定窗两侧 rdd 均为正，rdd 符号缺陷不影响本判决。
 > 索引与主图见 [`README.md`](README.md)。
 
 ## 主题
