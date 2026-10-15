@@ -804,14 +804,14 @@ class TestLegacyR40Compat:
     #: 改前（v0.356 代码）同夹具同参数报告的金样哈希（_normalize_volatile 后；
     #: v0.359 按浮点归一化口径重捕——CI 异构 CPU 浮点末位差会让全精度哈希必挂）
     _GOLDEN_SHA256 = {
-        "<full>": "99713a87246137ac5a42f96a44ecefa364055a6932780f34d625b353ff36b66d",
+        "<full>": "0719b99ce878508b5f8c5ba6a3b091b3de8114d2481e87fc06718eb67703ddcb",
         "accounting": "f4e5b0b6f8aa6ab614fd26ecc1f46a54782e5ef7f8842a3243c7f83b728131a8",
         "cost_sensitivity": "7bb383079ec9f41adcd638cecc948686239e657f51a07bc2bfa9caef86f79f23",
         "criteria": "95aa950228677312ce3cf8102a2e826d0c221221563fd8ae8b8a8cdec7c9c299",
         "forward_holdout_note": "3f7068aca87896dac440f9b7b068f1907e8e94112691bfd04a7f21789211d806",
         "params": "7b09f04841885b622f44ca879278673efb011f9a5ed922359407ddf992685ee0",
         "provenance": "a7f1a851100f6c5a33b6b2aa0a98502d5baa96bb2ce6269067531f165a0ceab7",
-        "readings": "7fb864f838037ad1e84c701941413bdcfc80a8906dd408d5f9ea92e018a495fb",
+        "readings": "bd7a754880045445b9e6cd347f53885ad8703458847c1f02c29554a890684376",
         "schema": "afdee52e747ec0df67de16b0e1f7b1353a70365707656551874a088391854830",
         "tag": "8ca5d81566f88badd698137ac629cbf93ccc107c0cd967b7964f7d82088f6ebf",
         "verdict": "6201e275c993fded1b6a1b7b64f106686c702d9fdff8af32b560aad5d781015c",

@@ -1055,16 +1055,18 @@ class TestV0LatticeEndToEnd:
         }
         # collect/score 拆分证据：64 格 + 3 灵敏度臂，collector 只跑了挖掘窗一遍
         assert collector.calls == [MINING]
-        # top = single_0（bbi_above 单腿）：平分并列取格子序在前者（A 在候选序前）
+        # top = j_low 单腿：A 凭分值被选中（v0.384 起平分按哈希破序——旧金样的
+        # bbi_above 单腿格是全平分「取候选序在前者」碰巧选中 A，审计 E1 正是此病）
         top = rep["top_genome"]
-        assert top["weights"] == [1.0] + [0.0] * 29
+        jl = V0L_LEGS.index("j_low")
+        assert top["weights"] == [1.0 if k == jl else 0.0 for k in range(30)]
         # expr 槽位 = 可还原的倍率向量 JSON 字符串
         mult = json.loads(top["expr"])
-        assert mult == top["multipliers"] and mult["bbi_above"] == 1.0
-        assert mult["j_low"] == 0.0
-        # overrides 与倍率向量一致（bbi_above×1=5，j_low×0=0，repair 双键×0）
-        assert top["overrides"]["bbi_above"] == 5.0
-        assert top["overrides"]["j_low"] == 0.0
+        assert mult == top["multipliers"] and mult["j_low"] == 1.0
+        assert mult["bbi_above"] == 0.0
+        # overrides 与倍率向量一致（j_low×1=默认分，bbi_above×0=0，repair 双键×0）
+        assert top["overrides"]["bbi_above"] == 0.0
+        assert top["overrides"]["j_low"] == DEFAULT_TECH_WEIGHTS["j_low"]
         assert top["overrides"]["repair_signals_each"] == 0.0
         # top 读数 = 选中 A 两笔（+0.10/−0.02）：胜率 0.5、盈亏比 5、n=2
         assert top["mining"]["n"] == 2

@@ -386,6 +386,7 @@
 | 2026-10-15 | v0.381 | **第一批候选预注册**：R36 adx_gt_60 v2 重测（冻结配置不重选，挖掘 B 前置核对 + 判定段冻结臂池）、R39 ADX v2 重测（全量宇宙 + A∪B，挖掘内预演过线才入批）、新立 R45（空头区间 J<13 × 敞口 ≤30% × 4×4 出场）；README 加冻结与开批流程；R44 先验跑数前修订；TODO #102/#103 | owner 2026-10-15 | 文档 |
 | 2026-10-15 | v0.382 | **rdd 门符号感知（审计 2026-10-15 CK-1）**：`m2._ret_over_dd`（strategy_grid/fes/exit_campaign/score_* 单源）收益<0 时改用 收益×回撤——原 收益/回撤 亏损时对回撤单调递增，rdd 相对门在熊市窗反向（回撤越大越易过门）；两轴单调、0 处连续；三份 legacy 金样只 ret_over_dd 读数变、判决不变，已重捕 | 审计 | 钉测 +3 |
 | 2026-10-15 | v0.383 | **margin 读数只用已实现交易（审计 older#1/#5/#9）**：新增 `bt.summarize_realized`（剔 open_end* 与 *_unfillable，记 n_unrealized）；fes.combine_readings（R39~R45 终端共用）、exit_campaign、score_evolution/filter/tier、cost_sensitivity、strategy_grid 格子行、m2 汇总行全部接入；组合层仍用全体交易 | 审计 | 钉测 +4 |
+| 2026-10-15 | v0.384 | **组合层平分破序与准入（审计 E1/E2/E5）**：simulate_portfolio/_topn 平分与同日先后改按 blake2b(seed|日期|代码)（新增 `--tie-seed`），不再按代码号；risk_frac=0 不再静默丢弃（按 2% 地板配仓），None 计入 n_no_risk；score=None 排末位；score_evolution 端到端金样 top 由平分碰巧格改为真实择优格 | 审计 | 钉测 +5 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

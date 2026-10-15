@@ -4217,12 +4217,35 @@ def _curve_cagr(
     return years, cagr
 
 
+def _tie_key(t: dict[str, Any], tie_seed: int) -> int:
+    """平分破序键（v0.384，审计 E1）：``blake2b(seed|entry_date|code)``——与输入顺序
+    无关、不按代码号系统性偏向、同 seed 可复现。此前稳定排序按候选清单顺序
+    （≈代码升序）破平分：baseline 恒 0 分、单腿二值分几乎全平分，top-N / 并发截断
+    读数被「代码号小者优先」这一任意规则主导（合成实测 CAGR 区间 −15.9%~+21.2%）。
+    要估平分噪声：换 ``tie_seed`` 多抽几次报区间。"""
+    import hashlib
+
+    h = hashlib.blake2b(
+        f"{tie_seed}|{t.get('entry_date')}|{t.get('code')}".encode(), digest_size=8
+    )
+    return int.from_bytes(h.digest(), "big")
+
+
+def _has_risk(t: dict[str, Any]) -> bool:
+    """组合层准入：risk_frac 为有限非负数（v0.384 审计 E2：=0 是 close==low 日
+    stop_mode=low 无余量的正常读数，按 2% 地板配仓；此前 ``>0`` 过滤把它们静默
+    丢掉且不计 n_skipped，被丢子集系统性偏差）。None/负值才是无效。"""
+    rf = t.get("risk_frac")
+    return isinstance(rf, (int, float)) and rf == rf and rf >= 0
+
+
 def simulate_portfolio(
     trades: list[dict[str, Any]],
     risk_pct: float = 0.01,
     max_concurrent: int = 5,
     max_pos_frac: float = 0.20,
     max_gross: float = 1.0,
+    tie_seed: int = 0,
 ) -> dict[str, Any]:
     """组合级资金曲线：把逐笔交易按**固定风险仓位**(每笔风险 risk_pct 的本金)+ 并发持仓上限
     + 单仓/总敞口上限,事件驱动地放到一条资金曲线上,输出总收益/CAGR/最大回撤/成交与被限笔数。
@@ -4234,18 +4257,19 @@ def simulate_portfolio(
     """
     import heapq
 
+    dated = [t for t in trades if t.get("entry_date") and t.get("exit_date")]
     entries = sorted(
-        [
-            t
-            for t in trades
-            if t.get("entry_date")
-            and t.get("exit_date")
-            and (t.get("risk_frac") or 0) > 0
-        ],
-        key=lambda t: t["entry_date"],
+        [t for t in dated if _has_risk(t)],
+        key=lambda t: (t["entry_date"], _tie_key(t, tie_seed)),  # 同日先后=哈希（E1）
     )
+    n_no_risk = len(dated) - len(entries)
     if not entries:
-        return {"n_taken": 0, "n_skipped": 0, "text": "无可用交易(缺 risk_frac/日期)"}
+        return {
+            "n_taken": 0,
+            "n_skipped": 0,
+            "n_no_risk": n_no_risk,
+            "text": "无可用交易(缺 risk_frac/日期)",
+        }
     equity = 1.0
     peak = 1.0
     max_dd = 0.0
@@ -4286,6 +4310,8 @@ def simulate_portfolio(
         "max_concurrent": max_concurrent,
         "max_pos_frac": max_pos_frac,
         "max_gross": max_gross,
+        "n_no_risk": n_no_risk,
+        "tie_seed": tie_seed,
     }
     ret_dd = round(out["total_return"] / max_dd, 2) if max_dd > 0 else None
     out["return_over_maxdd"] = ret_dd
@@ -4312,6 +4338,7 @@ def _open_topn_for_date(
     gross: float,
     seq: int,
     taken_out: Optional[list] = None,
+    tie_seed: int = 0,
 ) -> tuple[int, int, float, int, list[float]]:
     """topn 特有的横截面择优块：当日候选按 score 降序，在并发/top_n/总敞口上限内开仓。
 
@@ -4324,11 +4351,15 @@ def _open_topn_for_date(
     taken = 0
     skipped = 0
     taken_rets: list[float] = []
-    ranked = sorted(
-        (t for t in day if t["code"] not in held),
-        key=lambda t: t.get("score") or 0,
-        reverse=True,
-    )
+
+    def _rank(t: dict) -> tuple:
+        # score 降序；None/非数排最后（E5——此前 None 当 0 排在负分前）；平分按哈希（E1）
+        sc = t.get("score")
+        if isinstance(sc, (int, float)) and sc == sc:
+            return (0, -float(sc), _tie_key(t, tie_seed))
+        return (1, 0.0, _tie_key(t, tie_seed))
+
+    ranked = sorted((t for t in day if t["code"] not in held), key=_rank)
     opened = 0
     for t in ranked:
         if opened >= top_n or len(open_heap) >= max_concurrent:
@@ -4370,6 +4401,7 @@ def simulate_portfolio_topn(
     max_pos_frac: float = 0.20,
     max_gross: float = 1.0,
     taken_out: Optional[list] = None,
+    tie_seed: int = 0,
 ) -> dict[str, Any]:
     """组合级**横截面 top-N 择优**资金曲线：每个进场日在所有「可买」候选里按 score 降序取前 top_n
     (排除已持有该股、受并发/敞口上限约束)，固定风险仓位入场，事件驱动出资金曲线/CAGR/最大回撤。
@@ -4382,13 +4414,16 @@ def simulate_portfolio_topn(
     """
     import collections as _c
 
-    cands = [
-        t
-        for t in candidates
-        if t.get("entry_date") and t.get("exit_date") and (t.get("risk_frac") or 0) > 0
-    ]
+    dated = [t for t in candidates if t.get("entry_date") and t.get("exit_date")]
+    cands = [t for t in dated if _has_risk(t)]
+    n_no_risk = len(dated) - len(cands)
     if not cands:
-        return {"n_taken": 0, "n_skipped": 0, "text": "无可用候选"}
+        return {
+            "n_taken": 0,
+            "n_skipped": 0,
+            "n_no_risk": n_no_risk,
+            "text": "无可用候选",
+        }
     by_date: dict[str, list] = _c.defaultdict(list)
     for t in cands:
         by_date[t["entry_date"]].append(t)
@@ -4426,6 +4461,7 @@ def simulate_portfolio_topn(
             gross=gross,
             seq=seq,
             taken_out=taken_out,
+            tie_seed=tie_seed,
         )
         taken += tk
         skipped += sk
@@ -4454,6 +4490,8 @@ def simulate_portfolio_topn(
         "selected_expectancy": sel_exp,
         "risk_pct": risk_pct,
         "max_concurrent": max_concurrent,
+        "n_no_risk": n_no_risk,
+        "tie_seed": tie_seed,
     }
     out["text"] = (
         f"组合 top-{top_n} 横截面择优(风险{risk_pct * 100:.1f}%/笔, 并发≤{max_concurrent}): "
@@ -4904,6 +4942,7 @@ def _portfolio_from_trades(args: Any, codes: list[str]) -> int:
             risk_pct=args.risk_pct / 100.0,
             max_concurrent=args.max_concurrent,
             max_pos_frac=args.max_pos / 100.0,
+            tie_seed=getattr(args, "tie_seed", 0),
         )
     else:
         payload["portfolio"] = simulate_portfolio(
@@ -4911,6 +4950,7 @@ def _portfolio_from_trades(args: Any, codes: list[str]) -> int:
             risk_pct=args.risk_pct / 100.0,
             max_concurrent=args.max_concurrent,
             max_pos_frac=args.max_pos / 100.0,
+            tie_seed=getattr(args, "tie_seed", 0),
         )
     _rss = peak_rss_mb()
     print(
@@ -5274,6 +5314,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument(
         "--max-pos", type=float, default=20.0, help="组合:单仓名义上限%%本金(默认20)"
+    )
+    ap.add_argument(
+        "--tie-seed",
+        type=int,
+        default=0,
+        help="组合层平分破序种子（v0.384：同分/同日候选按 blake2b(seed|日期|代码) 排序，"
+        "不再按代码号；换种子多抽估平分噪声）",
     )
     ap.add_argument(
         "--top-n",
@@ -5783,6 +5830,7 @@ def _attach_portfolio_reports(
             risk_pct=args.risk_pct / 100.0,
             max_concurrent=args.max_concurrent,
             max_pos_frac=args.max_pos / 100.0,
+            tie_seed=getattr(args, "tie_seed", 0),
         )
     elif args.portfolio:
         payload["portfolio"] = simulate_portfolio(
@@ -5790,6 +5838,7 @@ def _attach_portfolio_reports(
             risk_pct=args.risk_pct / 100.0,
             max_concurrent=args.max_concurrent,
             max_pos_frac=args.max_pos / 100.0,
+            tie_seed=getattr(args, "tie_seed", 0),
         )
     if args.attribution:  # 先算归因,保证 --out JSON 里也带 attribution
         payload["attribution"] = attribution_report(trades)
