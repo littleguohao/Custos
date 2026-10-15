@@ -395,6 +395,7 @@
 | 2026-10-15 | v0.390 | **score_evolution `--tie-seed`（TODO #105 工具部分）**：进程内 V0 调权格与 V0 臂的组合层透传平分破序种子（R36 adx_gt_60 单腿 {0,5} 分大量平分，换种子多抽报分布）；DSL 格走 cell 子进程、连续分不受影响 | 审计 | 钉测 +2 |
 | 2026-10-15 | v0.391 | **R44 判定段攒批判决（TODO #102，B 方案）**：plan_rules_replay 锚点模式在判定段同次重抽随机宽度臂（逐信号 U[5%,20%] 单次抽，N=200 过门臂）建池，报告加 `criteria.judgment_batch`（候选 Δ、池、judgment_line、批判决）；无 --batch-id 只报池；R44 判据补池口径 | owner 2026-10-15 | 钉测 +2 |
 | 2026-10-15 | v0.392 | **R40/R45 判定段攒批判定线（TODO #102，B 方案）**：bear_regime_study 带 --batch-id 时 C2 判定半窗判定线 = `kit.batch_threshold`(冻结臂判定窗重读池, m)，m 只从名册读，报告 pools 加 batch_m；无批次号沿用 q95 | owner 2026-10-15 | 钉测 +1 |
+| 2026-10-15 | v0.393 | **R39 判定段攒批判决（TODO #102，B 方案）**：factor_exit_study 带 --batch-id 时随机分桶臂把冻结（分桶方案, 映射）在判定段同次重读（整簇随机赋桶重抽、独立随机流不扰挖掘池），报告加 `criteria.judgment_batch`；R39 v2 节补池口径 | owner 2026-10-15 | 钉测 +2 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

@@ -1178,3 +1178,32 @@ class TestV0386BucketFixes:
             {}, sigs, [0] * 6, {}, 25.0, 5, replay_fn=replay, n_buckets=3
         )
         assert st["n_buckets"] == 3 and len(st["configs"]) == 4**3
+
+
+class TestJudgmentBatchFes:
+    """v0.393（owner 选 B）：带 --batch-id ⇒ 随机分桶臂冻结映射在判定段同次重读成池。"""
+
+    def test_batch_block(self, monkeypatch, tmp_path):
+        from custos.research import judgment_batch as jb
+
+        reg = tmp_path / "jb.jsonl"
+        jb.open_batch(
+            "b1",
+            [{"id": f"c{k}", "config_hash": f"t:{k}", "unit": "R39"} for k in range(2)],
+            path=reg,
+        )
+        monkeypatch.setattr(jb, "REGISTRY", reg)
+        rep = _run(
+            monkeypatch,
+            _three_level_spec(180),
+            _scripted_replay,
+            n_random=5,
+            batch_id="b1",
+        )
+        blk = rep["criteria"]["judgment_batch"]
+        assert blk["line"]["m"] == 2 and blk["line"]["pool_size"] == len(blk["pool"])
+        assert blk["verdict"] in {"candidate", "provisional", "falsified"}
+        a = _run(monkeypatch, _three_level_spec(180), _scripted_replay, n_random=5)
+        assert "judgment_batch" not in a["criteria"]
+        # 判定重读走独立随机流：挖掘段 C4 池与不带批次号时逐位相同
+        assert a["criteria"]["C4"]["pool"] == rep["criteria"]["C4"]["pool"]

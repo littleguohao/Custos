@@ -729,6 +729,8 @@ def _c4_random_pool(
     replay_fn: Optional[Callable[[list[dict], dict[str, Any]], list[dict]]],
     rng: random.Random,
     ref_by_window: dict[str, Optional[dict]],
+    pool_j_out: Optional[list[float]] = None,
+    ub_margin_j: Optional[float] = None,
 ) -> tuple[list[float], int, int]:
     """C4 随机分桶臂池 → (pool, evaluated, gate_pass)；top/uniform-best 缺一即空池。
 
@@ -747,9 +749,14 @@ def _c4_random_pool(
         ub_margin_m = uniform_best["readings"]["margin"]
         clusters_m = kit.cluster_ids(signals["mining"])
 
+        clusters_j = (
+            kit.cluster_ids(signals["judgment"]) if pool_j_out is not None else None
+        )
+
         def _arm(_i: int) -> Optional[float]:
             arm_best: Optional[float] = None
             arm_ok = False
+            arm_pick: Optional[tuple[str, Any]] = None
             for name in BUCKETINGS:
                 perm = arm_bucket_draw(buckets[name]["mining"], clusters_m, rng)
                 stud_a = study_window(
@@ -772,8 +779,35 @@ def _c4_random_pool(
                 if top_a and top_a["readings"]["margin"] is not None:
                     arm_ok = True
                     dm = top_a["readings"]["margin"] - ub_margin_m
-                    arm_best = dm if arm_best is None else max(arm_best, dm)
+                    if arm_best is None or dm > arm_best:
+                        arm_best, arm_pick = dm, (name, top_a["mapping"])
+            if pool_j_out is not None and arm_pick is not None and arm_ok:
+                _judgment_reread(_i, *arm_pick)
             return arm_best if (arm_ok and arm_best is not None) else None
+
+        def _judgment_reread(i: int, name: str, mapping: Any) -> None:
+            """冻结臂判定段重读（v0.393，owner 选 B）：冻结的是挖掘段选出的
+            （分桶方案, 映射）；判定段归属照「整簇随机赋桶」策略重抽（随机归属搬不到
+            判定段信号上），不再取 max；Δ = 臂判定段 margin − uniform-best 判定段。"""
+            assert pool_j_out is not None and clusters_j is not None
+            rng_j = random.Random(f"{args.seed}-j{i}")  # 独立流：不扰挖掘臂抽样
+            n_b = len(BUCKETINGS[name]) + 1
+            perm_j = kit.cluster_draw(clusters_j, tuple(range(n_b)), rng_j)
+            trades = mapping_trades(
+                per_code["judgment"],
+                signals["judgment"],
+                perm_j,
+                mapping,
+                regime,
+                args.cost_bps,
+                replay_fn=replay_fn,
+            )
+            rd = combine_readings(trades, args.top_n, ref=ref_by_window["judgment"])
+            if not rd or not rd.get("rdd_gate") or rd.get("margin") is None:
+                return
+            if ub_margin_j is None:
+                return
+            pool_j_out.append(rd["margin"] - ub_margin_j)
 
         c4_pool = kit.assemble_c4_pool(args.n_random, _arm)
         pool = c4_pool["pool"]
@@ -1125,6 +1159,8 @@ def run_study(
     c3 = judge_c3(c3_draws)
 
     # ── C4：随机分桶臂 N=50 同预算（整簇打乱归属，同 80 格取 max）──
+    batch_id = str(getattr(args, "batch_id", "") or "")
+    pool_j: Optional[list[float]] = [] if batch_id else None
     pool, evaluated, gate_pass = _c4_random_pool(
         top,
         uniform_best,
@@ -1136,8 +1172,33 @@ def run_study(
         replay_fn_eff,
         rng,
         ref_by_window,
+        pool_j_out=pool_j,
+        ub_margin_j=(uniform_jd or {}).get("margin"),
     )
     c4 = judge_c4(dm_m, pool, evaluated, gate_pass, args.c4_min_pool)
+
+    # ── 判定段攒批判决（v0.393，owner 选 B；仅入批读数——带 --batch-id）──
+    judgment_batch_blk: Optional[dict[str, Any]] = None
+    if pool_j is not None:
+        from custos.research import judgment_batch as jb  # noqa: PLC0415
+
+        line = jb.judgment_line(batch_id, dm_j, pool_j, min_pool=args.c4_min_pool)
+        gate_j = bool(top and (top.get("judgment") or {}).get("rdd_gate"))
+        if dm_j is None or dm_j <= 0 or not gate_j:
+            bverdict = "falsified"
+        elif line["state"] == "confirmed_pass":
+            bverdict = "candidate"
+        else:
+            bverdict = "provisional"
+        judgment_batch_blk = {
+            "cand_delta_judgment": dm_j,
+            "cand_rdd_gate_judgment": gate_j,
+            "pool": pool_j,
+            "line": line,
+            "verdict": bverdict,
+            "rule": "判定段：top Δmargin(vs uniform-best)>0 且过 rdd 门 且 > 冻结臂判定段重读池"
+            "攒批判定线 ⇒ candidate；Δ≤0 或门不过 ⇒ falsified；否则 provisional",
+        }
 
     # ── 总结局（criteria_kit 单源：C1 不过 ⇒ untested 优先）──
     verdict = kit.verdict_four_state(
@@ -1167,7 +1228,7 @@ def run_study(
             "mining_merged": {"n_signals": len(signals["mining"])},
         }
 
-    return _assemble_report(
+    rep = _assemble_report(
         args,
         injected,
         windows,
@@ -1188,6 +1249,9 @@ def run_study(
         sg,
         segments=segments_blk,
     )
+    if judgment_batch_blk is not None:
+        rep["criteria"]["judgment_batch"] = judgment_batch_blk
+    return rep
 
 
 # ---------------------------------------------------------------------------
