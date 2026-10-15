@@ -270,6 +270,7 @@ def study_window(
     top_n: int,
     replay_fn: Optional[Callable[[list[dict], dict[str, Any]], list[dict]]] = None,
     ref_readings: Optional[dict] = None,
+    n_buckets: Optional[int] = None,
 ) -> dict[str, Any]:
     """单窗研究：按（档×桶）预放交易组，80 映射合并 + uniform 基准。
 
@@ -284,7 +285,9 @@ def study_window(
         def replay_fn(subset: list[dict], params: dict[str, Any]) -> list[dict]:
             return replay_signals(per_code, subset, params, regime, cost_bps)
 
-    n_b = (max(buckets) + 1) if buckets else 0
+    # 桶数由**挖掘窗切点**决定（v0.386 审计 recent#5）：判定窗因子值够不到最高桶时
+    # 按本窗 max(buckets) 算会少桶 ⇒ 映射数两窗不一致、合并时裸 StopIteration。
+    n_b = n_buckets if n_buckets is not None else ((max(buckets) + 1) if buckets else 0)
     cache: dict[tuple[str, int], list[dict]] = {}
 
     def _group(pk: str, b: int) -> list[dict]:
@@ -420,7 +423,8 @@ def judge_c1(
         if not rd:
             out[wname] = {"ok": False, "reason": "无读数"}
             continue
-        per_b = rd.get("n_taken_by_bucket") or {}
+        # JSON 落盘后 int 键变 str（v0.386 审计 recent#9）：从产物复判也要数得到
+        per_b = {int(k): v for k, v in (rd.get("n_taken_by_bucket") or {}).items()}
         lows = {
             b: per_b.get(b, 0)
             for b in range(n_buckets)
@@ -618,6 +622,7 @@ def _studies_by_bucketing(
                 args.cost_bps,
                 args.top_n,
                 replay_fn=replay_fn,
+                n_buckets=len(BUCKETINGS[name]) + 1,
             )
             for w in windows
         }
@@ -681,6 +686,7 @@ def _c3_perturbed_draws(
                     args.top_n,
                     replay_fn=replay_fn,
                     ref_readings=ref_by_window[w],  # v2.1 同参照口径对称
+                    n_buckets=len(qs_p) + 1,
                 )
                 for w in windows
             }
@@ -755,6 +761,7 @@ def _c4_random_pool(
                     args.top_n,
                     replay_fn=replay_fn,
                     ref_readings=ref_by_window["mining"],  # v2.1 随机臂同参照档
+                    n_buckets=len(BUCKETINGS[name]) + 1,
                 )
                 top_a = pick_top(
                     [

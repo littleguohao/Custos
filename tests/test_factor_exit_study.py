@@ -1141,3 +1141,40 @@ class TestMiningInJudgmentSegmentRejected:
         )
         with pytest.raises(SystemExit):
             fes._check_windows(args, ap)
+
+
+class TestV0386BucketFixes:
+    """v0.386（审计 recent#5/#9）：桶数由挖掘切点决定；C1 兼容 JSON 字符串键。"""
+
+    def test_judge_c1_accepts_str_keys(self):
+        from custos.research import factor_exit_study as fes_mod
+
+        rd = {"n_taken_by_bucket": {"0": 60, "1": 70}, "n_taken": 130}
+        out = fes_mod.judge_c1(rd, rd, 2)
+        assert out["mining"]["ok"] is True
+
+    def test_study_window_uses_given_n_buckets(self):
+        from custos.research import factor_exit_study as fes_mod
+
+        sigs = [{"code": f"{k:06d}", "date": "2023-01-03", "i": k} for k in range(6)]
+
+        def replay(subset, params):
+            return [
+                {
+                    "code": r["code"],
+                    "entry_date": "2023-01-03",
+                    "exit_date": "2023-01-09",
+                    "ret": 0.01,
+                    "reason": "stop",
+                    "risk_frac": 0.05,
+                    "r_multiple": 0.2,
+                    "holding": 4,
+                    "score": 1.0,
+                }
+                for r in subset
+            ]
+
+        st = fes_mod.study_window(
+            {}, sigs, [0] * 6, {}, 25.0, 5, replay_fn=replay, n_buckets=3
+        )
+        assert st["n_buckets"] == 3 and len(st["configs"]) == 4**3

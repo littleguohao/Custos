@@ -388,6 +388,7 @@
 | 2026-10-15 | v0.383 | **margin 读数只用已实现交易（审计 older#1/#5/#9）**：新增 `bt.summarize_realized`（剔 open_end* 与 *_unfillable，记 n_unrealized）；fes.combine_readings（R39~R45 终端共用）、exit_campaign、score_evolution/filter/tier、cost_sensitivity、strategy_grid 格子行、m2 汇总行全部接入；组合层仍用全体交易 | 审计 | 钉测 +4 |
 | 2026-10-15 | v0.384 | **组合层平分破序与准入（审计 E1/E2/E5）**：simulate_portfolio/_topn 平分与同日先后改按 blake2b(seed|日期|代码)（新增 `--tie-seed`），不再按代码号；risk_frac=0 不再静默丢弃（按 2% 地板配仓），None 计入 n_no_risk；score=None 排末位；score_evolution 端到端金样 top 由平分碰巧格改为真实择优格 | 审计 | 钉测 +5 |
 | 2026-10-15 | v0.385 | **判据件修正（审计 CK-2/3/5/6）**：`kit.q95` 改置换判定线（第 ⌊0.05(n+1)⌋ 大，假过线 ≤5%；旧插值 n=50 实为 6.7%）+ 新增 `perm_threshold`/`batch_threshold`（攒批 q(1−0.05/m)，#102 判据件部分）；cluster_ids 簇键含段（v2 A∪B 跨段误并）；objective NaN⇒None；power_mde 默认 k=2.8（80% 功效，旧 k=2 仅 ~53%） | 审计 | 钉测 +6 |
+| 2026-10-15 | v0.386 | **终端修复 a（审计 recent#1/#5/#9）**：bear_regime_study 随机臂判定窗抽样量改为冻结门在判定窗的实际信号数（原沿用挖掘窗 n_g ⇒ 臂分布偏窄、C2 判定半窗过松；只用计数不碰收益）；factor_exit_study 桶数由挖掘切点决定（判定窗够不到最高桶不再裸 StopIteration）、C1 兼容 JSON 字符串键 | 审计 | 钉测 +3 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

@@ -339,6 +339,7 @@ def run_arm(
     replay_mining: Callable[[list[dict], dict[str, Any]], list[dict]],
     top_n: int,
     judgment_reader: Optional[Callable[[int, dict], Optional[dict]]] = None,
+    judgment_counts: Optional[dict[str, int]] = None,
 ) -> dict[str, Any]:
     """单条随机臂：**预算对等**（v0.307）——完整复刻 top 的 max-of-230
     选型：逐门按该门实测信号数 n_g 抽随机入场（0 信号门跳过）× 全档重放，
@@ -378,9 +379,18 @@ def run_arm(
                     }
     out: dict[str, Any] = {"mining": best}
     if best is not None and judgment_reader is not None:
-        out["judgment"] = judgment_reader(
-            best["n_signals"], best["params"]
-        )  # 冻结配置（含胜出格 n_g），不重选
+        # 判定窗样本量 = 冻结门模板在**判定窗**的实际信号数（v0.386 审计 recent#1）：
+        # 候选判定窗读数用该门判定窗真实信号，臂若沿用挖掘窗 n_g（挖掘熊段信号
+        # 往往多数倍）⇒ 臂分布偏窄、q95_j 偏低、C2 判定半窗过松。只用计数不碰收益。
+        n_j = (
+            judgment_counts.get(best["gate_template"], 0)
+            if judgment_counts is not None
+            else best["n_signals"]
+        )
+        out["judgment_n"] = n_j
+        out["judgment"] = (
+            judgment_reader(n_j, best["params"]) if n_j > 0 else None
+        )  # 冻结出场配置，不重选
     return out
 
 
@@ -595,6 +605,7 @@ def _run_random_arms(
     记账/缓存恒按**逻辑窗**（mining/judgment）键，形态不随布局变。"""
     rng = random.Random(args.seed)
     counts_m = {g: len(gate_sigs["mining"][g]) for g in gates}
+    counts_j = {g: len(gate_sigs["judgment"][g]) for g in gates}  # 臂判定窗 n（v0.386）
     pool_j: list[float] = []
     index_df_ref: dict[str, Any] = {"df": index_df}  # 生产路径才有
 
@@ -669,6 +680,7 @@ def _run_random_arms(
             lambda subset, params: replay("mining", "__random__", subset, params),
             args.top_n,
             judgment_reader=_judgment_reader,
+            judgment_counts=counts_j,
         )
         if arm["mining"] is None:
             return None
@@ -903,8 +915,8 @@ def _build_report(
             "score_cache_size": {w: len(c) for w, c in arms["score_caches"].items()},
             "arm_construction": "对等纪律（v0.302）+ 预算对等（v0.307）："
             "每臂完整复刻 top 的 46 门 × 5 档 max-of-230 选型（逐门 n_g "
-            "对齐抽样，0 信号门跳过），冻结（n_g, 出场配置）进判定窗，"
-            "禁每窗重新取 max",
+            "对齐抽样，0 信号门跳过），冻结出场配置进判定窗（判定窗抽样量 = 冻结门"
+            "判定窗实际信号数，v0.386），禁每窗重新取 max",
         },
         "criteria": criteria,
         "objective_version": sg.OBJECTIVE_VERSION,
