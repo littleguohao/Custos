@@ -62,8 +62,9 @@ def _false_pass_rate(clustered: bool, trials=120, n_arms=60, seed=0):
 def test_clustered_arms_calibrated_and_iid_caught():
     fp_cluster = _false_pass_rate(True)
     fp_iid = _false_pass_rate(False)
-    assert fp_cluster <= 0.12, fp_cluster  # 名义 ≤5%（置换判定线），小样本留余量
-    assert fp_iid >= 0.25, fp_iid  # 回归哨兵：逐 bar 臂在成簇世界里必假过线
+    # v0.409（审计 2 T4 整簇放置后）实测：成簇臂 7.5%（名义 ≈4.9%，120 次 SE≈2.4%）/ 逐 bar 23.3%
+    assert fp_cluster <= 0.12, fp_cluster
+    assert fp_iid >= 0.18, fp_iid  # 回归哨兵：逐 bar 臂在成簇世界里必假过线
     assert fp_iid > 2 * fp_cluster
 
 
@@ -74,7 +75,9 @@ def test_cluster_shapes_and_draw():
     assert sorted(map(tuple, shapes)) == [(0,), (0,), (0, 1, 3)]
     pool, _pc, _r = _world(1)
     got = brs.clustered_draw(pool, shapes, random.Random(3))
-    assert len(got) == len(set(got)) and 3 <= len(got) <= 5  # 无放回；边界外 bar 不取
+    assert (
+        len(got) == len(set(got)) and len(got) == 5
+    )  # 无放回；整簇放得下才收（v0.409 T4）
 
 
 def test_iid_path_unchanged():
@@ -82,3 +85,17 @@ def test_iid_path_unchanged():
     a = brs.random_entries(per_code, {}, 30, random.Random(9), pool=pool)
     b = [t for t in random.Random(9).sample(pool, 30)]
     assert [(e["code"], e["i"]) for e in a] == [(c, i) for c, i, _d in b]
+
+
+def test_long_cluster_fits_whole():
+    """T4：母体由每段 12 根连续 bar 组成时，长 8 的簇应整簇放进（不截短）。"""
+    pool = [
+        (f"{c:06d}", i, f"d{i}")
+        for c in range(10)
+        for i in list(range(0, 12)) + list(range(50, 62))
+    ]
+    got = brs.clustered_draw(pool, [list(range(8))] * 6, random.Random(0))
+    by = {}
+    for c, i, _d in got:
+        by.setdefault((c, i // 50), []).append(i)
+    assert len(got) == 48 and all(len(v) == 8 for v in by.values())

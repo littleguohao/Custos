@@ -115,3 +115,8 @@ class TestReport:
 
     def test_report_empty_ledger_exits_2(self):
         assert pp.main(["report"]) == 2
+
+
+def test_pick_before_data_window_is_no_data():
+    df = _df([10.0] * 60, start="2025-01-02")
+    assert pp.simulate_pick(df, "2020-06-01")["status"] == "no_data"

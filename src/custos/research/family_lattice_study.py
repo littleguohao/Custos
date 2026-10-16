@@ -467,6 +467,7 @@ def run_study(
         "criteria": {"C1": c1, "C2": c2, "C3": c3, "C4": c4},
         "verdict": verdict,
         "judgment_batch": judgment_blk,
+        "base_equals_live": _base_equals_live(),
         "provenance": pv.build(
             args,
             unit="R46",
@@ -475,6 +476,18 @@ def run_study(
         ),
     }
     return rep
+
+
+def _base_equals_live() -> bool:
+    """基准格（DEFAULT_TECH_WEIGHTS × 1）是否等于 live 现行权重（registry 覆盖后）——
+    False ⇒ 「基准 = live」的表述不成立，判读时须注明（审计 2 T11）。"""
+    from custos.pipeline.screening import score_candidates as sc  # noqa: PLC0415
+
+    try:
+        live = sc.resolve_tech_weights(None)
+    except Exception:  # noqa: BLE001
+        return False
+    return all(live.get(k) == v for k, v in sc.DEFAULT_TECH_WEIGHTS.items())
 
 
 def _judgment_read(args, collector, legs, gs, arms) -> dict[str, Any]:

@@ -736,6 +736,22 @@ class _LazyGatePre(dict):
     def copy(self) -> dict:  # type: ignore[override]
         return dict(self.materialize())
 
+    def pop(self, key: Any, *default: Any) -> Any:  # type: ignore[override]
+        self._ensure(key)
+        return dict.pop(self, key, *default)
+
+    def setdefault(self, key: Any, default: Any = None) -> Any:  # type: ignore[override]
+        self._ensure(key)
+        return dict.setdefault(self, key, default)
+
+    def update(self, *a: Any, **k: Any) -> None:  # type: ignore[override]
+        self.materialize()
+        dict.update(self, *a, **k)
+
+    def __delitem__(self, key: Any) -> None:
+        self._ensure(key)
+        dict.__delitem__(self, key)
+
     def __reduce__(self):  # pickle（多进程 / 缓存）按普通 dict 物化
         return (dict, (dict(self.materialize()),))
 
@@ -3349,7 +3365,7 @@ def _dual_form_scorer(scorer: Callable) -> Callable:
 #: 实测占重放耗时 ~46%。条目随 df 对象回收自动清除（weakref.finalize），指纹
 #: （长度 + 首末日期 + 末收盘）不符即重算（防原地改 df）。只服务重放（signals_in）
 #: 且未开指标盘缓存的路径；结果逐位不变（tests/test_replay_prep_memo.py 钉住）。
-_REPLAY_PREP_MEMO: dict[int, tuple[tuple, dict[tuple, Any]]] = {}
+_REPLAY_PREP_MEMO: dict[int, Any] = {}
 
 
 def _df_fingerprint(raw: pd.DataFrame) -> tuple:
@@ -3358,23 +3374,49 @@ def _df_fingerprint(raw: pd.DataFrame) -> tuple:
         return (0,)
     d = raw["date"]
     c = raw["close"]
-    return (n, str(d.iloc[0]), str(d.iloc[-1]), float(c.iloc[-1]), float(c.iloc[0]))
+    # v0.409 审计 2 T1：首末点之外再加 OHLCV 全列和——原指纹对 high/low/内部 close 的原地修改全盲
+    sums = tuple(
+        float(raw[k].to_numpy(dtype=float, na_value=0.0).sum())
+        for k in ("open", "high", "low", "close", "volume")
+        if k in raw.columns
+    )
+    return (
+        n,
+        str(d.iloc[0]),
+        str(d.iloc[-1]),
+        float(c.iloc[-1]),
+        float(c.iloc[0]),
+        sums,
+    )
 
 
 def _prepare_stock_memo(raw: pd.DataFrame, key: tuple, build: Callable[[], Any]) -> Any:
+    """备忘挂在 df 对象自身（``_custos_prep_memo`` 属性，v0.409）：prep 可能直接引用 raw
+    （已有序时不复制），挂全局 dict 会形成「全局 → prep → raw」强引用、df 永不回收；挂在
+    raw 上则是 raw ↔ prep 自环，df 不再被外部引用时随 GC 一起释放。``df.copy()`` 不带该属性。
+    ``_REPLAY_PREP_MEMO`` 只留 id → 弱引用登记（测试/诊断看命中面），不持有 prep。"""
     import weakref  # noqa: PLC0415
 
-    rid = id(raw)
     fp = _df_fingerprint(raw)
-    ent = _REPLAY_PREP_MEMO.get(rid)
+    try:
+        ent: Optional[tuple[tuple, dict[tuple, Any]]] = raw.__dict__.get(
+            "_custos_prep_memo"
+        )
+    except AttributeError:
+        return build()
     if ent is None or ent[0] != fp:
         ent = (fp, {})
+        object.__setattr__(raw, "_custos_prep_memo", ent)
+        rid = id(raw)
         if rid not in _REPLAY_PREP_MEMO:
+
+            def _drop(_r: Any, rid: int = rid) -> None:
+                _REPLAY_PREP_MEMO.pop(rid, None)
+
             try:
-                weakref.finalize(raw, _REPLAY_PREP_MEMO.pop, rid, None)
-            except TypeError:  # 不可弱引用的对象：不备忘
-                return build()
-        _REPLAY_PREP_MEMO[rid] = ent
+                _REPLAY_PREP_MEMO[rid] = weakref.ref(raw, _drop)
+            except TypeError:
+                pass
     if key not in ent[1]:
         ent[1][key] = build()
     return ent[1][key]
@@ -3402,7 +3444,17 @@ def _prepare_stock(
     """
     if raw is None or len(raw) == 0:
         return None
-    df = raw.sort_values("date").reset_index(drop=True)
+    # v0.409 审计 2 T2：已按日期升序 + 默认 RangeIndex ⇒ 直接引用原 df（不复制；下游只读，
+    # 值与 sort_values().reset_index() 逐位相同）——重放备忘常驻内存的大头是这份副本
+    if (
+        isinstance(raw.index, pd.RangeIndex)
+        and raw.index.start == 0
+        and raw.index.step == 1
+        and raw["date"].is_monotonic_increasing
+    ):
+        df = raw
+    else:
+        df = raw.sort_values("date").reset_index(drop=True)
     if weekly:
         df = _to_weekly(df)
     n = len(df)

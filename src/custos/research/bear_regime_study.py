@@ -460,6 +460,9 @@ def clustered_draw(
     used: set = set()
     out: list[tuple[Any, ...]] = []
     for shape in shapes:
+        # v0.409 审计 2 T4：整簇放得下才收（原「取到 1 根就收」⇒ 长簇被截短、臂 n 系统性偏少，
+        # 违背预算对等）；max_retry 次都放不全 ⇒ 收找到的最长部分
+        best: list = []
         for _ in range(max_retry):
             a = pool[rng.randrange(len(pool))]
             ka = key_of(a)
@@ -469,11 +472,13 @@ def clustered_draw(
                 t = index.get(k)
                 if t is not None and k not in used:
                     got.append((k, t))
-            if got:
-                for k, t in got:
-                    used.add(k)
-                    out.append(t)
+            if len(got) > len(best):
+                best = got
+            if len(got) == len(shape):
                 break
+        for k, t in best:
+            used.add(k)
+            out.append(t)
     return out
 
 
@@ -1335,14 +1340,16 @@ def _run_study_body(
         q95_j,
     )
 
+    if r45:
+        c2.setdefault("beats_no_trade", None)  # 报告字段稳定（C2 先不过时也在）
     if r45 and c2.get("ok") is not False:
-        # R45-C2：打过「不交易」——两窗组合收益 > 0（ret_over_dd 符号感知 v0.382，
-        # 符号 = 收益符号）；与「打过随机入场池」并列要求
-        rdds = [
-            ((top or {}).get(w) or {}).get("ret_over_dd")
+        # R45-C2：打过「不交易」——两窗组合总收益 > 0（v0.409 审计 2 P1-3：直接读 total_return；
+        # 原用 rdd>0 代理，零回撤时 rdd=None ⇒ 正收益零回撤的最好结局被判死）
+        rets = [
+            ((top or {}).get(w) or {}).get("total_return")
             for w in ("mining", "judgment")
         ]
-        beats = all(v is not None and v > 0 for v in rdds)
+        beats = all(v is not None and v > 0 for v in rets)
         c2["beats_no_trade"] = beats
         if not beats:
             c2["ok"] = False

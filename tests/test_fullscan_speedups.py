@@ -98,3 +98,11 @@ def test_expr_scorer_point_query_matches_slice():
     for i in (260, 400, 699):
         assert sc(None, "600000", pre, i + 1) == sc(df.iloc[: i + 1], "600000", pre)
     assert sc(None, "600000", None, 10) is None  # 无 pre 不能点查询
+
+
+def test_lazy_gate_pre_mutators_materialize():
+    df = _bars(3, n_codes=1)["600000"]
+    pre = bt._precompute_gate_series(df)
+    assert pre.pop("weekly_j") is not None  # 原 KeyError（审计 2）
+    pre2 = bt._precompute_gate_series(df)
+    assert pre2.setdefault("monthly_dif", None) is not None

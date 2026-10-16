@@ -66,18 +66,19 @@ def test_memo_bit_identical_to_cold(monkeypatch):
     assert warm == cold == warm2
 
 
-def test_memo_invalidates_on_mutation_and_gc():
-    per_code, subset = _world(1, n_codes=1)
-    df = per_code["600000"]["df"]
-    a = fes.replay_signals(per_code, subset, PARAMS[0], {}, 25.0)
-    assert id(df) in bt._REPLAY_PREP_MEMO
-    df.loc[df.index[-1], "close"] *= 1.5  # 原地改末收盘 ⇒ 指纹变 ⇒ 重算
-    b = fes.replay_signals(per_code, subset, PARAMS[0], {}, 25.0)
-    bt._REPLAY_PREP_MEMO.clear()
-    c = fes.replay_signals(per_code, subset, PARAMS[0], {}, 25.0)
-    assert b == c
-    assert a is not b
+def test_memo_invalidates_on_any_column_mutation_and_gc():
+    """T1：内部 high/low/close 原地改也必须失效（原指纹只看首末点）；df 回收即释放。"""
+    for col in ("low", "high", "close"):
+        per_code, subset = _world(1, n_codes=1)
+        df = per_code["600000"]["df"]
+        fes.replay_signals(per_code, subset, PARAMS[0], {}, 25.0)
+        df.loc[df.index[50:350], col] *= 0.5
+        warm = fes.replay_signals(per_code, subset, PARAMS[0], {}, 25.0)
+        object.__delattr__(df, "_custos_prep_memo")
+        cold = fes.replay_signals(per_code, subset, PARAMS[0], {}, 25.0)
+        assert warm == cold, col
     rid = id(df)
+    assert rid in bt._REPLAY_PREP_MEMO
     del per_code, df
     gc.collect()
     assert rid not in bt._REPLAY_PREP_MEMO

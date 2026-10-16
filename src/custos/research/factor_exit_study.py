@@ -246,6 +246,7 @@ def combine_readings(
         "n_unrealized": tsum.get("n_unrealized"),
         "n_taken": pf.get("n_taken"),
         "ret_over_dd": row["ret_over_dd"],
+        **({"total_return": pf.get("total_return")} if portfolio is not None else {}),
         "trade_set_note": "margin=全候选交易(collect_all) / rdd=topN 组合选中子集"
         "——两批交易不同（v2.1 注明在案）",
         "taken": taken,

@@ -114,6 +114,9 @@ def simulate_pick(df: Any, day: str) -> dict[str, Any]:
     if df is None or len(df) == 0:
         return {"status": "no_data"}
     dates = df["date"].astype(str).str[:10].tolist()
+    if dates[0] > day:
+        # v0.409 审计 2 T3：选股日早于数据窗首根 ⇒ 不能把「窗首开盘」当 T+1 入场
+        return {"status": "no_data", "reason": f"数据窗首根 {dates[0]} 晚于选股日"}
     e = next((k for k, d in enumerate(dates) if d > day), None)
     if e is None:
         return {"status": "pending"}  # T+1 尚无 K 线
@@ -219,13 +222,17 @@ def build_report(
     }
 
 
-def _default_loader(code: str) -> Any:
+def _make_loader(picks: list[dict[str, Any]]) -> Callable[[str], Any]:
+    """按最早选股日推算回看根数（v0.409 审计 2 T3：固定 400 根约 1.6 年后老台账必然出窗）。"""
     from custos.research import backtest_factors as bt  # noqa: PLC0415
+    from custos.research import load_window as lw  # noqa: PLC0415
 
+    first = min(str(p["date"]) for p in picks)
+    count = max(BAR_COUNT, lw.count_for_start(first, warmup_bars=60))
     # live 跟踪读近期数据：前向 holdout 豁免（同 plan_shadow_review，v0.361 先例）
     return functools.partial(
-        bt._load_one_bars, count=BAR_COUNT, start=None, end=None, allow_holdout=True
-    )(code)
+        bt._load_one_bars, count=count, start=None, end=None, allow_holdout=True
+    )
 
 
 def _fmt_pct(v: Optional[float]) -> str:
@@ -298,7 +305,7 @@ def main(argv: Optional[list[str]] = None, *, loader: Optional[Callable] = None)
     if not picks:
         print("[FAIL] 台账为空——先 `pick_practice add <代码>`", file=sys.stderr)
         return 2
-    rep = build_report(picks, loader or _default_loader, month=args.month)
+    rep = build_report(picks, loader or _make_loader(picks), month=args.month)
     _print_report(rep)
     if args.out:
         out = Path(args.out)

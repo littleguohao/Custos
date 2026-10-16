@@ -1785,20 +1785,25 @@ def _eval_lattice(
             f"expr:{expr}", gate, exit_params, start=window.start, end=window.end
         )
 
+    # v0.409 审计 2 T9：同一 expr 只跑一次（不同权重向量可编译出同一条 expr，并行时会
+    # 两个子进程并发写同一格文件）；结果按 expr 回填
+    uniq = list(dict.fromkeys(e for _k, e in todo))
     workers = 1
-    if _JOBS > 1 and len(todo) > 1:
+    if _JOBS > 1 and len(uniq) > 1:
         from custos.research.m2_stop_sweep import _cap_jobs  # noqa: PLC0415
 
-        workers = _cap_jobs(_JOBS, len(todo))
+        workers = _cap_jobs(_JOBS, len(uniq))
+    got: dict[str, Optional[dict]] = {}
     if workers <= 1:
-        for k, expr in todo:
-            rows[k]["reading"] = _one(expr)
+        for expr in uniq:
+            got[expr] = _one(expr)
     else:
         from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
 
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            for (k, _e), rd in zip(todo, ex.map(_one, [e for _k, e in todo])):
-                rows[k]["reading"] = rd
+            got = dict(zip(uniq, ex.map(_one, uniq)))
+    for k, expr in todo:
+        rows[k]["reading"] = got[expr]
     return rows
 
 
