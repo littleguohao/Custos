@@ -398,6 +398,7 @@
 | 2026-10-15 | v0.393 | **R39 判定段攒批判决（TODO #102，B 方案）**：factor_exit_study 带 --batch-id 时随机分桶臂把冻结（分桶方案, 映射）在判定段同次重读（整簇随机赋桶重抽、独立随机流不扰挖掘池），报告加 `criteria.judgment_batch`；R39 v2 节补池口径 | owner 2026-10-15 | 钉测 +2 |
 | 2026-10-15 | v0.394 | **R36 冻结配置读数（TODO #102/#105，B 方案）**：score_evolution `--frozen-read <v0-lattice 报告>` 候选 top_genome 与随机 DSL 臂 best 都不重选、只读指定窗；候选/等倍率按 `--frozen-tie-seeds`（默认 20）读、取 Δmargin 中位数；臂冻结重读成池、带 --batch-id 走 judgment_line；口径与原报告不一致拒跑；R36 v2 节写入命令与细则 | owner 2026-10-15 | 钉测 +3 |
 | 2026-10-15 | v0.395 | **R43 判定段读数模式（TODO #102 收口，B 方案）**：regime_style_study 新增 `--judgment-read 方向:维度:±`（含 sector 指数），读 2017~2021 判定段、过批次门、登记台账；统计量=符号化同向段价差 t，池=同次判定段伪段同维度符号化 t（不取族 max），走 judgment_line；挖掘模式拒批次参数；R43 判据补口径 | owner 2026-10-15 | 钉测 +4 |
+| 2026-10-16 | v0.396 | **0AMV 区间回放阈值统一严格不等号**：`backtest_0amv_bear_regime` 由 <=/>= 改 < -2.3 / > +4（同 live amv_state 与研究引擎；只在读数恰为 −2.30/4.00 的日子有差）；TODO #82 并入 #109 闭环 | owner 2026-10-16 | 测试改写 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

@@ -5,10 +5,10 @@
 整个持仓收益会如何（对比实际成交）。
 
 区间定义（用户钦定）：
-- 空头区间：某交易日 amv_change_pct <= -2.3 当日**进入**（含当日），
-  直到某交易日 amv_change_pct >= +4 的前一日结束。
-- 多头区间：amv_change_pct >= +4 当日进入（含当日），
-  直到下一个 <= -2.3 的前一日结束。
+- 空头区间：某交易日 amv_change_pct < -2.3 当日**进入**（含当日），
+  直到某交易日 amv_change_pct > +4 的前一日结束（严格不等号同 live，v0.396）。
+- 多头区间：amv_change_pct > +4 当日进入（含当日），
+  直到下一个 < -2.3 的前一日结束。
 - 首次触发之前为 neutral（正常交易）。
 
 三个场景：
@@ -59,8 +59,8 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from custos.core.paths import ARTIFACT_LOGS, TRADES_DIR, cn_now  # noqa: E402
 
-BEAR_THRESHOLD = -2.3  # amv_change_pct <= 此值当日进入空头
-BULL_THRESHOLD = 4.0  # amv_change_pct >= 此值当日进入多头
+BEAR_THRESHOLD = -2.3  # amv_change_pct < 此值当日进入空头（严格，同 live）
+BULL_THRESHOLD = 4.0  # amv_change_pct > 此值当日进入多头（严格，同 live）
 REBOUND_SELL_PCT = 0.20  # 反弹日减仓比例
 
 LEDGER_PATH = TRADES_DIR / "master_trade_ledger.csv"
@@ -109,9 +109,11 @@ def build_regime_map(records: list[dict]) -> dict[str, str]:
     for rec in records:
         cp = rec.get("change_pct")
         if cp is not None:
-            if cp <= BEAR_THRESHOLD:
+            # 严格不等号，与 live amv_state / 引擎 _amv_regime_from_records 同口径
+            # （v0.396 owner 2026-10-16 拍板统一；原 <= / >= 在恰为 −2.30 / 4.00 的日子分叉）
+            if cp < BEAR_THRESHOLD:
                 state = "bear"
-            elif cp >= BULL_THRESHOLD:
+            elif cp > BULL_THRESHOLD:
                 state = "bull"
         regime[rec["date"]] = state
     return regime
