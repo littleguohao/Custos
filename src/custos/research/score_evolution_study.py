@@ -1803,7 +1803,10 @@ def _eval_lattice(
         with ThreadPoolExecutor(max_workers=workers) as ex:
             got = dict(zip(uniq, ex.map(_one, uniq)))
     for k, expr in todo:
-        rows[k]["reading"] = got[expr]
+        rd = got[expr]
+        rows[k]["reading"] = (
+            dict(rd) if isinstance(rd, dict) else rd
+        )  # 不共享别名（审计 3 C-8）
     return rows
 
 

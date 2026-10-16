@@ -90,7 +90,7 @@ uv run python -m custos.research family_lattice_study --mining-a-start <SEG_A_ST
 | R45 | `bear_regime_study --r45 --tag r45_v2_j` |
 | R46 | `family_lattice_study --mining-a-start <SEG_A_START> --out artifacts/logs/family_lattice/r46_j.json` |
 
-贴回：每个候选的 `<tool>:<hash>`。`--tag/--out-dir/--timeout/--jobs/count` 不进哈希，可改；其余参数一个都不能动。
+贴回：每个候选的 `<tool>:<hash>`。`--tag/--out-dir/--jobs/count` 不进哈希，可改；其余参数（含 `--timeout`）一个都不能动。
 
 ## 步骤 4 · 开批（截止日当天，owner 发令）
 

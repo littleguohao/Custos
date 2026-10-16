@@ -3376,10 +3376,10 @@ def _df_fingerprint(raw: pd.DataFrame) -> tuple:
     c = raw["close"]
     # v0.409 审计 2 T1：首末点之外再加 OHLCV 全列和——原指纹对 high/low/内部 close 的原地修改全盲
     sums = tuple(
-        float(raw[k].to_numpy(dtype=float, na_value=0.0).sum())
+        float(pd.to_numeric(raw[k], errors="coerce").fillna(0.0).to_numpy().sum())
         for k in ("open", "high", "low", "close", "volume")
         if k in raw.columns
-    )
+    )  # 非数值列 coerce 为 NaN→0（审计 3 C-5：原 dtype=float 遇字符串 volume 抛错）
     return (
         n,
         str(d.iloc[0]),
@@ -4701,6 +4701,8 @@ def simulate_portfolio_topn(
         "selected_expectancy": sel_exp,
         "risk_pct": risk_pct,
         "max_concurrent": max_concurrent,
+        "max_pos_frac": max_pos_frac,
+        "max_gross": max_gross,
         "n_no_risk": n_no_risk,
         "tie_seed": tie_seed,
     }

@@ -600,9 +600,18 @@ def run_study(
     def _arm(i: int) -> Optional[float]:
         arm_rng = random.Random(f"{args.seed}-arm{i}")  # 臂级种子写死可复现
         arm_trades: list[dict] = []
+        # 锚点模式（R44 冻结档读数，v0.411 审计 3 B-2）：每臂一个固定宽度 x~U[5,20] 同锚点——
+        # 与候选「一个固定宽度」同构（逐信号抽会把宽度系统效应平均掉）；R41 lookback 模式
+        # 保持预注册原口径（候选本身就是逐信号不同的计划止损，逐信号随机止损价对等）
+        x_arm = arm_rng.uniform(*C4_WIDTH_RANGE) if anchor_mode else None
         for g in mining_groups:
             arm_recs = [
-                _sig_with_stop(r, r["entry_close"] * arm_rng.uniform(lo, hi))
+                _sig_with_stop(
+                    r,
+                    r["anchor_low"] * (1.0 - x_arm / 100.0)
+                    if x_arm is not None
+                    else r["entry_close"] * arm_rng.uniform(lo, hi),
+                )
                 for r in g["subset"]
             ]
             if not arm_recs:
@@ -673,7 +682,19 @@ def run_study(
             arm_trades: list[dict] = []
             for g in j_groups:
                 arm_recs = [
-                    _sig_with_stop(r, r["anchor_low"] * (1.0 - x_j / 100.0))
+                    _sig_with_stop(
+                        r,
+                        r["anchor_low"]
+                        * (
+                            1.0
+                            - (
+                                arm_rng.uniform(lo_w, hi_w)
+                                if C4_WIDTH_PER_SIGNAL
+                                else x_j
+                            )
+                            / 100.0
+                        ),
+                    )
                     for r in g["subset"]
                 ]
                 if not arm_recs:
@@ -845,9 +866,9 @@ def run_study(
             "单独终步只能杀，C2~C4 全过才启动（owner 拍板发令）",
             **(
                 {
-                    "anchor_note": "signal_low 锚点模式（R44，v0.379）：本报告的 C4 "
-                    "随机臂仍是 R41 口径（entry×U[0.85,0.99]），与锚点宽度语义不同——"
-                    "冻结档的判定以 --scan-widths 的 C4 + 攒批判定线为准",
+                    "anchor_note": "signal_low 锚点模式（R44）：本报告挖掘段 C4 随机臂 = 每臂一个"
+                    "固定宽度 x~U[5,20] 同锚点（v0.411；不再是 R41 的 entry×U[0.85,0.99]）；"
+                    "冻结档入批判定以 --scan-widths 的 C4 + 攒批判定线为准",
                     "judgment_batch": judgment_batch_blk,
                 }
                 if anchor_mode

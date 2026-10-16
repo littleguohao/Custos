@@ -1184,6 +1184,7 @@ def _realized_view(s: dict) -> dict:
     stat_keys = (
         "win_rate", "expectancy", "expectancy_R", "total_R", "payoff_ratio",
         "avg_win", "avg_loss", "avg_holding", "exit_reasons",
+        "median_return", "median_R", "avg_win_R", "avg_loss_R",
     )  # fmt: skip
     return {**s, **{k: None for k in stat_keys}, **real, "_realized": True}
 

@@ -487,7 +487,9 @@ def _base_equals_live() -> bool:
         live = sc.resolve_tech_weights(None)
     except Exception:  # noqa: BLE001
         return False
-    return all(live.get(k) == v for k, v in sc.DEFAULT_TECH_WEIGHTS.items())
+    return dict(live) == dict(
+        sc.DEFAULT_TECH_WEIGHTS
+    )  # 双向（审计 3 C-4：live 多键也算漂移）
 
 
 def _judgment_read(args, collector, legs, gs, arms) -> dict[str, Any]:

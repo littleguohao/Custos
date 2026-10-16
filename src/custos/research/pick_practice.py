@@ -228,7 +228,12 @@ def _make_loader(picks: list[dict[str, Any]]) -> Callable[[str], Any]:
     from custos.research import load_window as lw  # noqa: PLC0415
 
     first = min(str(p["date"]) for p in picks)
-    count = max(BAR_COUNT, lw.count_for_start(first, warmup_bars=60))
+    try:
+        count = max(BAR_COUNT, lw.count_for_start(first, warmup_bars=60))
+    except (
+        ValueError
+    ):  # 最早选股日 = 今天（当天 add 当天 report）⇒ 无历史可推，用缺省根数
+        count = BAR_COUNT
     # live 跟踪读近期数据：前向 holdout 豁免（同 plan_shadow_review，v0.361 先例）
     return functools.partial(
         bt._load_one_bars, count=count, start=None, end=None, allow_holdout=True

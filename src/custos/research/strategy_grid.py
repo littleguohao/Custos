@@ -602,8 +602,8 @@ def load_cell_selected_row(
     （fail-closed，不回落全池）。出场网格排名仍用 :func:`load_cell_row`（全池是出场规则读数）。"""
     from custos.research import backtest_factors as bt  # noqa: PLC0415
 
-    row = load_cell_row(cell, path, reused)
-    raw = _load(path)
+    raw = _load(path)  # 只读一次（审计 3 C-3：m2 有 OOM 前科）
+    row = _cell_row_from(cell, path, raw, reused)
     trades = raw.get("_trades") or []
     pf = raw.get("_portfolio") or {}
     stat = (
@@ -615,23 +615,36 @@ def load_cell_selected_row(
         "margin",
         "breakeven_wr",
     )
-    if pf.get("mode") != "topn" or not trades or not all("score" in t for t in trades):
-        return {
-            **row,
-            **{k: None for k in stat},
-            "reading_basis": "selected_unavailable",
-        }
+    unavailable = {
+        **row,
+        **{k: None for k in stat},
+        "reading_basis": "selected_unavailable",
+    }
+    if (
+        pf.get("mode") != "topn"
+        or not trades
+        or not all("score" in t for t in trades)
+        or any(k not in pf for k in ("top_n", "risk_pct", "max_concurrent"))
+    ):
+        return unavailable
+    # v0.411 前的格子产物不含 max_pos_frac：网格从不传 --max-pos ⇒ 必为 CLI 缺省 20%；
+    # 读数行显式标注 max_pos_frac_assumed（审计 3 C-1：不静默）
+    mpf_assumed = "max_pos_frac" not in pf
     taken: list[dict[str, Any]] = []
     bt.simulate_portfolio_topn(
         trades,
         top_n=int(pf.get("top_n") or 0),
-        risk_pct=float(pf.get("risk_pct", 0.01)),
-        max_concurrent=int(pf.get("max_concurrent", 5)),
+        risk_pct=float(pf["risk_pct"]),
+        max_concurrent=int(pf["max_concurrent"]),
         max_pos_frac=float(pf.get("max_pos_frac", 0.20)),
+        max_gross=float(pf.get("max_gross", 1.0)),
         taken_out=taken,
         tie_seed=int(pf.get("tie_seed", 0) or 0),
     )
-    s = bt.summarize_realized(taken)
+    try:
+        s = bt.summarize_realized(taken)
+    except (KeyError, TypeError):  # 旧产物逐笔字段不全（同 m2._realized_view 降级口径）
+        return unavailable
     return {
         **row,
         "n": s.get("n"),
@@ -642,6 +655,7 @@ def load_cell_selected_row(
         "breakeven_wr": _breakeven_wr(s.get("payoff_ratio")),
         "margin": _margin({"win": s.get("win_rate"), "payoff": s.get("payoff_ratio")}),
         "reading_basis": "selected_topn",
+        "max_pos_frac_assumed": mpf_assumed,
     }
 
 
@@ -649,7 +663,13 @@ def load_cell_row(
     cell: dict[str, Any], path: pathlib.Path, reused: bool
 ) -> dict[str, Any]:
     """读一个格子的结果文件，组装排名行（键名固定，测试钉住）。"""
-    s = _realized_view(_load(path))  # margin 等 = 已实现口径（v0.383）
+    return _cell_row_from(cell, path, _load(path), reused)
+
+
+def _cell_row_from(
+    cell: dict[str, Any], path: pathlib.Path, loaded: dict[str, Any], reused: bool
+) -> dict[str, Any]:
+    s = _realized_view(loaded)  # margin 等 = 已实现口径（v0.383）
     pf = s.get("_portfolio") or {}
     return {
         "scorer": cell["scorer"],
