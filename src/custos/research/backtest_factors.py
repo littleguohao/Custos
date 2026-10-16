@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import bisect
 import json
 import random
 import statistics
@@ -3264,6 +3265,43 @@ def _dual_form_scorer(scorer: Callable) -> Callable:
     return lambda df_slice, code, _pre=None: scorer(df_slice, code)  # 两参 scorer
 
 
+#: 重放路径逐股 prep 备忘（v0.401 性能）：{id(df): (指纹, {参数键: prep})}。
+#: 随机臂 / 格子枚举 / C3 扰动对**同一个 df 对象**重放成千上万次，而 prep（排序副本、
+#: BBI、可成交性、中大阳线、OHLC、日期串）只依赖 df 与少数参数——此前每次重算，合成
+#: 实测占重放耗时 ~46%。条目随 df 对象回收自动清除（weakref.finalize），指纹
+#: （长度 + 首末日期 + 末收盘）不符即重算（防原地改 df）。只服务重放（signals_in）
+#: 且未开指标盘缓存的路径；结果逐位不变（tests/test_replay_prep_memo.py 钉住）。
+_REPLAY_PREP_MEMO: dict[int, tuple[tuple, dict[tuple, Any]]] = {}
+
+
+def _df_fingerprint(raw: pd.DataFrame) -> tuple:
+    n = len(raw)
+    if n == 0:
+        return (0,)
+    d = raw["date"]
+    c = raw["close"]
+    return (n, str(d.iloc[0]), str(d.iloc[-1]), float(c.iloc[-1]), float(c.iloc[0]))
+
+
+def _prepare_stock_memo(raw: pd.DataFrame, key: tuple, build: Callable[[], Any]) -> Any:
+    import weakref  # noqa: PLC0415
+
+    rid = id(raw)
+    fp = _df_fingerprint(raw)
+    ent = _REPLAY_PREP_MEMO.get(rid)
+    if ent is None or ent[0] != fp:
+        ent = (fp, {})
+        if rid not in _REPLAY_PREP_MEMO:
+            try:
+                weakref.finalize(raw, _REPLAY_PREP_MEMO.pop, rid, None)
+            except TypeError:  # 不可弱引用的对象：不备忘
+                return build()
+        _REPLAY_PREP_MEMO[rid] = ent
+    if key not in ent[1]:
+        ent[1][key] = build()
+    return ent[1][key]
+
+
 def _prepare_stock(
     raw: pd.DataFrame,
     weekly: bool,
@@ -3586,7 +3624,16 @@ def _trades_from_signals(
     trades: list[dict[str, Any]] = []
     emitted = 0
     i = min_bars
+    # v0.401 性能：step=1 时空 bar 只是 i+=1 ⇒ 直接跳到下一条信号的 bar（bisect），
+    # 不再逐 bar 空转（每票 ~25 信号 / 1500 bar 时是循环本体的大头）；step>1 有相位语义，
+    # 维持逐步扫描。两条路径访问的信号序列逐位一致。
+    sig_keys = sorted(by_i) if max(1, step) == 1 else None
     while i < n - 1:
+        if sig_keys is not None:
+            k = bisect.bisect_left(sig_keys, i)
+            if k >= len(sig_keys) or sig_keys[k] >= n - 1:
+                break
+            i = sig_keys[k]
         cand = by_i.get(i)
         if cand is None:
             i += max(1, step)
@@ -3598,13 +3645,22 @@ def _trades_from_signals(
                 f"{code} bar {i}: 信号文件日期 {cand.get('date')}"
                 f" != 现数据日期 {dates[i]}"
             )
-        slice_df = df.iloc[: i + 1]
+        # v0.401 性能：切片只在被消费时构造（平台止损 / 特征面板）——重放热循环里
+        # 每信号一次 df.iloc 切片是 profile 第二大头（合成实测 ~16%），结果逐位不变。
+        need_slice = feature_panel or (
+            "stop_override" not in cand and sim_kw["stop_mode"] == "platform"
+        )
+        slice_df = df.iloc[: i + 1] if need_slice else None
         # R41：信号显式携带止损位（stop_loss_ref as-of 重算）优先；缺省走
         # 原逻辑（平台高止损）——exit_campaign/R39/R40 信号无此键，逐位不变。
         stop_ov = (
             cand["stop_override"]
             if "stop_override" in cand
-            else _platform_stop_override(slice_df, stop_mode=sim_kw["stop_mode"])
+            else (
+                _platform_stop_override(slice_df, stop_mode=sim_kw["stop_mode"])
+                if slice_df is not None
+                else None
+            )
         )
         tr = simulate_b1_trade(
             df,
@@ -3623,7 +3679,7 @@ def _trades_from_signals(
         rec = _trade_record(
             tr, ret_net, code, cand["date"], dates, i, cand.get("score")
         )
-        if feature_panel:
+        if feature_panel and slice_df is not None:
             rec["features"] = _feature_panel(slice_df)
         trades.append(rec)
         emitted += 1
@@ -3851,19 +3907,38 @@ def evaluate_trades(
         # 大头却零消费。传 None 走 _prepare_stock 既有的「不算」分支，
         # 重放产出的 trades 由 tests/test_signals_replay.py 逐位钉住。
         replay_only = signals_in is not None
-        prep = _prepare_stock(
-            raw,
-            weekly,
-            min_bars,
-            code,
-            tradability,
-            scale_out_frac,
-            stop_buffer,
-            None if replay_only else entry_gate,
-            scorer=None if replay_only else scorer,
-            qsx_exit_consec=qsx_exit_consec,
-            indicator_cache=indicator_cache,
-        )
+
+        def _build(raw=raw, code=code, replay_only=replay_only):
+            return _prepare_stock(
+                raw,
+                weekly,
+                min_bars,
+                code,
+                tradability,
+                scale_out_frac,
+                stop_buffer,
+                None if replay_only else entry_gate,
+                scorer=None if replay_only else scorer,
+                qsx_exit_consec=qsx_exit_consec,
+                indicator_cache=indicator_cache,
+            )
+
+        if replay_only and indicator_cache is None and raw is not None:
+            prep = _prepare_stock_memo(
+                raw,
+                (
+                    weekly,
+                    min_bars,
+                    code,
+                    tradability,
+                    scale_out_frac > 0,
+                    stop_buffer == "atr",
+                    qsx_exit_consec > 0,
+                ),
+                _build,
+            )
+        else:
+            prep = _build()
         if prep is None:
             continue
         df = prep["df"]
