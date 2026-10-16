@@ -64,7 +64,10 @@ class RegimeMapTests(unittest.TestCase):
     def test_exact_thresholds_and_neutral_before_first_trigger(self):
         records = _amv(
             [
-                ("2024-01-01", -2.30),  # 恰等于 -2.3：不越线（严格，同 live），仍 neutral
+                (
+                    "2024-01-01",
+                    -2.30,
+                ),  # 恰等于 -2.3：不越线（严格，同 live），仍 neutral
                 ("2024-01-02", -2.31),
                 ("2024-01-03", 4.00),  # 恰等于 +4：不越线，延续空头
                 ("2024-01-04", 4.01),

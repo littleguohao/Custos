@@ -203,6 +203,7 @@ def combine_readings(
     trades: list[dict],
     top_n: int,
     ref: dict[str, Any] | str | None = None,
+    portfolio: Optional[dict[str, Any]] = None,
 ) -> Optional[dict]:
     """交易集 → 读数块（与 exit_campaign 评估器同形状 + taken 供 C1 桶级计数）。
 
@@ -221,7 +222,7 @@ def combine_readings(
     tsum = bt.summarize_realized(trades)  # margin 等 = 已实现口径（v0.383）
     taken: list[dict] = []
     pf = bt.simulate_portfolio_topn(
-        trades, top_n=top_n, taken_out=taken, **V0_PORTFOLIO
+        trades, top_n=top_n, taken_out=taken, **(portfolio or V0_PORTFOLIO)
     )
     row = {
         "margin": sg._margin(

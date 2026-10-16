@@ -86,6 +86,102 @@ _R11_R14_NOTE = (
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# R45 模式（v0.397，TODO #103）：空头区间 J<13 单门 × 总敞口 ≤30% × 4×4 出场网格
+# ---------------------------------------------------------------------------
+
+#: 止损宽度（信号日最低价 ×(1−x%)，同 R44 锚点）
+R45_STOPS: tuple[float, ...] = (5.0, 8.0, 12.0, 15.0)
+#: 止盈 / 清仓方案（stop_trigger=close；BBI 两连破为引擎缺省，T2 也保留）
+R45_TPS: dict[str, dict[str, Any]] = {
+    "T1": {"scale_out_frac": 0.5, "bbi_exit_consec": 2},  # 现行：两阳分批 + BBI 清仓
+    "T2": {"trail_pct": 0.08, "bbi_exit_consec": 2},  # trail 8%（无分批）
+    "T3": {"cost_zone_bars": 3, "bbi_exit_consec": 2},  # 成本区不涨就拍（cz3）
+    "T4": {"time_stop_bars": 10, "bbi_exit_consec": 2},  # 时间止损 10 日
+}
+R45_EXIT_GRID: list[dict[str, Any]] = [
+    {
+        "name": f"x{x:g}_{t}",
+        "params": {**tp, "stop_trigger": "close", "_anchor_x": x},
+        "stop_x": x,
+        "tp": t,
+    }
+    for x in R45_STOPS
+    for t, tp in R45_TPS.items()
+]
+#: rdd 相对门参照格（事先固定、不经挑选：现行止盈 × 8% 中间档）
+R45_REF = "x8_T1"
+#: 总敞口 ≤30%：同时 ≤3 只 × 单仓名义 ≤10%，单笔风险 1%
+R45_PORTFOLIO: dict[str, Any] = {
+    "risk_pct": 0.01,
+    "max_concurrent": 3,
+    "max_pos_frac": 0.10,
+}
+
+#: 模块级口径（run_study 在 R45 模式下切换，finally 复位——R40 默认值逐位不变）
+_REF_NAME = "pct5_trail08"
+_PORTFOLIO: Optional[dict[str, Any]] = None
+
+
+def _combine(trades: list[dict], top_n: int, ref: Any = None) -> Optional[dict]:
+    """读数单源：R40 = V0 组合口径；R45 = 30% 敞口上限口径（_PORTFOLIO）。"""
+    return fes.combine_readings(trades, top_n, ref=ref, portfolio=_PORTFOLIO)
+
+
+def _anchor_subset(view: dict[str, dict], subset: list[dict], x: float) -> list[dict]:
+    """信号级止损 = 信号日最低价 ×(1−x%)（stop_override 钩子，同 R41/R44）；
+    df 缺失 / 越界 / 止损 ≥ 入场收盘的信号剔除（两侧同口径，不静默回退）。"""
+    out = []
+    for r in subset:
+        df = (view.get(r["code"]) or {}).get("df")
+        i = r.get("i")
+        if df is None or i is None or not (0 <= int(i) < len(df)):
+            continue
+        low = float(df["low"].iloc[int(i)])
+        close = float(df["close"].iloc[int(i)])
+        stop = low * (1.0 - x / 100.0)
+        if not (stop < close):
+            continue
+        out.append({**r, "sig": {**r["sig"], "stop_override": stop}})
+    return out
+
+
+def judge_c3_r45(configs: list[dict], top: Optional[dict]) -> dict[str, Any]:
+    """R45-C3（预注册写死）：①top 的止损邻档（同止盈、相邻 x，端点单侧）两窗
+    margin 均 >0；②两窗各自最优格（过门）的止盈方案与 top 相同。"""
+    if top is None:
+        return {"ok": None, "reason": "无 top"}
+    by = {c["exit"]: c for c in configs}
+    tp = top["exit"].split("_", 1)[1]
+    xi = R45_STOPS.index(float(top["exit"].split("_", 1)[0][1:]))
+    nbrs = [
+        f"x{R45_STOPS[j]:g}_{tp}" for j in (xi - 1, xi + 1) if 0 <= j < len(R45_STOPS)
+    ]
+    smooth = all(
+        (by.get(n, {}).get(w) or {}).get("margin") is not None
+        and by[n][w]["margin"] > 0
+        for n in nbrs
+        for w in ("mining", "judgment")
+    )
+    best_tp: dict[str, Optional[str]] = {}
+    for w in ("mining", "judgment"):
+        ok = [c for c in configs if c.get(w) and c[w].get("objective") is not None]
+        best_tp[w] = (
+            max(ok, key=lambda c: c[w]["margin"])["exit"].split("_", 1)[1]
+            if ok
+            else None
+        )
+    consistent = all(v == tp for v in best_tp.values())
+    return {
+        "ok": bool(smooth and consistent),
+        "neighbors": nbrs,
+        "neighbors_positive": smooth,
+        "best_tp_by_window": best_tp,
+        "tp_consistent": consistent,
+        "rule": "止损邻档两窗 margin>0 且两窗各自最优格止盈方案与 top 相同（R45 预注册）",
+    }
+
+
 def invert_regime_bearish(regime: dict[str, str]) -> dict[str, str]:
     """空头区间放行适配：「空头」→「做多」、其余（做多/中性）→「空头」。
 
@@ -358,14 +454,14 @@ def run_arm(
         entries = draw_entries(n_g, "mining")
         ref_rd: Optional[dict] = None
         for e in exits:
-            if e["name"] == "pct5_trail08":
-                ref_rd = fes.combine_readings(
+            if e["name"] == _REF_NAME:
+                ref_rd = _combine(
                     replay_mining(entries, e["params"]), top_n, ref="self"
                 )
                 break
         for e in exits:
             trades = replay_mining(entries, e["params"])
-            rd = fes.combine_readings(trades, top_n, ref=ref_rd)
+            rd = _combine(trades, top_n, ref=ref_rd)
             if rd and rd["objective"] is not None and rd["margin"] is not None:
                 if (
                     best is None or rd["margin"] > best["readings"]["margin"]
@@ -562,20 +658,20 @@ def _enumerate_grid(
     """46 门 × 5 档 × 双窗全枚举：参照档 pct5_trail08 每（门,窗）先算存 refs
     （自参照），其余档重放缓存 per（门, 档, 窗）。"""
     configs: list[dict] = []
-    ref_trail = next(e["params"] for e in exits if e["name"] == "pct5_trail08")
+    ref_trail = next(e["params"] for e in exits if e["name"] == _REF_NAME)
     refs: dict[tuple[str, str], Optional[dict]] = {}
     for g in gates:
         for w in windows:
             trades = replay(w, g, gate_sigs[w][g], ref_trail)
-            refs[(g, w)] = fes.combine_readings(trades, top_n, ref="self")
+            refs[(g, w)] = _combine(trades, top_n, ref="self")
         for e in exits:
             row: dict[str, Any] = {"gate": g, "exit": e["name"]}
             for w in windows:
-                if e["name"] == "pct5_trail08":
+                if e["name"] == _REF_NAME:
                     rd = refs[(g, w)]  # 参照档本体=自参照读数（复用不重复重放）
                 else:
                     trades = replay(w, g, gate_sigs[w][g], e["params"])
-                    rd = fes.combine_readings(trades, top_n, ref=refs[(g, w)])
+                    rd = _combine(trades, top_n, ref=refs[(g, w)])
                 if rd is not None:
                     rd.pop("taken", None)  # 报告不落交易明细
                 row[w] = rd
@@ -665,13 +761,13 @@ def _run_random_arms(
             （随机入场无门信号可携带——对等的是「臂冻结配置 vs top 冻结配置」，
             入场随机性两臂同分布）。v2.1 参照 = 同批判定入场 × trail08。"""
             entries_j = _rand_entries(n_g, "judgment")
-            ref_j = fes.combine_readings(
+            ref_j = _combine(
                 replay("judgment", "__random__", entries_j, ref_trail),
                 args.top_n,
                 ref="self",
             )
             trades = replay("judgment", "__random__", entries_j, frozen_params)
-            return fes.combine_readings(trades, args.top_n, ref=ref_j)
+            return _combine(trades, args.top_n, ref=ref_j)
 
         arm = run_arm(
             counts_m,
@@ -747,7 +843,7 @@ def _judge_c3(
         if top is not None:
             for draw_i in range(C3_DRAWS):
                 params_p, moved = perturb_exit_params(dict(top_params or {}), rng)
-                rd_m = fes.combine_readings(
+                rd_m = _combine(
                     replay(
                         "mining",
                         top["gate"],
@@ -757,7 +853,7 @@ def _judge_c3(
                     top_n,
                     ref=refs[(top["gate"], "mining")],  # v2.1 同参照口径对称
                 )
-                rd_j = fes.combine_readings(
+                rd_j = _combine(
                     replay(
                         "judgment",
                         top["gate"],
@@ -982,8 +1078,49 @@ def run_study(
         judgment_span=windows["judgment"],
         tool="bear_regime_study",
     )
-    gates = _resolve_gates(args)
-    exits = sg.DEFAULT_EXIT_GRID
+    r45 = bool(getattr(args, "r45", False))
+    gates = ["j_low"] if r45 else _resolve_gates(args)
+    exits = R45_EXIT_GRID if r45 else sg.DEFAULT_EXIT_GRID
+    global _REF_NAME, _PORTFOLIO
+    _prev = (_REF_NAME, _PORTFOLIO)
+    if r45:
+        _REF_NAME, _PORTFOLIO = R45_REF, R45_PORTFOLIO
+    try:
+        return _run_study_body(
+            args,
+            warm_fn,
+            replay_fn,
+            random_entry_fn,
+            injected,
+            sg,
+            seg_windows,
+            mining_segs,
+            is_v2,
+            windows,
+            gates,
+            exits,
+            r45,
+        )
+    finally:
+        _REF_NAME, _PORTFOLIO = _prev
+
+
+def _run_study_body(
+    args: Any,
+    warm_fn: Any,
+    replay_fn: Any,
+    random_entry_fn: Any,
+    injected: bool,
+    sg: Any,
+    seg_windows: dict[str, tuple[str, str]],
+    mining_segs: list[str],
+    is_v2: bool,
+    windows: dict[str, tuple[str, str]],
+    gates: list[str],
+    exits: list[dict],
+    r45: bool,
+) -> dict[str, Any]:
+    """run_study 主体（v0.397 拆出：R45 模式的模块级口径在外层 try/finally 复位）。"""
     regime_bear, index_df, warm_fn = _resolve_warm(
         args, gates, warm_fn, regime_since=min(se[0] for se in seg_windows.values())
     )
@@ -1035,6 +1172,9 @@ def run_study(
     def _replay(w: str, g: str, subset: list[dict], params: dict[str, Any]):
         if replay_fn is not None:
             return replay_fn(subset, params)
+        anchor_x = params.get("_anchor_x")
+        if anchor_x is not None:  # R45：信号日最低价锚定止损（逐信号 stop_override）
+            params = {k: v for k, v in params.items() if k != "_anchor_x"}
         segs = mining_segs if w == "mining" else ["judgment"]
         if len(segs) == 1:
             seg = segs[0]
@@ -1042,7 +1182,12 @@ def run_study(
                 view = _entry_view(per_code[seg], subset)  # 随机入场集专用视图
             else:
                 view = _gate_view(per_code[seg], g)
-            return fes.replay_signals(view, subset, params, regime_bear, args.cost_bps)
+            sub = (
+                _anchor_subset(view, subset, anchor_x)
+                if anchor_x is not None
+                else subset
+            )
+            return fes.replay_signals(view, sub, params, regime_bear, args.cost_bps)
         # v2 合并挖掘池：按 ``_seg`` 拆回各段 df 重放后合并交易集
         trades: list[dict] = []
         for seg in segs:
@@ -1053,6 +1198,8 @@ def run_study(
                 view = _entry_view(per_code[seg], seg_subset)  # 随机入场集专用视图
             else:
                 view = _gate_view(per_code[seg], g)
+            if anchor_x is not None:
+                seg_subset = _anchor_subset(view, seg_subset, anchor_x)
             trades.extend(
                 fes.replay_signals(view, seg_subset, params, regime_bear, args.cost_bps)
             )
@@ -1099,21 +1246,36 @@ def run_study(
         q95_j,
     )
 
+    if r45 and c2.get("ok") is not False:
+        # R45-C2：打过「不交易」——两窗组合收益 > 0（ret_over_dd 符号感知 v0.382，
+        # 符号 = 收益符号）；与「打过随机入场池」并列要求
+        rdds = [
+            ((top or {}).get(w) or {}).get("ret_over_dd")
+            for w in ("mining", "judgment")
+        ]
+        beats = all(v is not None and v > 0 for v in rdds)
+        c2["beats_no_trade"] = beats
+        if not beats:
+            c2["ok"] = False
     top_params = next(
         (e["params"] for e in exits if top and e["name"] == top["exit"]), None
     )
     # ── C3：top 出场参数 ±50%×4 零翻转（池固定不重估）；top 出场无可扰
     # 参数轴（base_low params={}）⇒ not_applicable 不空转（v0.307）──
-    c3 = _judge_c3(
-        top,
-        top_params,
-        gate_sigs,
-        _replay,
-        refs,
-        args.top_n,
-        q95_m,
-        q95_j,
-        rng,
+    c3 = (
+        judge_c3_r45(configs, top)
+        if r45
+        else _judge_c3(
+            top,
+            top_params,
+            gate_sigs,
+            _replay,
+            refs,
+            args.top_n,
+            q95_m,
+            q95_j,
+            rng,
+        )
     )
     # C4 状态机 = criteria_kit 单源（v0.322：空池 indeterminate / 池未满
     # provisional / top 挖掘窗 margin > q95 confirmed_pass）
@@ -1137,6 +1299,20 @@ def run_study(
         "C2": c2,
         "C3": c3,
         "C4": c4,
+        **(
+            {
+                "r45": {
+                    "unit": "R45",
+                    "exit_grid": [e["name"] for e in exits],
+                    "ref_cell": R45_REF,
+                    "portfolio": R45_PORTFOLIO,
+                    "note": "R45 模式（v0.397）：j_low 单门 × 4 止损（信号日低点锚定）× 4 止盈；"
+                    "C2 另须两窗组合收益>0（打过不交易）；C3=止损邻档平滑+最优止盈一致",
+                }
+            }
+            if r45
+            else {}
+        ),
         "rule_note": "R40-C1~C4 跑数前写死（v0.301/v0.302/v0.307 修订在案——"
         "v0.307：随机臂预算对等 max-of-230 镜像；C3 无可扰参数轴="
         "not_applicable 不空转不放行）；"
@@ -1199,6 +1375,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--gates", default="all", help="逗号分隔门名（默认 all=全量 46 门 ENTRY_GATES）"
     )
     ap.add_argument("--n-random", type=int, default=DEFAULT_N_RANDOM, help="随机臂数")
+    ap.add_argument(
+        "--r45",
+        action="store_true",
+        help="R45 模式（v0.397）：j_low 单门 × 4 止损（信号日最低价×(1−x%%)，x∈5/8/12/15）"
+        "× 4 止盈（现行/trail8/cz3/时间止损10）；总敞口 ≤30%%（并发 3 × 单仓 10%%）；"
+        "参照格 x8_T1；C2 另须两窗组合收益>0（打过不交易）；忽略 --gates",
+    )
     ap.add_argument("--c4-min-pool", type=int, default=C4_MIN_POOL, help="C4 最小池")
     ap.add_argument("--seed", type=int, default=20261008, help="全局种子（C3/C4 派生）")
     ap.add_argument(

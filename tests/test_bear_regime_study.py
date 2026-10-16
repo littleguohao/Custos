@@ -1349,3 +1349,85 @@ class TestBatchJudgmentLine:
         pools = rep["pools"]
         assert pools["batch_m"] == 3
         assert pools["q95_judgment"] == kit.batch_threshold(pools["judgment"], 3)
+
+
+class TestR45Mode:
+    """v0.397（TODO #103）：R45 = j_low 单门 × 4×4 锚定止损网格 × 30% 敞口上限。"""
+
+    @staticmethod
+    def _replay_t2_wins(subset, params):
+        # T2（trail_pct）各档稳赢、其余档负；随机臂贴零
+        out = []
+        for r in subset:
+            if r["gate"] == "__random__":
+                ret = 0.01 if r["i"] % 2 == 0 else -0.005
+            elif params.get("trail_pct"):
+                ret = 0.08 if r["i"] % 2 == 0 else -0.02
+            else:
+                ret = -0.01 if r["i"] % 2 == 0 else 0.005
+            out.append(_trade_of(r, ret))
+        return out
+
+    def test_grid_ref_portfolio_and_reset(self, monkeypatch):
+        seen_pf = []
+        orig = fes.combine_readings
+
+        def spy(trades, top_n, ref=None, portfolio=None):
+            seen_pf.append(portfolio)
+            return orig(trades, top_n, ref=ref, portfolio=portfolio)
+
+        monkeypatch.setattr(fes, "combine_readings", spy)
+        spec = _mk_per_code({"j_low": 120, "j_low_adx25": 4})
+        rep = _run(spec, self._replay_t2_wins, r45=True, gates="j_low_adx25")
+        assert len(rep["configs"]) == 16 and {c["gate"] for c in rep["configs"]} == {
+            "j_low"
+        }
+        assert rep["criteria"]["r45"]["ref_cell"] == "x8_T1"
+        assert seen_pf and all(p == brs.R45_PORTFOLIO for p in seen_pf)
+        assert rep["top"]["exit"].endswith("_T2")
+        assert "beats_no_trade" in rep["criteria"]["C2"]
+        # 模块级口径复位：之后的 R40 运行回到默认
+        assert brs._REF_NAME == "pct5_trail08" and brs._PORTFOLIO is None
+
+    def test_replay_params_carry_anchor(self):
+        seen = []
+
+        def rp(subset, params):
+            seen.append(params.get("_anchor_x"))
+            return self._replay_t2_wins(subset, params)
+
+        _run(_mk_per_code({"j_low": 120}), rp, r45=True)
+        assert set(x for x in seen if x is not None) == set(brs.R45_STOPS)
+
+    def test_anchor_subset(self):
+        import pandas as pd
+
+        df = pd.DataFrame({"low": [9.0, 9.5], "close": [10.0, 9.5]})
+        view = {"000001": {"df": df}}
+        recs = [
+            {"code": "000001", "i": 0, "sig": {"i": 0}},
+            {"code": "000001", "i": 1, "sig": {"i": 1}},
+            {"code": "000002", "i": 0, "sig": {"i": 0}},  # 无 df ⇒ 剔
+        ]
+        out = brs._anchor_subset(view, recs, 8.0)
+        assert [r["i"] for r in out] == [0, 1]
+        assert out[0]["sig"]["stop_override"] == pytest.approx(9.0 * 0.92)
+
+    def test_c3_r45(self):
+        def cell(name, mm, mj):
+            return {
+                "exit": name,
+                "mining": {"margin": mm, "objective": mm},
+                "judgment": {"margin": mj, "objective": mj},
+            }
+
+        cfg = [cell(e["name"], -0.1, -0.1) for e in brs.R45_EXIT_GRID]
+        by = {c["exit"]: c for c in cfg}
+        for n in ("x5_T2", "x8_T2", "x12_T2"):
+            by[n] = cell(n, 0.1, 0.1)
+        by["x8_T2"] = cell("x8_T2", 0.3, 0.3)
+        cfg = list(by.values())
+        out = brs.judge_c3_r45(cfg, by["x8_T2"])
+        assert out["ok"] is True and out["neighbors"] == ["x5_T2", "x12_T2"]
+        by["x12_T2"] = cell("x12_T2", 0.1, -0.05)
+        assert brs.judge_c3_r45(list(by.values()), by["x8_T2"])["ok"] is False
