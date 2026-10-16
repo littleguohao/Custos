@@ -26,7 +26,7 @@
 | `src/custos/research/evolution/` | LLM 因子进化引擎（研究侧） |
 | `governance/contracts` | 代码真读的 JSON 配置（EXIT_RULES 等）+ 工作流文档 |
 | `governance/strategy` | 策略规则文档（一策略一目录 + STRATEGY_REGISTRY.json 强制登记） |
-| `governance/research` | 研究单元 R1–R45（判据预注册，编号只增不复用；索引/纪律/工具目录见其 README） |
+| `governance/research` | 研究单元 R1–R46（判据预注册，编号只增不复用；索引/纪律/工具目录见其 README） |
 | `TODO.md` / `CHANGELOG.md` | 待办 vs 已改策略规则，两者分工严格（见 §4） |
 | `tests/` | ~6600 测试，架构/契约/注册表/研究纪律全靠它强制 |
 
