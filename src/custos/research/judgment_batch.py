@@ -53,6 +53,8 @@ _BOOKKEEP_KEYS = {
     "candidate_id",
     "print_config_hash",
     "func",
+    # 「jobs」（v0.403）：并行路数只影响墙钟时间，读数逐位不变——不进冻结哈希
+    "jobs",
     # 「count」（v0.375，#99①）：缺省时 resolve_count 按「窗口起点→今天」的
     # 工作日数推算，**随日漂移**——冻结次日即失配。count 只影响起点可达性、
     # 不影响读数（基线 runbook 同口径），可达性由 check_reach 兜底 ⇒ 不进指纹。

@@ -1657,3 +1657,39 @@ class TestFrozenRead:
             (tmp_path / "fz" / "_score_evolution__fz.json").read_text(encoding="utf-8")
         )
         assert rep["line"]["m"] == 1 and rep["line"]["min_pool"] == ses.FROZEN_MIN_POOL
+
+
+class TestJobsParallel:
+    """v0.403：--jobs 并行格子，报告与串行逐位一致（行序按格子序）；jobs 不进冻结哈希。"""
+
+    def test_parallel_equals_serial(self, tmp_path, monkeypatch):
+        from custos.research import m2_stop_sweep as m2
+
+        monkeypatch.setattr(m2, "_cap_jobs", lambda jobs, n: min(jobs, n))
+        reps = []
+        for j in ("1", "4"):
+            out = tmp_path / f"j{j}"
+            fake = FakeRunner(default=_reading(0.5))
+            rc = ses.main(
+                _argv_v0l(out, "--jobs", j),
+                cell_runner=fake,
+                v0l_collector=SpyCollector({MINING: _v0l_collected_mining()}),
+            )
+            assert rc == 0
+            rep = json.loads(
+                (out / "t1" / "_score_evolution__t1.json").read_text(encoding="utf-8")
+            )
+            for k in ("provenance", "generated_at", "window_usage"):
+                rep.pop(k, None)
+            reps.append(rep)
+        assert reps[0]["arms"]["random"] == reps[1]["arms"]["random"]
+        assert reps[0]["top_genome"] == reps[1]["top_genome"]
+
+    def test_jobs_not_in_config_hash(self):
+        import argparse
+
+        from custos.research import judgment_batch as jb
+
+        a = argparse.Namespace(x=1, jobs=1)
+        b = argparse.Namespace(x=1, jobs=8)
+        assert jb.config_hash("t", a) == jb.config_hash("t", b)

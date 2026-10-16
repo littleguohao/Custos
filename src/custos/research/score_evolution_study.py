@@ -310,6 +310,14 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--timeout", type=int, default=0, help="单格超时秒（0=strategy_grid 默认 1800）"
     )
+    ap.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=1,
+        help="格子子进程并行路数（v0.403；按 CPU/内存自动收敛，同 strategy_grid --jobs）；"
+        "结果与串行逐位一致（行序按格子序）",
+    )
     ap.add_argument("--tag", default="", help="运行标识（默认时间戳）；产物目录名")
     ap.add_argument(
         "--out-dir", default="", help=f"产物根目录（默认 {OUTDIR}），tag 作子目录"
@@ -559,6 +567,11 @@ def _make_cell_runner(args: Any, codes_file: str, cells_dir: Path) -> CellRunner
     cells_dir.mkdir(parents=True, exist_ok=True)
     failures: list[dict[str, Any]] = []
     ref_cache: dict[tuple[str, str, str, str], Optional[dict]] = {}
+    import threading  # noqa: PLC0415
+
+    ref_lock = (
+        threading.Lock()
+    )  # --jobs 并行时参照孪生格同 key 只跑一次（防同文件并写）
 
     def _ref_row(
         sg: Any, cell: dict, ns: argparse.Namespace, *, start: str, end: str
@@ -572,6 +585,12 @@ def _make_cell_runner(args: Any, codes_file: str, cells_dir: Path) -> CellRunner
             start,
             end,
         )
+        with ref_lock:
+            return _ref_row_locked(sg, cell, ns, key, start=start, end=end)
+
+    def _ref_row_locked(
+        sg: Any, cell: dict, ns: argparse.Namespace, key: tuple, *, start: str, end: str
+    ) -> Optional[dict]:
         if key not in ref_cache:
             ref_cell = sg.twin_ref_cell(cell)
             st, p, log = sg.run_cell(ns, ref_cell, cells_dir, capture=True)
@@ -1721,6 +1740,10 @@ def _run_v0_lattice_study(
 # ---------------------------------------------------------------------------
 
 
+#: 格子并行度（main 按 --jobs 设置；1 = 串行旧路径）
+_JOBS = 1
+
+
 def _eval_lattice(
     runner: CellRunner,
     legs: Sequence[str],
@@ -1730,8 +1753,12 @@ def _eval_lattice(
     rank_window: int,
     window: Window,
 ) -> list[dict]:
-    """权重格逐组编译 + 评估（挖掘窗）；编译失败/格子失败 → reading=None 留痕。"""
+    """权重格逐组编译 + 评估（挖掘窗）；编译失败/格子失败 → reading=None 留痕。
+
+    v0.403：``_JOBS > 1`` 时格子子进程经线程池并行（线程只等子进程；路数经
+    ``m2._cap_jobs`` 按 CPU/内存收敛）；行序恒按格子序，读数与串行逐位一致。"""
     rows: list[dict[str, Any]] = []
+    todo: list[tuple[int, str]] = []
     for w in lattice:
         try:
             expr = compile_composite(list(legs), list(w), rank_window=rank_window)
@@ -1745,10 +1772,28 @@ def _eval_lattice(
                 }
             )
             continue
-        reading = runner(
+        rows.append({"weights": list(w), "expr": expr, "reading": None})
+        todo.append((len(rows) - 1, expr))
+
+    def _one(expr: str) -> Optional[dict]:
+        return runner(
             f"expr:{expr}", gate, exit_params, start=window.start, end=window.end
         )
-        rows.append({"weights": list(w), "expr": expr, "reading": reading})
+
+    workers = 1
+    if _JOBS > 1 and len(todo) > 1:
+        from custos.research.m2_stop_sweep import _cap_jobs  # noqa: PLC0415
+
+        workers = _cap_jobs(_JOBS, len(todo))
+    if workers <= 1:
+        for k, expr in todo:
+            rows[k]["reading"] = _one(expr)
+    else:
+        from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
+
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for (k, _e), rd in zip(todo, ex.map(_one, [e for _k, e in todo])):
+                rows[k]["reading"] = rd
     return rows
 
 
@@ -2699,6 +2744,8 @@ def main(
     _validate_gate(args, ap)
     codes = _resolve_universe(args, ap)
 
+    global _JOBS
+    _JOBS = max(1, int(getattr(args, "jobs", 1) or 1))
     tag = args.tag or _now_tag()
     args.tag = tag
     out_dir = (Path(args.out_dir) if args.out_dir else OUTDIR) / tag
