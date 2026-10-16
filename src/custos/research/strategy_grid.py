@@ -588,6 +588,63 @@ def run_cell(
 # ---------- 结果读取与目标函数 ----------
 
 
+def load_cell_selected_row(
+    cell: dict[str, Any], path: pathlib.Path, reused: bool
+) -> dict[str, Any]:
+    """打分比较场景的格子读数行：margin/胜率/盈亏比/expectancy_R/n 取 **top-N 选中子集**
+    （A 层，已实现口径），rdd 取同一组合（v0.407 审计 2 P0-1）。
+
+    ⚠️ 为什么：表达式 scorer 恒给「可买」、候选池只由 entry_gate 决定 ⇒ **全候选池读数与
+    scorer 无关**（审计实测 4 条不同 DSL 全池 margin 逐位相同）。R34 预注册口径本就是
+    「--top-n 20 选中子集 vs 全池」，旧实现取了全池——打分比较只能读选中子集。
+    选中子集用格子产物逐笔交易按组合产物同参数（top_n/risk_pct/max_concurrent/max_pos，
+    tie_seed=0）重放 ``simulate_portfolio_topn`` 得到；无逐笔 / 非 top-N 组合 ⇒ 统计键 None
+    （fail-closed，不回落全池）。出场网格排名仍用 :func:`load_cell_row`（全池是出场规则读数）。"""
+    from custos.research import backtest_factors as bt  # noqa: PLC0415
+
+    row = load_cell_row(cell, path, reused)
+    raw = _load(path)
+    trades = raw.get("_trades") or []
+    pf = raw.get("_portfolio") or {}
+    stat = (
+        "win_rate",
+        "expectancy",
+        "expectancy_R",
+        "payoff_ratio",
+        "n",
+        "margin",
+        "breakeven_wr",
+    )
+    if pf.get("mode") != "topn" or not trades or not all("score" in t for t in trades):
+        return {
+            **row,
+            **{k: None for k in stat},
+            "reading_basis": "selected_unavailable",
+        }
+    taken: list[dict[str, Any]] = []
+    bt.simulate_portfolio_topn(
+        trades,
+        top_n=int(pf.get("top_n") or 0),
+        risk_pct=float(pf.get("risk_pct", 0.01)),
+        max_concurrent=int(pf.get("max_concurrent", 5)),
+        max_pos_frac=float(pf.get("max_pos_frac", 0.20)),
+        taken_out=taken,
+        tie_seed=int(pf.get("tie_seed", 0) or 0),
+    )
+    s = bt.summarize_realized(taken)
+    return {
+        **row,
+        "n": s.get("n"),
+        "win_rate": s.get("win_rate"),
+        "expectancy": s.get("expectancy"),
+        "expectancy_R": s.get("expectancy_R"),
+        "payoff_ratio": s.get("payoff_ratio"),
+        "breakeven_wr": _breakeven_wr(s.get("payoff_ratio")),
+        "margin": _margin({"win": s.get("win_rate"), "payoff": s.get("payoff_ratio")}),
+        "reading_basis": "selected_topn",
+    }
+
+
 def load_cell_row(
     cell: dict[str, Any], path: pathlib.Path, reused: bool
 ) -> dict[str, Any]:

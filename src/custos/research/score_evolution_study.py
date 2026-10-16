@@ -646,7 +646,8 @@ def _make_cell_runner(args: Any, codes_file: str, cells_dir: Path) -> CellRunner
             )
             return None
         ref = _ref_row(sg, cell, ns, start=start, end=end)
-        row = sg.load_cell_row(cell, path, reused=(status == "reused"))
+        # 打分比较 ⇒ 选中子集（A 层）读数（v0.407 审计 2 P0-1：全池读数与 scorer 无关）
+        row = sg.load_cell_selected_row(cell, path, reused=(status == "reused"))
         if ref is None:  # 研究侧 fail-closed：参照缺失不回落绝对门（兼容通道只留 CLI）
             return {
                 "objective": None,
@@ -791,13 +792,16 @@ def _make_v0_runner(args: Any, codes: list[str], exit_spec: dict) -> CellRunner:
             if not cands:
                 print("[WARN] V0 臂：0 候选（宇宙/窗口/数据有问题？）", file=sys.stderr)
                 return None
-            tsum = bt.summarize_realized(cands)  # 已实现口径（v0.383）
+            taken_v0: list[dict] = []
             pf = bt.simulate_portfolio_topn(
                 cands,
                 top_n=args.top_n,
+                taken_out=taken_v0,
                 tie_seed=getattr(args, "tie_seed", 0),
                 **_V0_PORTFOLIO,
             )
+            # V0 臂同 A 层口径：选中子集已实现读数（v0.407——与 DSL 格、v0-lattice 格一致）
+            tsum = bt.summarize_realized(taken_v0)
             margin = sg._margin(
                 {"win": tsum.get("win_rate"), "payoff": tsum.get("payoff_ratio")}
             )

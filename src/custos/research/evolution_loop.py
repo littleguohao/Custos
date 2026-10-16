@@ -695,7 +695,8 @@ def _make_cell_runner(
         status, path, _log = sg.run_cell(ns, cell, cells_dir)
         if status == "failed" or path is None:
             return None
-        row = sg.load_cell_row(cell, path, reused=(status == "reused"))
+        # 打分比较 ⇒ 选中子集（A 层）读数（v0.407 审计 2 P0-1）
+        row = sg.load_cell_selected_row(cell, path, reused=(status == "reused"))
         ref = _ref_row(cell, ns, start=start, end=end)
         if ref is None:  # 研究侧 fail-closed：参照缺失不回落绝对门（兼容通道只留 CLI）
             return {
