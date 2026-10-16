@@ -654,12 +654,90 @@ def _precompute_gate_series(
         }
         if _rsi is not None:
             out["rsi14"] = _rsi(close, RSI_MID)
-        # 失败退 None ⇒ or {} 不更新：缺周/月线键，对应 gate 走旧路径
-        out.update((_weekly_gate_arrays(df)) or {})
-        out.update((_monthly_gate_arrays(df)) or {})
-        return out
+        # 失败退 None ⇒ or {} 不更新：缺周/月线键，对应 gate 走旧路径。
+        # v0.402 性能：周/月数组改**惰性**——只有周线/月线 gate 会读，j_low 等日线 gate
+        # 每格每股白算（合成单格实测 ~0.9s/30 股）；首次访问对应键组才算，值与急切计算
+        # 逐位一致（同一函数同一输入）；迭代/序列化（指标盘缓存落盘）时全量物化。
+        return _LazyGatePre(out, df)
     except Exception:  # noqa: BLE001
         return None
+
+
+_WEEKLY_PRE_KEYS = frozenset(
+    {
+        "day_w", "weekly_bars", "weekly_close", "weekly_dea", "weekly_dif",
+        "weekly_dks", "weekly_j", "weekly_ma180", "weekly_ma180_nat",
+        "weekly_part_vol", "weekly_qsx", "weekly_vol",
+    }
+)  # fmt: skip
+_MONTHLY_PRE_KEYS = frozenset({"monthly_bars", "monthly_dea", "monthly_dif"})
+
+
+class _LazyGatePre(dict):
+    """gate_pre 字典：周/月线键组首次访问时才计算（v0.402）。
+
+    ``[]``/``get``/``in`` 触发对应键组计算；``keys/items/values/iter/len/copy``
+    先全量物化——对外语义与急切 dict 完全一致（含「算不出 ⇒ 缺键」）。"""
+
+    def __init__(self, base: dict, df: pd.DataFrame) -> None:
+        super().__init__(base)
+        self._df: Optional[pd.DataFrame] = df
+        self._pending = {"weekly": True, "monthly": True}
+
+    def _load(self, group: str) -> None:
+        if self._pending.get(group) and self._df is not None:
+            self._pending[group] = False
+            fn = _weekly_gate_arrays if group == "weekly" else _monthly_gate_arrays
+            try:
+                dict.update(self, fn(self._df) or {})
+            except Exception:  # noqa: BLE001 —— 同急切路径：算不出即缺键
+                pass
+            if not any(self._pending.values()):
+                self._df = None
+
+    def _ensure(self, key: Any) -> None:
+        if key in _WEEKLY_PRE_KEYS:
+            self._load("weekly")
+        elif key in _MONTHLY_PRE_KEYS:
+            self._load("monthly")
+
+    def materialize(self) -> "_LazyGatePre":
+        self._load("weekly")
+        self._load("monthly")
+        return self
+
+    def __getitem__(self, key: Any) -> Any:
+        self._ensure(key)
+        return dict.__getitem__(self, key)
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        self._ensure(key)
+        return dict.get(self, key, default)
+
+    def __contains__(self, key: object) -> bool:
+        self._ensure(key)
+        return dict.__contains__(self, key)
+
+    def keys(self):  # type: ignore[override]
+        return dict.keys(self.materialize())
+
+    def items(self):  # type: ignore[override]
+        return dict.items(self.materialize())
+
+    def values(self):  # type: ignore[override]
+        return dict.values(self.materialize())
+
+    def __iter__(self):  # type: ignore[override]
+        return dict.__iter__(self.materialize())
+
+    def __len__(self) -> int:
+        return dict.__len__(self.materialize())
+
+    def copy(self) -> dict:  # type: ignore[override]
+        return dict(self.materialize())
+
+    def __reduce__(self):  # pickle（多进程 / 缓存）按普通 dict 物化
+        return (dict, (dict(self.materialize()),))
 
 
 def _j_low_hit(df_slice: pd.DataFrame, precomputed: Optional[dict] = None) -> bool:
@@ -5695,6 +5773,11 @@ def _preregister_scorer_expr(argv: list) -> str:
     try:
         key = expr_scorer_key(expr)
         SCORERS[key] = make_expr_scorer(expr)  # 构造期 parse 校验
+        # v0.402 性能：表达式 scorer 有全序列预计算 ⇒ 进无切片快速路径白名单（热循环
+        # 不再逐 bar 构造 df.iloc 切片；合成单格实测切片占 ~42%）。仅当 scorer_pre 非 None
+        # 时才走快速路径（预计算失败照旧回退切片路径），读数逐位一致。
+        global _SLICE_FREE_SCORERS
+        _SLICE_FREE_SCORERS = _SLICE_FREE_SCORERS | {SCORERS[key]}
         # TODO #75：接进预计算旁路（每股全序列只算一次，热循环 O(1) 点查询）——
         # 逐 bar 前缀切片全量重算在生产尺度是病态根因（profile：单股逐 bar
         # 模拟 ~700s vs 快表达式 0.5s）。查不到/预计算失败 ⇒ 自动回退旧路径。

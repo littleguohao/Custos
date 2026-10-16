@@ -53,16 +53,24 @@ def make_expr_scorer(expr: str) -> Callable[..., dict | None]:
     tree = parse(expr)  # 白名单校验在构造期完成；ExprError 直接上抛
 
     def scorer(
-        df_slice: pd.DataFrame, code: str = "", pre: dict | None = None
+        df_slice: pd.DataFrame | None,
+        code: str = "",
+        pre: dict | None = None,
+        n: int | None = None,
     ) -> dict[str, Any] | None:
-        if df_slice is None or not len(df_slice):
+        # 无切片快速路径（v0.402 性能，同 _sc_b1_pullback）：df=None + 显式 n + pre
+        # ⇒ 点查询 vals[n-1]，与前缀切片 len(df_slice)=n 的读数逐位一致
+        size = n if df_slice is None else (len(df_slice) if df_slice is not None else 0)
+        if not size or (df_slice is None and pre is None):
             return None
         try:
             if pre is not None:
                 vals = pre["expr_score"]
-                last = float(vals[len(df_slice) - 1])
-            else:
+                last = float(vals[size - 1])
+            elif df_slice is not None:
                 last = float(evaluate(tree, df_slice).iloc[-1])
+            else:
+                return None
         except Exception:  # noqa: BLE001 —— 计算期异常一律吞掉返回 None
             return None
         if math.isnan(last) or math.isinf(last):
