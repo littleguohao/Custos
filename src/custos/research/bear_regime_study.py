@@ -355,6 +355,7 @@ def random_entries(
     *,
     pool: Optional[list[tuple[Any, ...]]] = None,
     score_cache: Optional[dict[Any, Optional[float]]] = None,
+    shapes: Optional[list[list[int]]] = None,
 ) -> list[dict]:
     """空头日随机 (code, bar) 入场 n 个；**无放回抽样**（v0.308：``rng.sample``，
     母体不够就截断——有放回会让同一 (code, bar) 重复计入）；score 缺失时
@@ -372,10 +373,16 @@ def random_entries(
     各有一份 df）；3 元组形态逐位不变。"""
     if pool is None:
         pool = bear_bar_pool(per_code, regime_bear)
-    if not pool or n <= 0:
+    if not pool or (n <= 0 and not shapes):
         return []
     out: list[dict] = []
-    for item in rng.sample(pool, min(n, len(pool))):
+    # shapes 给出 ⇒ 成簇抽样（v0.399）；否则逐 bar 无放回（旧行为逐位不变）
+    items = (
+        clustered_draw(pool, shapes, rng)
+        if shapes
+        else rng.sample(pool, min(n, len(pool)))
+    )
+    for item in items:
         seg: Optional[str] = None
         if len(item) == 4:  # (seg, code, i, d)——v2 合并挖掘池段溯源形态
             seg, code, i, d = item
@@ -411,6 +418,62 @@ def random_entries(
         if seg is not None:
             rec["_seg"] = seg
         out.append(rec)
+    return out
+
+
+def cluster_shapes(sigs: list[dict]) -> list[list[int]]:
+    """候选信号的簇形状（v0.399，owner 2026-10-16 拍板 3b）：簇划分 = ``kit.cluster_ids``
+    单源（同票、bar 间隔 ≤5 的连续段；v2 簇键含段），每簇 = 相对首 bar 的偏移清单。"""
+    by: dict[int, list[int]] = {}
+    for r, cid in zip(sigs, kit.cluster_ids(sigs)):
+        by.setdefault(cid, []).append(int(r["i"]))
+    out = []
+    for cid in sorted(by):
+        ii = sorted(by[cid])
+        out.append([x - ii[0] for x in ii])
+    return out
+
+
+def clustered_draw(
+    pool: list[tuple[Any, ...]],
+    shapes: list[list[int]],
+    rng: random.Random,
+    *,
+    max_retry: int = 20,
+) -> list[tuple[Any, ...]]:
+    """成簇随机抽样（v0.399）：每个候选簇形状独立抽一个母体锚点，同票按偏移连续取，
+    只收落在母体（空头日 ∩ 段内 ∩ 隔离带前）且未被占用的 bar——**整体无放回**。
+    锚点重抽至该簇至少取到 1 个 bar（上限 max_retry 次，放不下的簇丢弃、由
+    entry_accounting 的 requested/returned 如实记账）。
+
+    ⚠️ 为什么：j_low 等门信号在空头期同票连续多日触发、成簇；逐 bar 独立抽样的随机臂
+    不成簇 ⇒ 零假设方差被低估、q95 偏低、判定线偏松（R39/R42 v0.335 同病，owner 模拟
+    簇长 20 ⇒ 假过线 38%）。"""
+    if not pool or not shapes:
+        return []
+    key_of = (
+        (lambda t: (t[0], t[1], t[2]))
+        if len(pool[0]) == 4
+        else (lambda t: (t[0], t[1]))
+    )
+    index = {key_of(t): t for t in pool}
+    used: set = set()
+    out: list[tuple[Any, ...]] = []
+    for shape in shapes:
+        for _ in range(max_retry):
+            a = pool[rng.randrange(len(pool))]
+            ka = key_of(a)
+            got = []
+            for off in shape:
+                k = (*ka[:-1], ka[-1] + off)
+                t = index.get(k)
+                if t is not None and k not in used:
+                    got.append((k, t))
+            if got:
+                for k, t in got:
+                    used.add(k)
+                    out.append(t)
+                break
     return out
 
 
@@ -451,7 +514,11 @@ def run_arm(
     for g, n_g in gate_counts.items():
         if n_g <= 0:
             continue  # 0 信号的门不能当模板（n=0 的臂无意义）
-        entries = draw_entries(n_g, "mining")
+        entries = (
+            draw_entries(n_g, "mining", g)  # type: ignore[call-arg]
+            if getattr(draw_entries, "_gate_aware", False)
+            else draw_entries(n_g, "mining")
+        )
         ref_rd: Optional[dict] = None
         for e in exits:
             if e["name"] == _REF_NAME:
@@ -485,7 +552,13 @@ def run_arm(
         )
         out["judgment_n"] = n_j
         out["judgment"] = (
-            judgment_reader(n_j, best["params"]) if n_j > 0 else None
+            (
+                judgment_reader(n_j, best["params"], best["gate_template"])  # type: ignore[call-arg]
+                if getattr(judgment_reader, "_gate_aware", False)
+                else judgment_reader(n_j, best["params"])
+            )
+            if n_j > 0
+            else None
         )  # 冻结出场配置，不重选
     return out
 
@@ -734,7 +807,17 @@ def _run_random_arms(
             )
         return pool, per_code
 
-    def _rand_entries(n: int, w: str) -> list[dict]:
+    # 候选簇形状（v0.399）：每（窗, 门）一次，随机臂按同簇结构抽（成簇零假设）
+    shape_cache: dict[tuple[str, str], list[list[int]]] = {}
+
+    def _shapes(w: str, g: Optional[str]) -> Optional[list[list[int]]]:
+        if g is None:
+            return None
+        if (w, g) not in shape_cache:
+            shape_cache[(w, g)] = cluster_shapes(gate_sigs[w][g])
+        return shape_cache[(w, g)]
+
+    def _rand_entries(n: int, w: str, g: Optional[str] = None) -> list[dict]:
         entry_accounting[w]["requested"] += n
         if random_entry_fn is not None:
             out = random_entry_fn(n, w)
@@ -749,18 +832,23 @@ def _run_random_arms(
                 index_df=index_df_ref["df"],
                 pool=bar_pools[w],
                 score_cache=score_caches[w],
+                shapes=_shapes(w, g),
             )
         entry_accounting[w]["returned"] += len(out)
         return out
 
+    _rand_entries._gate_aware = True  # type: ignore[attr-defined]
+
     def _arm(_i: int) -> Optional[float]:
-        def _judgment_reader(n_g: int, frozen_params: dict[str, Any]) -> Optional[dict]:
+        def _judgment_reader(
+            n_g: int, frozen_params: dict[str, Any], gate: Optional[str] = None
+        ) -> Optional[dict]:
             """冻结配置（含胜出格 n_g）的判定窗读数（不重选——对等纪律 v0.302）。
 
             ⚠️ 冻结的是**出场配置与胜出格 n_g**；判定窗入场集 = 同分布重抽
             （随机入场无门信号可携带——对等的是「臂冻结配置 vs top 冻结配置」，
             入场随机性两臂同分布）。v2.1 参照 = 同批判定入场 × trail08。"""
-            entries_j = _rand_entries(n_g, "judgment")
+            entries_j = _rand_entries(n_g, "judgment", gate)  # 冻结门判定窗簇形状
             ref_j = _combine(
                 replay("judgment", "__random__", entries_j, ref_trail),
                 args.top_n,
@@ -769,6 +857,7 @@ def _run_random_arms(
             trades = replay("judgment", "__random__", entries_j, frozen_params)
             return _combine(trades, args.top_n, ref=ref_j)
 
+        _judgment_reader._gate_aware = True  # type: ignore[attr-defined]
         arm = run_arm(
             counts_m,
             exits,
