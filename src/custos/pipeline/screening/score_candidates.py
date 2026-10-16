@@ -296,6 +296,36 @@ def cap_bucket(bucket: str, cap: str) -> str:
     return bucket if BUCKET_ORDER.index(bucket) >= BUCKET_ORDER.index(cap) else cap
 
 
+def _technical_score_parts(cand: dict, w: dict) -> tuple[Any, dict]:
+    """八段累加（clamp 之前的原始分 + contrib）——technical_score 与研究侧
+    technical_score_raw 共用的单一实现。"""
+    contrib: dict[str, Any] = {}
+    score = 0
+    # 段顺序＝历史上 factor_contrib 的键序，勿动（落盘明细供复盘对照）。
+    for pts, part in (
+        _pattern_score(cand, w),
+        _b1_bonus_score(cand, w),
+        _macd_score(cand, w),
+        _zhixing_score(cand, w),
+        _ignition_score(cand, w),
+        _trend_score(cand, w),
+        _volume_yy_score(cand, w),
+        _distribution_score(cand, w),
+    ):
+        score += pts
+        contrib.update(part)
+    return score, contrib
+
+
+def technical_score_raw(cand: dict, weights: Optional[dict] = None) -> float:
+    """技术分**clamp 之前**的原始累加分（研究侧 R46 家族子分用；live 不调用）。
+
+    各段对权重线性（命中即加权重；repair 的 min(次数×each, cap) 对非负同比缩放
+    线性），故 technical_score(cand, w×m) = clamp₀¹⁰⁰(Σ m·raw_段)——R46 据此把
+    729 格降成矩阵乘（tests/test_family_lattice.py 钉住与 technical_score 逐位一致）。"""
+    return float(_technical_score_parts(cand, resolve_tech_weights(weights))[0])
+
+
 def technical_score(
     cand: dict, weights: Optional[dict] = None
 ) -> tuple[int, str, dict]:
@@ -328,21 +358,7 @@ def technical_score(
     （registry scoring.weights 覆盖），`weights=None` 时全默认 == 现值。
     """
     w = resolve_tech_weights(weights)
-    contrib: dict[str, Any] = {}
-    score = 0
-    # 段顺序＝历史上 factor_contrib 的键序，勿动（落盘明细供复盘对照）。
-    for pts, part in (
-        _pattern_score(cand, w),
-        _b1_bonus_score(cand, w),
-        _macd_score(cand, w),
-        _zhixing_score(cand, w),
-        _ignition_score(cand, w),
-        _trend_score(cand, w),
-        _volume_yy_score(cand, w),
-        _distribution_score(cand, w),
-    ):
-        score += pts
-        contrib.update(part)
+    score, contrib = _technical_score_parts(cand, w)
     # 2026-08-16 review 修复：负分项引入后补下限——口径恢复为 0-100
     # （负分信息在 factor_contrib 里仍可见，展示分不跌破 0）。
     score = min(max(score, 0), 100)

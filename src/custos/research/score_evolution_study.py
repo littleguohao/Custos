@@ -1059,7 +1059,8 @@ def _collect_v0_window(
                     cand = srs.asof_candidate(df, index_df, i, code)
                 except Exception:  # noqa: BLE001
                     continue  # 单笔 cand 失败丢该笔（WARN 在 srs 内部已打）
-                item: dict[str, Any] = {"trade": tr, "cand": cand, "code": code}
+                # "i"：信号 bar 序号（R46 簇级置换用 kit.cluster_ids；读数路径不读）
+                item: dict[str, Any] = {"trade": tr, "cand": cand, "code": code, "i": i}
                 if addon_exprs:
                     item["addon"] = {
                         e: _addon_value(s, i) for e, s in addon_map.items()

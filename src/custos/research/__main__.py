@@ -174,6 +174,12 @@ TOOLS: dict[str, tuple[str, str]] = {
         "（不重跑引擎）；Δ 或绝对 margin 跟成本翻号 ⇒ flip=True 标「成本"
         "敏感」判读降权（绝对口径 R40 C2/pre2019 薄 margin 是主战场）",
     ),
+    "family_lattice_study": (
+        "driver",
+        "R46 V0 打分家族级配比（TODO #110）：30 腿分 6 家族 × 倍率 {0,1,2} 全枚举 729 格，"
+        "clamp(S·m) 矩阵化重打分（与 technical_score 逐位一致）；C1~C4（双挖掘段选格 / 邻格平滑 / "
+        "簇级置换同预算零假设）；--batch-id 同次读判定段走 judgment_line；副读数 64 个家族开/关子格",
+    ),
     "pick_practice": (
         "driver",
         "选股练习台账（TODO #101，live 跟踪非研究）：`add <代码…>` 登记当天（--date 可改）"
