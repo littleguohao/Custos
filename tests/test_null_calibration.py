@@ -18,6 +18,11 @@ v0.330 返修（owner review #1）：
 - **回归哨兵** ``TestSentinelMaxOf5``：把 R40 随机臂换回 v0.307 前的
   max-of-5 构造（monkeypatch run_arm），断言校准测试**必须失败**——
   能抓住已知 bug 才证明这道合入门有效。
+
+覆盖面（v0.405）：R40 / R41 / R42 / R43 挖掘 + 判定段读数 / R44 扫描 + 判定段 / R39 + 判定段 /
+R45 / R46，以及 R40/R45 判定半窗的攒批判定线。**R36 ``--frozen-read`` 豁免**：其零假设池是
+r36_p3_c4review 既有 50 臂（v0.269 采样器标尺，当时已校准），冻结读数只把同一批臂搬到判定段
+重读，不新造零假设构造；合成夹具下臂读数由 FakeRunner 给定，校准无信息量。
 """
 
 from __future__ import annotations
@@ -510,4 +515,396 @@ class TestSentinelFesPerSignalShuffle:
             hn.assert_noise_calibration(
                 "factor_exit[逐信号哨兵]",
                 _fes_clustered_run(monkeypatch, n_random=15, c4_min_pool=10),
+            )
+
+
+# ---------------------------------------------------------------------------
+# R45（bear_regime_study --r45，v0.397）：j_low 单门 × 16 格 × 30% 敞口
+# ---------------------------------------------------------------------------
+
+
+def _r45_run(replay, **kw):
+    return _bear_run(replay, r45=True, gates="j_low", **kw)
+
+
+class TestR45Calibration:
+    """R45 零假设两连测：纯噪声 5 种子 confirmed_pass ≤10%；植入「T2（trail8）真更优」可识别。"""
+
+    def test_noise(self):
+        hn.assert_noise_calibration("r45", _r45_run(hn.null_replay))
+
+    def test_edge_detected(self):
+        hn.assert_edge_detected(
+            "r45",
+            _r45_run(
+                lambda sub, p: hn.edge_replay(
+                    sub,
+                    p,
+                    is_edge=lambda r, pp: (
+                        r["gate"] == "j_low" and bool(pp.get("trail_pct"))
+                    ),
+                )
+            ),
+        )
+
+
+class TestSentinelR45MaxOf1:
+    """回归哨兵：R45 随机臂只看 1 格（丢掉与 16 格网格对等的 max-of-16 预算）⇒
+    零假设校准**必须失败**——证明 C4 的「同预算选格」是有效约束。"""
+
+    def test_calibration_catches_max_of_1(self, monkeypatch):
+        orig = brs.run_arm
+
+        def max_of_1(gate_counts, exits, *a, **k):
+            # 只留 1 个候选格 + 参照格（参照档必须在，否则退回绝对门、混淆哨兵）
+            keep = [exits[0]] + [e for e in exits if e["name"] == brs.R45_REF]
+            return orig(gate_counts, keep, *a, **k)
+
+        monkeypatch.setattr(brs, "run_arm", max_of_1)
+        with pytest.raises(AssertionError, match="零假设校准失败"):
+            hn.assert_noise_calibration("r45[max-of-1 哨兵]", _r45_run(hn.null_replay))
+
+
+# ---------------------------------------------------------------------------
+# 判定段攒批判定线（v0.389~0.395，owner 选 B）：终端级两连测
+# ---------------------------------------------------------------------------
+
+
+def _open_cal_batch(m: int = 4) -> str:
+    from custos.research import judgment_batch as jb
+
+    bid = f"cal{m}"
+    if bid not in jb.status():
+        jb.open_batch(
+            bid,
+            [{"id": f"c{k}", "config_hash": f"t:{k}", "unit": "R0"} for k in range(m)],
+        )
+    return bid
+
+
+def _judgment_hits(run, seeds=hn.NULL_SEEDS):
+    return [bool(run(s)["criteria"]["C2"].get("pool_ok_judgment")) for s in seeds]
+
+
+class TestBearJudgmentLineCalibration:
+    """R40/R45 判定半窗（带 --batch-id ⇒ 判定线 = batch_threshold(冻结臂判定窗重读池, m)）：
+    纯噪声下「判定窗 > 判定线」比例 ≤10%；植入 edge 可识别。"""
+
+    def test_noise(self):
+        bid = _open_cal_batch()
+        hits = _judgment_hits(_bear_run(hn.null_replay, batch_id=bid))
+        assert sum(hits) / len(hits) <= hn.NOISE_CAP, hits
+
+    def test_edge_detected(self):
+        bid = _open_cal_batch()
+        run = _bear_run(
+            lambda sub, p: hn.edge_replay(
+                sub, p, is_edge=lambda r, _p: r["gate"] == "j_low"
+            ),
+            batch_id=bid,
+        )
+        rep = run(0)
+        assert rep["pools"]["batch_m"] == 4
+        assert rep["criteria"]["C2"]["pool_ok_judgment"] is True
+
+
+def _prr_anchor_run(edge: bool, monkeypatch, bid: str):
+    monkeypatch.setattr(prr, "SCAN_N_RANDOM", N_RANDOM)
+
+    def is_edge(r, _p):
+        so = r["sig"].get("stop_override")
+        return (
+            so is not None
+            and "anchor_low" in r
+            and abs(1.0 - so / r["anchor_low"] - 0.10) < 1e-9
+        )
+
+    replay = (
+        (lambda sub, p: hn.edge_replay(sub, p, is_edge=is_edge))
+        if edge
+        else hn.null_replay
+    )
+
+    def run(seed):
+        spec = {w: _prr_per_code() for w in _WINDOWS}
+        return prr.run_study(
+            _prr_args(
+                seed=seed,
+                stop_anchor="signal_low",
+                stop_buffer_pct=10.0,
+                batch_id=bid,
+                c4_min_pool=MIN_POOL,
+            ),
+            warm_fn=lambda s, e: spec[(s, e)],
+            replay_fn=replay,
+        )
+
+    return run
+
+
+class TestPrrAnchorJudgmentLineCalibration:
+    """R44 判定段（锚点模式 criteria.judgment_batch）：纯噪声 candidate 率 ≤10%；植入 x=10 真更优可识别。"""
+
+    def test_noise(self, monkeypatch):
+        run = _prr_anchor_run(False, monkeypatch, _open_cal_batch())
+        hits = [
+            run(s)["criteria"]["judgment_batch"]["verdict"] == "candidate"
+            for s in hn.NULL_SEEDS
+        ]
+        assert sum(hits) / len(hits) <= hn.NOISE_CAP, hits
+
+    def test_edge_detected(self, monkeypatch):
+        blk = _prr_anchor_run(True, monkeypatch, _open_cal_batch())(0)["criteria"][
+            "judgment_batch"
+        ]
+        assert blk["line"]["m"] == 4 and blk["pool_size"] >= MIN_POOL
+        assert blk["verdict"] == "candidate", blk["verdict"]
+
+
+class TestFesJudgmentLineCalibration:
+    """R39 判定段（criteria.judgment_batch：随机分桶臂冻结映射判定段整簇重赋桶重读）：
+    纯噪声 candidate 率 ≤10%；条件映射真剧本可识别。"""
+
+    @staticmethod
+    def _run(monkeypatch, replay, seed, bid):
+        return fxt._run(
+            monkeypatch,
+            fxt._three_level_spec(180),
+            replay,
+            n_random=N_RANDOM,
+            c4_min_pool=MIN_POOL,
+            seed=seed,
+            batch_id=bid,
+        )
+
+    def test_noise(self, monkeypatch):
+        bid = _open_cal_batch()
+        hits = [
+            self._run(monkeypatch, hn.null_replay, s, bid)["criteria"][
+                "judgment_batch"
+            ]["verdict"]
+            == "candidate"
+            for s in hn.NULL_SEEDS
+        ]
+        assert sum(hits) / len(hits) <= hn.NOISE_CAP, hits
+
+    def test_edge_detected(self, monkeypatch):
+        blk = self._run(monkeypatch, fxt._scripted_replay, 0, _open_cal_batch())[
+            "criteria"
+        ]["judgment_batch"]
+        assert blk["line"]["m"] == 4
+        assert blk["verdict"] == "candidate", (blk["verdict"], blk["line"])
+
+
+def _r43j_fixture(seed: int, edge: bool):
+    """判定段 2017~2021 内 9 空头 + 9 多头段；edge=空头段高龄组 +0.35%/日（同 R43 挖掘校准）。"""
+    import numpy as np
+    import pandas as pd
+    from test_regime_style_study import _blocks_days, _mk_df, _regime_of
+
+    blocks = [("中性", 5)] + [("空头", 10), ("中性", 5), ("做多", 10), ("中性", 5)] * 9
+    days, states = _blocks_days(blocks, "2017-03-01")
+    regime = _regime_of(days, states)
+    full = [d.strftime("%Y-%m-%d") for d in pd.bdate_range("2014-01-02", "2019-12-31")]
+    bear = {d for d, s in regime.items() if s == "空头"}
+    rng = np.random.RandomState(seed)
+    frames = {}
+    for k in range(40):
+        c = f"{['600', '000', '300', '920'][k % 4]}{100 + k:03d}"
+        dk = full[10 * k :]
+        r = rng.normal(0.0002, 0.008, len(dk))
+        if edge:
+            bump = 0.0035 if k < 20 else -0.0035
+            r = np.array([ri + (bump if d in bear else 0.0) for d, ri in zip(dk, r)])
+        frames[c] = _mk_df(dk, (5.0 + k) * np.exp(np.cumsum(r)))
+    return regime, frames
+
+
+def _r43j_run(edge: bool, bid: str):
+    from custos.research import regime_style_study as rs
+
+    def run(seed):
+        regime, frames = _r43j_fixture(seed, edge)
+        args = rs._build_parser().parse_args(
+            [
+                "--judgment-read",
+                "bear:age:+",
+                "--min-segs",
+                "8",
+                "--min-stocks",
+                "20",
+                "--min-group",
+                "4",
+                "--n-random",
+                str(N_RANDOM),
+                "--c4-min-pool",
+                str(MIN_POOL),
+                "--c4-seed",
+                str(20261014 + seed),
+                "--batch-id",
+                bid,
+            ]
+        )
+        return rs.run_judgment_read(
+            args,
+            rs.parse_judgment_specs(args.judgment_read),
+            bars_loader=lambda codes, count, start, end: frames,
+            regime=regime,
+            codes=sorted(frames),
+            sector_bars={},
+            sector_types={},
+            shares_fn=lambda c: None,
+            xdxr_fn=lambda c: None,
+            pit_records=[],
+        )
+
+    return run
+
+
+class TestR43JudgmentReadCalibration:
+    """R43 --judgment-read：纯噪声 candidate 率 ≤10%；植入空头段 age 价差可识别。"""
+
+    def test_noise(self):
+        run = _r43j_run(False, _open_cal_batch())
+        hits = [
+            run(s)["candidates"][0]["verdict"] == "candidate" for s in hn.NULL_SEEDS
+        ]
+        assert sum(hits) / len(hits) <= hn.NOISE_CAP, hits
+
+    def test_edge_detected(self):
+        c = _r43j_run(True, _open_cal_batch())(0)["candidates"][0]
+        assert c["n_segs"] >= 8 and c["line"]["m"] == 4
+        assert c["verdict"] == "candidate", (c["verdict"], c["signed_t"], c["line"])
+
+
+# ---------------------------------------------------------------------------
+# R46（family_lattice_study，v0.404）：729 格 → 校准用 9 格缩小网格（前两家族 3×3）
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def r46_small(monkeypatch):
+    from custos.research import family_lattice_study as fl
+
+    grid = [m for m in fl.GRID if all(x == 1 for x in m[2:])]
+    monkeypatch.setattr(fl, "GRID", grid)
+    monkeypatch.setattr(fl, "ONOFF", [m for m in grid if all(x in (0, 1) for x in m)])
+    monkeypatch.setattr(fl, "family_subscores", lambda cand, legs: cand["S"])
+    monkeypatch.setattr(
+        fl,
+        "neighbors",
+        lambda m: [x for x in grid if sum(abs(a - b) for a, b in zip(x, m)) == 1],
+    )
+    return fl
+
+
+def _r46_clustered_world(seed, n_codes=30, n_days=50):
+    """成簇零假设：同票子分与收益各自跨日持续（簇），但两者互相独立。"""
+    import numpy as np
+    import pandas as pd
+
+    rng = np.random.RandomState(seed)
+    out = {}
+    for seg, y0 in (("A", 2010), ("B", 2023), ("J", 2018)):
+        items = []
+        days = pd.bdate_range(f"{y0}-01-04", periods=n_days)
+        sc0 = {k: rng.uniform(0, 12, 6) for k in range(n_codes)}
+        mu = {k: rng.normal(0, 0.03) for k in range(n_codes)}
+        for di, d in enumerate(days):
+            for k in range(n_codes):
+                ret = float(mu[k] + rng.normal(0, 0.02))
+                ds = d.strftime("%Y-%m-%d")
+                items.append(
+                    {
+                        "code": f"{k:06d}",
+                        "i": di,
+                        "S": sc0[k] + rng.normal(0, 0.3, 6),
+                        "trade": {
+                            "code": f"{k:06d}",
+                            "entry_date": ds,
+                            "exit_date": (d + pd.Timedelta(days=3)).strftime(
+                                "%Y-%m-%d"
+                            ),
+                            "ret": ret,
+                            "reason": "stop",
+                            "risk_frac": 0.05,
+                            "r_multiple": ret / 0.05,
+                            "holding": 3,
+                        },
+                    }
+                )
+        out[seg] = items
+    return out
+
+
+def _r46_run(fl, tmp_path, world_fn):
+    import json
+
+    import test_family_lattice as tfl
+
+    def run(seed):
+        out = tmp_path / f"r46_{seed}.json"
+        args = [
+            "--out",
+            str(out),
+            "--n-random",
+            str(N_RANDOM),
+            "--c4-min-pool",
+            str(MIN_POOL),
+            "--tie-seeds",
+            "3",
+            "--top-n",
+            "5",
+            "--seed",
+            str(seed),
+        ]
+        assert fl.main(args, collector=tfl._collector(world_fn(seed))) == 0
+        return json.loads(out.read_text(encoding="utf-8"))
+
+    return run
+
+
+class TestR46Calibration:
+    """R46 零假设两连测：纯噪声 0/5；植入「F1 家族有信息」可识别；成簇零假设（簇级置换）0/5。"""
+
+    def test_noise(self, r46_small, tmp_path):
+        import test_family_lattice as tfl
+
+        hn.assert_noise_calibration(
+            "r46",
+            _r46_run(r46_small, tmp_path, lambda s: tfl._world(500 + s, edge=0.0)),
+        )
+
+    def test_edge_detected(self, r46_small, tmp_path):
+        import test_family_lattice as tfl
+
+        hn.assert_edge_detected(
+            "r46",
+            _r46_run(r46_small, tmp_path, lambda s: tfl._world(500 + s, edge=3.0)),
+        )
+
+    def test_clustered_noise(self, r46_small, tmp_path):
+        hn.assert_noise_calibration(
+            "r46[成簇]",
+            _r46_run(r46_small, tmp_path, lambda s: _r46_clustered_world(900 + s)),
+        )
+
+
+class TestSentinelR46IidPermutation:
+    """回归哨兵：零假设换成**逐候选**置换（拆散簇）⇒ 成簇零假设下校准必须失败
+    （20 种子实测：簇级 1/20，逐候选 10/20）。"""
+
+    def test_calibration_catches_iid_permutation(
+        self, r46_small, tmp_path, monkeypatch
+    ):
+        def iid(items, S, rng):
+            idx = list(range(len(S)))
+            rng.shuffle(idx)
+            return S[idx]
+
+        monkeypatch.setattr(r46_small, "permute_clusters", iid)
+        with pytest.raises(AssertionError, match="零假设校准失败"):
+            hn.assert_noise_calibration(
+                "r46[逐候选置换哨兵]",
+                _r46_run(r46_small, tmp_path, lambda s: _r46_clustered_world(900 + s)),
             )
