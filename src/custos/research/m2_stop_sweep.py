@@ -1179,7 +1179,13 @@ def _realized_view(s: dict) -> dict:
         real = bt.summarize_realized(trades)
     except (KeyError, TypeError):  # 旧产物逐笔字段不全 ⇒ 无法重算，如实标注
         return {**s, "_realized": False}
-    return {**s, **real, "_realized": True}
+    # 统计键以已实现汇总为准（v0.406 审计 P0-2）：0 笔已实现时 summarize_trades 只回
+    # {n, text}，键级 merge 会把全体（含窗末浮盈）的 win_rate/payoff 原样留下 ⇒ 显式置 None
+    stat_keys = (
+        "win_rate", "expectancy", "expectancy_R", "total_R", "payoff_ratio",
+        "avg_win", "avg_loss", "avg_holding", "exit_reasons",
+    )  # fmt: skip
+    return {**s, **{k: None for k in stat_keys}, **real, "_realized": True}
 
 
 def _collect_row(group: str, name: str, s: dict, sample: int) -> dict:

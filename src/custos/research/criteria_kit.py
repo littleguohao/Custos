@@ -111,6 +111,8 @@ def c4_state_of(
     """C4 状态机（单一来源）：空池 ⇒ indeterminate（不放行，v0.297 族）；
     池 < min_pool ⇒ provisional；候选 Δ > q95 ⇒ confirmed_pass；
     否则 confirmed_fail（plan_delta=None 按不过处理）。"""
+    # 有效池 = 剔 NaN/None 后（v0.406 审计 P1-1：perm_threshold 剔 NaN，护栏也须按有效长度）
+    pool = [x for x in pool if x is not None and x == x]
     if not pool:
         return "indeterminate"
     if len(pool) < min_pool:

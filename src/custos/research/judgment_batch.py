@@ -55,6 +55,11 @@ _BOOKKEEP_KEYS = {
     "func",
     # 「jobs」（v0.403）：并行路数只影响墙钟时间，读数逐位不变——不进冻结哈希
     "jobs",
+    # 「tag/out_dir/timeout」（v0.406 审计 P1-2）：只决定产物命名/位置与超时，不影响读数——
+    # 进哈希会让崩溃重跑换 tag/换目录被批次门误判「口径变了」
+    "tag",
+    "out_dir",
+    "timeout",
     # 「count」（v0.375，#99①）：缺省时 resolve_count 按「窗口起点→今天」的
     # 工作日数推算，**随日漂移**——冻结次日即失配。count 只影响起点可达性、
     # 不影响读数（基线 runbook 同口径），可达性由 check_reach 兜底 ⇒ 不进指纹。
@@ -339,7 +344,10 @@ def batch_m(batch_id: str, *, path: Optional[Path] = None) -> int:
     b = _replay(_load_events(path)).get(str(batch_id).strip())
     if b is None:
         raise ValueError(f"批次 {batch_id!r} 不存在——m 只能来自已开批的名册")
-    return int(b["m"])
+    m = b.get("m") or len(b.get("candidates") or ())
+    if not m:
+        raise ValueError(f"批次 {batch_id!r} 登记缺名册人数 m（open 事件损坏？）")
+    return int(m)
 
 
 def judgment_line(
@@ -360,6 +368,7 @@ def judgment_line(
     from custos.research import criteria_kit as kit  # noqa: PLC0415
 
     m = batch_m(batch_id, path=path)
+    pool_j = [x for x in pool_j if x is not None and x == x]  # 有效池（剔 NaN，v0.406）
     thr = kit.batch_threshold(pool_j, m)
     if not pool_j:
         state = "indeterminate"
