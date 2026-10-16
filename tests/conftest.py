@@ -99,6 +99,16 @@ def _redirect_plan_shadow_ledger_tmp(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _redirect_pick_practice_ledger_tmp(monkeypatch, tmp_path):
+    """选股练习台账改道 tmp（TODO #101）——测试不得写真实 data/trades/pick_practice.jsonl。"""
+    from custos.research import pick_practice
+
+    monkeypatch.setattr(
+        pick_practice, "PICK_PRACTICE_LEDGER", tmp_path / "pick_practice.jsonl"
+    )
+
+
+@pytest.fixture(autouse=True)
 def _redirect_window_usage_ledger_tmp(monkeypatch, tmp_path):
     """把判定窗/pre2019 使用台账改道 tmp（v0.321）。
 

@@ -92,6 +92,8 @@ POSITION_PLANS_FILE = TRADES_DIR / "position_plans.json"
 # 持仓计划影子判定台账（v0.310，pipeline/holdings/plan_shadow_ledger 唯一写
 # 入口径）：append-only + 幂等 (date,code,stage)——#60 并轨判据的证据链。
 PLAN_SHADOW_LEDGER = TRADES_DIR / "plan_shadow_observations.jsonl"
+# 选股练习台账（TODO #101，append-only；唯一写入口 research.pick_practice.append_picks）
+PICK_PRACTICE_LEDGER = TRADES_DIR / "pick_practice.jsonl"
 SECTORS_DIR = DATA / "sectors"
 # 板块指数日线 CSV（fetch_sector_index_history 落盘，{code}.csv 或 {code}.SH.csv）
 SECTOR_INDEX_DIR = MARKET_DIR / "sector_index"

@@ -146,7 +146,7 @@ uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 �
 - 规范入口 `detect(df, code, ctx=)` / `score()`，live 标注与研究 SCORERS 同源
   （改判定语义 = 语义变更，须立项 + 回测）。
 
-**append-only 台账**（三本；写入只走各自唯一入口，每日首写前自动快照
+**append-only 台账**（四本；写入只走各自唯一入口，每日首写前自动快照
 `.bak_YYYYMMDD`，**严禁覆盖式写入**——2026-09-21 曾误用 write 工具覆写 0AMV 台账，
 8215 行全历史灭失，靠备份救回）：
 
@@ -155,6 +155,7 @@ uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 �
 | `data/market/0amv_observations.jsonl` | `amv_state.append_observation`（或 `>>` 追加） | 0AMV 全链方向主过滤器的历史 |
 | `data/trades/plan_shadow_observations.jsonl` | `plan_shadow_ledger.append_shadow_safe` | 幂等 (date, code, stage)；写入点=review_core / final_close_review 重估流程（主批不传 plan）；default 计划视同无计划；**旁路隔离**：任何异常只 WARN，绝不打死主报告 |
 | `governance/research/window_usage.jsonl` | `window_usage.record_use` | **入库**，只由生产机写入提交；注入件非 None ⇒ `synthetic=True` 不写（入口快照判定，生产方向有钉测） |
+| `data/trades/pick_practice.jsonl` | `pick_practice.append_picks` | 选股练习（TODO #101）；同 (date, code) 幂等；live 跟踪不作研究判据 |
 
 ## 5. 研究层约定
 

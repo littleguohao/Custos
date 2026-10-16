@@ -174,6 +174,13 @@ TOOLS: dict[str, tuple[str, str]] = {
         "（不重跑引擎）；Δ 或绝对 margin 跟成本翻号 ⇒ flip=True 标「成本"
         "敏感」判读降权（绝对口径 R40 C2/pre2019 薄 margin 是主战场）",
     ),
+    "pick_practice": (
+        "driver",
+        "选股练习台账（TODO #101，live 跟踪非研究）：`add <代码…>` 登记当天（--date 可改）"
+        "亲选标的；`report` 按 B1 现行规则（T+1 开盘入场、止损 −10% 收盘触发、两阳分批、"
+        "BBI 两连破清仓、25bps）模拟，出累计/按月胜率、盈亏比、均收、均持，未出场单列；"
+        "holdout 豁免同 plan_shadow_review",
+    ),
     "plan_shadow_review": (
         "driver",
         "#60 持仓计划影子事后打分（判据 C）：台账 1700 口径不一致事件（agree="
