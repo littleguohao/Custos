@@ -216,19 +216,60 @@ class TestPlanWidthScanCalibration:
         hn.assert_edge_detected("plan_width_scan", _r44_run(True))
 
 
-class TestSentinelScanMaxOf1:
-    """回归哨兵（抓选择效应）：随机臂换成 max-of-1（monkeypatch
-    ``prr.C4_ARM_DRAWS``=1，丢掉与 8 档网格对等的 max-of-8 预算）⇒ 零假设
-    校准**必须失败**——池标尺系统性偏低，纯噪声也能 confirmed_pass。"""
+def _r44_mono_run(**kw):
+    """宽度单调零假设：胜率随止损宽度线性上升（系统性效应，没有哪一档特殊）——
+    固定宽度候选 x* 选到最宽档不算 edge，必须打不过「同范围随机固定宽度 max-of-8」。"""
+    import hashlib
 
-    def test_calibration_catches_max_of_1(self, monkeypatch):
-        from custos.research import plan_rules_replay as prr
+    from test_plan_rules_replay import _scan_args, _scan_fixture, _trade_of
 
-        monkeypatch.setattr(prr, "C4_ARM_DRAWS", 1)
+    kw.setdefault("scan_random", N_RANDOM)
+    kw.setdefault("scan_c4_min_pool", MIN_POOL)
+
+    def run(seed):
+        def rp(subset, params):
+            out = []
+            for r in subset:
+                so = r["sig"].get("stop_override")
+                key = f"{r['code']}|{r['date']}|{so}|{seed}|mono"
+                h = (
+                    int.from_bytes(hashlib.md5(key.encode()).digest()[:4], "little")
+                    / 2**32
+                )
+                x = (
+                    (1.0 - so / r["anchor_low"]) * 100.0
+                    if so is not None and "anchor_low" in r
+                    else 10.0
+                )
+                out.append(_trade_of(r, 0.06 if h < 0.21 + 0.02 * x else -0.035))
+            return out
+
+        spec = _scan_fixture()
+        return prr.run_width_scan(
+            _scan_args(seed=seed, **kw), warm_fn=lambda s, e: spec[(s, e)], replay_fn=rp
+        )
+
+    return run
+
+
+class TestPlanWidthMonotoneNull:
+    """R44 宽度单调零假设（v0.408 审计 2 P0-3）：固定宽度随机臂下 confirmed_pass ≤10%
+    （12 种子实测：固定宽度臂 0/12，逐信号臂 12/12）。"""
+
+    def test_monotone_null(self):
+        hn.assert_noise_calibration("plan_width_scan[宽度单调]", _r44_mono_run())
+
+
+class TestSentinelScanPerSignalWidth:
+    """回归哨兵（替代 v0.379 的 max-of-1 哨兵——固定宽度臂口径下 max-of-1 只 2/20，不再
+    decisive）：随机臂换回逐信号独立抽宽度（审计 2 P0-3 旧 bug）⇒ 宽度单调零假设下校准
+    **必须失败**（宽度系统效应在臂内被平均掉，候选最宽档恒过线）。"""
+
+    def test_calibration_catches_per_signal_width(self, monkeypatch):
+        monkeypatch.setattr(prr, "C4_WIDTH_PER_SIGNAL", True)
         with pytest.raises(AssertionError, match="零假设校准失败"):
             hn.assert_noise_calibration(
-                "plan_width_scan[max-of-1 哨兵]",
-                _r44_run(False, scan_random=25, scan_c4_min_pool=20),
+                "plan_width_scan[逐信号宽度哨兵]", _r44_mono_run()
             )
 
 

@@ -96,6 +96,9 @@ WIDTH_GRID = (5.0, 6.0, 7.0, 8.0, 10.0, 12.0, 15.0, 20.0)
 C4_WIDTH_RANGE = (5.0, 20.0)
 #: C4 每臂抽 8 组取 max（与 8 档网格同预算——回归哨兵：换成 1 校准必须失败）
 C4_ARM_DRAWS = 8
+#: 回归哨兵 monkeypatch 点（v0.408）：True = 复刻审计 2 P0-3 的旧 bug（逐信号独立抽宽度）——
+#: 宽度单调影响收益的零假设世界里校准必须失败；生产恒 False
+C4_WIDTH_PER_SIGNAL = False
 SCAN_N_RANDOM = 200  # 扫描模式 C4 臂数（N 指过门臂数）
 SCAN_C4_MIN_POOL = 20
 
@@ -665,12 +668,12 @@ def run_study(
 
         def _arm_j(i: int) -> Optional[float]:
             arm_rng = random.Random(f"{args.seed}-j{i}")  # 臂级种子写死可复现
+            # 每臂一个固定宽度（v0.408 审计 2 P0-3，同挖掘 C4 臂口径）
+            x_j = arm_rng.uniform(lo_w, hi_w)
             arm_trades: list[dict] = []
             for g in j_groups:
                 arm_recs = [
-                    _sig_with_stop(
-                        r, r["anchor_low"] * (1.0 - arm_rng.uniform(lo_w, hi_w) / 100.0)
-                    )
+                    _sig_with_stop(r, r["anchor_low"] * (1.0 - x_j / 100.0))
                     for r in g["subset"]
                 ]
                 if not arm_recs:
@@ -1205,12 +1208,25 @@ def run_width_scan(
         arm_rng = random.Random(f"{args.seed}-w{i}")  # 臂级种子写死可复现
         best: Optional[float] = None
         for _d in range(C4_ARM_DRAWS):  # ← 回归哨兵 monkeypatch 点（max-of-8）
+            # v0.408 审计 2 P0-3：每组 = **一个固定宽度** x~U[5,20] 作用于全部信号（与候选
+            # 「一个固定宽度」同构）。原逐信号独立抽宽度会把宽度的系统性效应在臂内平均掉，
+            # 臂间方差只剩 1/√n ⇒ 只要宽度对收益单调，候选就恒过线（实测 sd 0.0174→0.0009）。
+            x_d = arm_rng.uniform(lo_w, hi_w)
             arm_trades: list[dict] = []
             for g in groups:
                 arm_recs = [
                     _sig_with_stop(
                         r,
-                        r["anchor_low"] * (1.0 - arm_rng.uniform(lo_w, hi_w) / 100.0),
+                        r["anchor_low"]
+                        * (
+                            1.0
+                            - (
+                                arm_rng.uniform(lo_w, hi_w)
+                                if C4_WIDTH_PER_SIGNAL
+                                else x_d
+                            )
+                            / 100.0
+                        ),
                     )
                     for r in g["subset"]
                 ]

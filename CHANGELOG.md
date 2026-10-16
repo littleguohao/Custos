@@ -410,6 +410,7 @@
 | 2026-10-16 | v0.405 | **零假设校准补齐（合入清单第 6 条）**：test_null_calibration 新增 R45 两连测 + max-of-1 哨兵、R46 两连测 + 成簇零假设 + 逐候选置换哨兵（20 种子：簇级 1/20 vs 逐候选 10/20）、判定段攒批判定线终端级两连测（R40/R45 bear、R44 prr 锚点、R39 fes、R43 --judgment-read）；R36 --frozen-read 豁免理由在案 | 方法论 | 钉测 +16 |
 | 2026-10-16 | v0.406 | **审计 2 修复 a（判据件）**：P0-2 `_realized_view` 0 笔已实现时统计键置 None（原键级 merge 留下含浮盈的 win/payoff，格子排名在最该无效处偏正）；P1-1 c4_state_of/judgment_line 按剔 NaN 后的有效池长判 min_pool（全 NaN ⇒ indeterminate 而非判死）；P1-2 批次哈希簿记键加 tag/out_dir/timeout；batch_m 缺 m 报 ValueError | 审计 2 | 钉测 +3 |
 | 2026-10-16 | v0.407 | **审计 2 P0-1：打分比较改读选中子集**：新增 `strategy_grid.load_cell_selected_row`（格子逐笔按组合同参重放 top-N，取选中子集已实现读数；无逐笔 fail-closed）；score_evolution DSL 格、V0 臂、evolution_loop 改用它（全池读数与 scorer 无关，实测 4 条 DSL 逐位相同）；R32/R34/R36 就地标注（R36 C4 撤销无效，#105 重建） | 审计 2 | 钉测 +2 |
+| 2026-10-16 | v0.408 | **审计 2 P0-3：R44 随机宽度臂改每组一个固定宽度**（挖掘 C4 max-of-8 与判定段池同改）：原逐信号独立抽宽度把宽度系统效应平均掉，宽度单调即恒过线；新增宽度单调零假设用例（固定臂 0/12）与逐信号宽度哨兵（12/12，替代不再 decisive 的 max-of-1 哨兵）；R44 预注册跑数前修订 | 审计 2 | 钉测 +2 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
