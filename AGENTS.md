@@ -186,7 +186,8 @@ uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 �
      快照豁免）；
   5. 宇宙经 `universe.resolve`（缺省=规则构造全量个股，`--codes-file` 仅兼容通道）；
      报告接 `provenance.build`（宇宙三件套）与 `cost_sensitivity`；
-  6. 带零假设校准两连测 + 回归哨兵（`tests/test_null_calibration.py`，collect_all 口径
+  6. 产物字段清单登记 `result_digest.SPECS` + `tests/test_result_digest.py` 真实产物零缺失用例（回填协议 v0.413）；
+  7. 带零假设校准两连测 + 回归哨兵（`tests/test_null_calibration.py`，collect_all 口径
      须含成簇用例）；带「生产路径写台账」钉测。
 - **进化引擎**：LLM 只做提案，decision 由确定性函数给出；`--joint` / `--grid-judge`
   必须显式 `--count`；`--cell-top-n` 默认 20（=0 是因子轴退化）；非默认门口径

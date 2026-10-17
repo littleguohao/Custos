@@ -180,6 +180,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "clamp(S·m) 矩阵化重打分（与 technical_score 逐位一致）；C1~C4（双挖掘段选格 / 邻格平滑 / "
         "簇级置换同预算零假设）；--batch-id 同次读判定段走 judgment_line；副读数 64 个家族开/关子格",
     ),
+    "result_digest": (
+        "diagnostic",
+        "跑数结果摘要（回填协议 v0.413）：按预注册字段清单从产物 JSON 机械提取读数，写入库的 "
+        "results/<单元>/<tag>.json 并把 markdown 回填块插进研究单元回填区；守卫测试逐字重渲染防手改",
+    ),
     "pick_practice": (
         "driver",
         "选股练习台账（TODO #101，live 跟踪非研究）：`add <代码…>` 登记当天（--date 可改）"

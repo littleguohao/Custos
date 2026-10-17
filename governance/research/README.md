@@ -312,6 +312,8 @@ append-only、生产机写入提交）：
 4. **关批**：末位候选读完自动关；手动 `judgment_batch close --batch-id b1`；
    `status [--batch-id]` 查批状态/已读/未读清单。
 
+**回填协议（v0.413）**：读什么字段在预注册时写死（`result_digest.SPECS`）；生产机跑完用 `result_digest … --write --backfill` 机械生成入库摘要 `results/<单元>/<tag>.json` 与回填块（数字不许手改，`tests/test_result_digest.py` 逐字比对）；判读写块外，单元状态/TODO 闭环留复核后改。
+
 **生产机逐步执行版**：[`batch1_runbook.md`](batch1_runbook.md)（#91 → #92 → 挖掘段 → 冻结 → 开批 → 读数，命令逐字可复制）。
 
 **冻结与开批流程**（第一批起执行；每个候选一行登记，缺项不得入批）：
