@@ -1,0 +1,37 @@
+{
+  "digest_version": 1,
+  "fields": {
+    "count": 4200,
+    "end": "2016-12-31",
+    "entry_filter": "j_low",
+    "portfolio.cagr": 0.0172,
+    "portfolio.max_drawdown": 0.1725,
+    "portfolio.n_taken": 228,
+    "portfolio.return_over_maxdd": 0.5,
+    "portfolio.total_return": 0.0863,
+    "scorer": "baseline",
+    "start": "2012-01-01",
+    "timing": {
+      "eval_s": 106.6,
+      "load_s": 89.0,
+      "total_s": 196.3
+    },
+    "trade_summary.exit_reasons.open_end": {
+      "avg_return": 0.0425,
+      "n": 322
+    },
+    "trade_summary.expectancy": 0.0024,
+    "trade_summary.expectancy_R": 0.03,
+    "trade_summary.n": 36178,
+    "trade_summary.payoff_ratio": 1.406,
+    "trade_summary.win_rate": 0.4311
+  },
+  "kind": "baseline",
+  "missing": [],
+  "path": "results/TODO92/r4_segA2012_amv.json",
+  "schema": "result_digest/v1",
+  "source_name": "r4_segA2012_amv.json",
+  "source_sha256": "269ae4e2c1bf4152cb5ad26dc228c0177902c1fe989e75f8649958f0b5164450",
+  "tag": "r4_segA2012_amv",
+  "unit": "TODO92"
+}

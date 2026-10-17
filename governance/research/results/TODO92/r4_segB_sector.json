@@ -1,0 +1,37 @@
+{
+  "digest_version": 1,
+  "fields": {
+    "count": 1600,
+    "end": "2026-09-04",
+    "entry_filter": "j_low",
+    "portfolio.cagr": 0.0426,
+    "portfolio.max_drawdown": 0.2015,
+    "portfolio.n_taken": 452,
+    "portfolio.return_over_maxdd": 1.03,
+    "portfolio.total_return": 0.2082,
+    "scorer": "baseline",
+    "start": "2022-01-01",
+    "timing": {
+      "eval_s": 203.0,
+      "load_s": 96.5,
+      "total_s": 340.3
+    },
+    "trade_summary.exit_reasons.open_end": {
+      "avg_return": 0.0556,
+      "n": 2745
+    },
+    "trade_summary.expectancy": -0.0008,
+    "trade_summary.expectancy_R": -0.01,
+    "trade_summary.n": 229315,
+    "trade_summary.payoff_ratio": 1.378,
+    "trade_summary.win_rate": 0.4145
+  },
+  "kind": "baseline",
+  "missing": [],
+  "path": "results/TODO92/r4_segB_sector.json",
+  "schema": "result_digest/v1",
+  "source_name": "r4_segB_sector.json",
+  "source_sha256": "45706c0cc86c6d9ea78671f847ac40e3936c94a84a304606b6e96a5f4dd65069",
+  "tag": "r4_segB_sector",
+  "unit": "TODO92"
+}

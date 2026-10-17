@@ -1,0 +1,32 @@
+{
+  "digest_version": 1,
+  "fields": {
+    "count": 7200,
+    "end": "2016-12-31",
+    "entry_filter": "j_low",
+    "scorer": "baseline",
+    "start": "2000-01-01",
+    "timing": {
+      "eval_s": 136.0,
+      "load_s": 92.7,
+      "total_s": 230.8
+    },
+    "trade_summary.exit_reasons.open_end": {
+      "avg_return": 0.0138,
+      "n": 1594
+    },
+    "trade_summary.expectancy": 0.0097,
+    "trade_summary.expectancy_R": 0.121,
+    "trade_summary.n": 293492,
+    "trade_summary.payoff_ratio": 1.508,
+    "trade_summary.win_rate": 0.4545
+  },
+  "kind": "baseline",
+  "missing": [],
+  "path": "results/TODO92/r11_segA.json",
+  "schema": "result_digest/v1",
+  "source_name": "r11_segA.json",
+  "source_sha256": "e80fc6836107e7ee58bcbae07d2f092f4daf0e934d27d9ce74556e0e91ffcaeb",
+  "tag": "r11_segA",
+  "unit": "TODO92"
+}
