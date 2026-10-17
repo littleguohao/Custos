@@ -26,6 +26,7 @@
 | `trade_summary.n` | 29866 |
 | `trade_summary.payoff_ratio` | 1.6 |
 | `trade_summary.win_rate` | 0.4357 |
+| 派生 expectancy_ex_open_end | 0.006968 |
 <!-- /digest -->
 
 
@@ -51,6 +52,7 @@
 | `trade_summary.n` | 80153 |
 | `trade_summary.payoff_ratio` | 1.662 |
 | `trade_summary.win_rate` | 0.4584 |
+| 派生 expectancy_ex_open_end | 0.014135 |
 <!-- /digest -->
 
 
@@ -76,6 +78,7 @@
 | `trade_summary.n` | 36178 |
 | `trade_summary.payoff_ratio` | 1.406 |
 | `trade_summary.win_rate` | 0.4311 |
+| 派生 expectancy_ex_open_end | 0.00204 |
 <!-- /digest -->
 
 
@@ -101,6 +104,7 @@
 | `trade_summary.n` | 122716 |
 | `trade_summary.payoff_ratio` | 1.503 |
 | `trade_summary.win_rate` | 0.4713 |
+| 派生 expectancy_ex_open_end | 0.012583 |
 <!-- /digest -->
 
 
@@ -126,6 +130,7 @@
 | `trade_summary.n` | 93085 |
 | `trade_summary.payoff_ratio` | 1.661 |
 | `trade_summary.win_rate` | 0.406 |
+| 派生 expectancy_ex_open_end | 0.003963 |
 <!-- /digest -->
 
 
@@ -151,6 +156,7 @@
 | `trade_summary.n` | 229315 |
 | `trade_summary.payoff_ratio` | 1.378 |
 | `trade_summary.win_rate` | 0.4145 |
+| 派生 expectancy_ex_open_end | -0.001483 |
 <!-- /digest -->
 
 
@@ -176,6 +182,7 @@
 | `trade_summary.n` | 119380 |
 | `trade_summary.payoff_ratio` | 1.866 |
 | `trade_summary.win_rate` | 0.453 |
+| 派生 expectancy_ex_open_end | 0.01597 |
 <!-- /digest -->
 
 
@@ -201,6 +208,7 @@
 | `trade_summary.n` | 300408 |
 | `trade_summary.payoff_ratio` | 1.439 |
 | `trade_summary.win_rate` | 0.439 |
+| 派生 expectancy_ex_open_end | 0.003792 |
 <!-- /digest -->
 
 
@@ -226,6 +234,7 @@
 | `trade_summary.n` | 43623 |
 | `trade_summary.payoff_ratio` | 1.924 |
 | `trade_summary.win_rate` | 0.4548 |
+| 派生 expectancy_ex_open_end | 0.017552 |
 <!-- /digest -->
 
 
@@ -251,6 +260,7 @@
 | `trade_summary.n` | 117736 |
 | `trade_summary.payoff_ratio` | 1.759 |
 | `trade_summary.win_rate` | 0.4615 |
+| 派生 expectancy_ex_open_end | 0.017581 |
 <!-- /digest -->
 
 
@@ -276,6 +286,7 @@
 | `trade_summary.n` | 78470 |
 | `trade_summary.payoff_ratio` | 1.749 |
 | `trade_summary.win_rate` | 0.4415 |
+| 派生 expectancy_ex_open_end | 0.013179 |
 <!-- /digest -->
 
 
@@ -301,6 +312,7 @@
 | `trade_summary.n` | 293492 |
 | `trade_summary.payoff_ratio` | 1.508 |
 | `trade_summary.win_rate` | 0.4545 |
+| 派生 expectancy_ex_open_end | 0.009678 |
 <!-- /digest -->
 
 
@@ -321,6 +333,7 @@
 | `trade_summary.n` | 300408 |
 | `trade_summary.payoff_ratio` | 1.439 |
 | `trade_summary.win_rate` | 0.439 |
+| 派生 expectancy_ex_open_end | 0.003792 |
 <!-- /digest -->
 
 
@@ -341,6 +354,7 @@
 | `trade_summary.n` | 293492 |
 | `trade_summary.payoff_ratio` | 1.508 |
 | `trade_summary.win_rate` | 0.4545 |
+| 派生 expectancy_ex_open_end | 0.009678 |
 <!-- /digest -->
 
 
@@ -353,8 +367,134 @@
 | `generated_at` | "2026-10-17" |
 | `holdout_cap` | "2026-09-04" |
 | `min_bars` | 60 |
-| `sector_index_csv` | {"date_max": "2026-09-04", "date_min": "2005-06-07", "dir": "C:\\Users\\gh\\.openclaw-tdxclaw\\workspace\\strategy_team\\data\\market\\sector_index", "n_bad": 0, "n_files": 732, "yearly": [{"n_files": 0, "year": 1990}, {"n_files": 0, "year": 1991}, {"n_files": 0, "year": 1992}, {"n_files": 0, "year": 1993}, {"n_files": 0, "year": 1994}, {"n_files": 0, "year": 1995}, {"n_files": 0, "year": 1996}, {"n_files": 0, "year": 1997}, {"n_files": 0, "year": 1998}, {"n_files": 0, "year": 1999}, {"n_files": 0, "year": 2000}, {"n_files": 0, "year": 2001}, {"n_files": 0, "year": 2002}, {"n_files": 0, "year": 2003}, {"n_files": 0, "year": 2004}, {"n_files": 70, "year": 2005}, {"n_files": 70, "year": 2006}, {"n_files": 71, "year": 2007}, {"n_files": 71, "year": 2008}, {"n_files": 71, "year": 2009}, {"n_files": 72, "year": 2010}, {"n_files": 203, "year": 2011}, {"n_files": 232, "year": 2012}, {"n_files": 256, "year": 2013}, {"n_files": 276, "year": 2014}, {"n_files": 287, "year": 2015}, {"n_files": 303, "year": 2016}, {"n_files": 327, "year": 2017}, {"n_files": 494, "year": 2018}, {"n_files": 532, "year": 2019}, {"n_files": 556, "year": 2020}, {"n_files": 588, "year": 2021}, {"n_files": 640, "year": 2022}, {"n_files": 682, "year": 2023}, {"n_files": 714, "year": 2024}, {"n_files": 726, "year": 2025}, {"n_files": 732, "year": 2026}]} |
-| `sector_index_vipdoc` | {"first_date_pct": {"p10": "2005-06-07", "p50": "2011-01-04", "p90": "2022-11-12"}, "n_files": 1120, "yearly": [{"n_active": 0, "year": 1990}, {"n_active": 0, "year": 1991}, {"n_active": 0, "year": 1992}, {"n_active": 0, "year": 1993}, {"n_active": 0, "year": 1994}, {"n_active": 0, "year": 1995}, {"n_active": 0, "year": 1996}, {"n_active": 0, "year": 1997}, {"n_active": 0, "year": 1998}, {"n_active": 0, "year": 1999}, {"n_active": 2, "year": 2000}, {"n_active": 2, "year": 2001}, {"n_active": 3, "year": 2002}, {"n_active": 3, "year": 2003}, {"n_active": 3, "year": 2004}, {"n_active": 197, "year": 2005}, {"n_active": 199, "year": 2006}, {"n_active": 201, "year": 2007}, {"n_active": 203, "year": 2008}, {"n_active": 202, "year": 2009}, {"n_active": 204, "year": 2010}, {"n_active": 664, "year": 2011}, {"n_active": 697, "year": 2012}, {"n_active": 734, "year": 2013}, {"n_active": 757, "year": 2014}, {"n_active": 775, "year": 2015}, {"n_active": 801, "year": 2016}, {"n_active": 831, "year": 2017}, {"n_active": 854, "year": 2018}, {"n_active": 901, "year": 2019}, {"n_active": 927, "year": 2020}, {"n_active": 961, "year": 2021}, {"n_active": 1014, "year": 2022}, {"n_active": 1056, "year": 2023}, {"n_active": 1095, "year": 2024}, {"n_active": 1113, "year": 2025}, {"n_active": 1120, "year": 2026}]} |
-| `stocks` | {"by_board": {"创业板": 1410, "北交所": 352, "沪主板": 1702, "深主板": 1495, "科创板": 617}, "by_market": {"bj": 352, "sh": 2319, "sz": 2905}, "first_date_max": "2026-09-04", "first_date_min": "1993-11-19", "n_eligible": 5514, "n_files": 5576, "yearly": [{"n_active": 0, "n_eligible": 0, "year": 1990}, {"n_active": 0, "n_eligible": 0, "year": 1991}, {"n_active": 0, "n_eligible": 0, "year": 1992}, {"n_active": 1, "n_eligible": 0, "year": 1993}, {"n_active": 2, "n_eligible": 2, "year": 1994}, {"n_active": 2, "n_eligible": 2, "year": 1995}, {"n_active": 3, "n_eligible": 2, "year": 1996}, {"n_active": 4, "n_eligible": 4, "year": 1997}, {"n_active": 5, "n_eligible": 5, "year": 1998}, {"n_active": 7, "n_eligible": 6, "year": 1999}, {"n_active": 865, "n_eligible": 826, "year": 2000}, {"n_active": 937, "n_eligible": 929, "year": 2001}, {"n_active": 1001, "n_eligible": 988, "year": 2002}, {"n_active": 1064, "n_eligible": 1050, "year": 2003}, {"n_active": 1157, "n_eligible": 1157, "year": 2004}, {"n_active": 1171, "n_eligible": 1171, "year": 2005}, {"n_active": 1232, "n_eligible": 1196, "year": 2006}, {"n_active": 1344, "n_eligible": 1308, "year": 2007}, {"n_active": 1410, "n_eligible": 1409, "year": 2008}, {"n_active": 1503, "n_eligible": 1439, "year": 2009}, {"n_active": 1822, "n_eligible": 1741, "year": 2010}, {"n_active": 2088, "n_eligible": 2044, "year": 2011}, {"n_active": 2231, "n_eligible": 2228, "year": 2012}, {"n_active": 2246, "n_eligible": 2245, "year": 2013}, {"n_active": 2363, "n_eligible": 2323, "year": 2014}, {"n_active": 2577, "n_eligible": 2548, "year": 2015}, {"n_active": 2803, "n_eligible": 2701, "year": 2016}, {"n_active": 3231, "n_eligible": 3142, "year": 2017}, {"n_active": 3336, "n_eligible": 3318, "year": 2018}, {"n_active": 3538, "n_eligible": 3465, "year": 2019}, {"n_active": 3970, "n_eligible": 3861, "year": 2020}, {"n_active": 4491, "n_eligible": 4367, "year": 2021}, {"n_active": 4919, "n_eligible": 4797, "year": 2022}, {"n_active": 5232, "n_eligible": 5183, "year": 2023}, {"n_active": 5332, "n_eligible": 5301, "year": 2024}, {"n_active": 5448, "n_eligible": 5410, "year": 2025}, {"n_active": 5555, "n_eligible": 5514, "year": 2026}]} |
+| `sector_index_csv` | {"date_max": "2026-09-04", "date_min": "2005-06-07", "dir": "C:\\Users\\gh\\.openclaw-tdxclaw\\workspace\\strategy_team\\data\\market\\sector_index", "n_bad": 0, "n_files": 732, "yearly": "见子表 sector_index_csv.yearly（37 行）"} |
+| `sector_index_vipdoc` | {"first_date_pct": {"p10": "2005-06-07", "p50": "2011-01-04", "p90": "2022-11-12"}, "n_files": 1120, "yearly": "见子表 sector_index_vipdoc.yearly（37 行）"} |
+| `stocks` | {"by_board": {"创业板": 1410, "北交所": 352, "沪主板": 1702, "深主板": 1495, "科创板": 617}, "by_market": {"bj": 352, "sh": 2319, "sz": 2905}, "first_date_max": "2026-09-04", "first_date_min": "1993-11-19", "n_eligible": 5514, "n_files": 5576, "yearly": "见子表 stocks.yearly（37 行）"} |
+
+子表 `sector_index_csv.yearly`：
+
+| year | n_files |
+|---|---|
+| 1990 | 0 |
+| 1991 | 0 |
+| 1992 | 0 |
+| 1993 | 0 |
+| 1994 | 0 |
+| 1995 | 0 |
+| 1996 | 0 |
+| 1997 | 0 |
+| 1998 | 0 |
+| 1999 | 0 |
+| 2000 | 0 |
+| 2001 | 0 |
+| 2002 | 0 |
+| 2003 | 0 |
+| 2004 | 0 |
+| 2005 | 70 |
+| 2006 | 70 |
+| 2007 | 71 |
+| 2008 | 71 |
+| 2009 | 71 |
+| 2010 | 72 |
+| 2011 | 203 |
+| 2012 | 232 |
+| 2013 | 256 |
+| 2014 | 276 |
+| 2015 | 287 |
+| 2016 | 303 |
+| 2017 | 327 |
+| 2018 | 494 |
+| 2019 | 532 |
+| 2020 | 556 |
+| 2021 | 588 |
+| 2022 | 640 |
+| 2023 | 682 |
+| 2024 | 714 |
+| 2025 | 726 |
+| 2026 | 732 |
+
+子表 `sector_index_vipdoc.yearly`：
+
+| year | n_active |
+|---|---|
+| 1990 | 0 |
+| 1991 | 0 |
+| 1992 | 0 |
+| 1993 | 0 |
+| 1994 | 0 |
+| 1995 | 0 |
+| 1996 | 0 |
+| 1997 | 0 |
+| 1998 | 0 |
+| 1999 | 0 |
+| 2000 | 2 |
+| 2001 | 2 |
+| 2002 | 3 |
+| 2003 | 3 |
+| 2004 | 3 |
+| 2005 | 197 |
+| 2006 | 199 |
+| 2007 | 201 |
+| 2008 | 203 |
+| 2009 | 202 |
+| 2010 | 204 |
+| 2011 | 664 |
+| 2012 | 697 |
+| 2013 | 734 |
+| 2014 | 757 |
+| 2015 | 775 |
+| 2016 | 801 |
+| 2017 | 831 |
+| 2018 | 854 |
+| 2019 | 901 |
+| 2020 | 927 |
+| 2021 | 961 |
+| 2022 | 1014 |
+| 2023 | 1056 |
+| 2024 | 1095 |
+| 2025 | 1113 |
+| 2026 | 1120 |
+
+子表 `stocks.yearly`：
+
+| year | n_active | n_eligible |
+|---|---|---|
+| 1990 | 0 | 0 |
+| 1991 | 0 | 0 |
+| 1992 | 0 | 0 |
+| 1993 | 1 | 0 |
+| 1994 | 2 | 2 |
+| 1995 | 2 | 2 |
+| 1996 | 3 | 2 |
+| 1997 | 4 | 4 |
+| 1998 | 5 | 5 |
+| 1999 | 7 | 6 |
+| 2000 | 865 | 826 |
+| 2001 | 937 | 929 |
+| 2002 | 1001 | 988 |
+| 2003 | 1064 | 1050 |
+| 2004 | 1157 | 1157 |
+| 2005 | 1171 | 1171 |
+| 2006 | 1232 | 1196 |
+| 2007 | 1344 | 1308 |
+| 2008 | 1410 | 1409 |
+| 2009 | 1503 | 1439 |
+| 2010 | 1822 | 1741 |
+| 2011 | 2088 | 2044 |
+| 2012 | 2231 | 2228 |
+| 2013 | 2246 | 2245 |
+| 2014 | 2363 | 2323 |
+| 2015 | 2577 | 2548 |
+| 2016 | 2803 | 2701 |
+| 2017 | 3231 | 3142 |
+| 2018 | 3336 | 3318 |
+| 2019 | 3538 | 3465 |
+| 2020 | 3970 | 3861 |
+| 2021 | 4491 | 4367 |
+| 2022 | 4919 | 4797 |
+| 2023 | 5232 | 5183 |
+| 2024 | 5332 | 5301 |
+| 2025 | 5448 | 5410 |
+| 2026 | 5555 | 5514 |
 <!-- /digest -->
 

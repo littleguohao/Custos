@@ -271,6 +271,47 @@ def _fmt(v: Any) -> str:
     return s.replace("|", "\\|")
 
 
+def _table_rows(v: Any) -> Optional[list[dict[str, Any]]]:
+    """同构 dict 列表（如探针逐年表）⇒ 返回行，用子表渲染；否则 None。"""
+    if (
+        isinstance(v, list)
+        and v
+        and all(isinstance(x, dict) for x in v)
+        and len({tuple(sorted(x)) for x in v}) == 1
+        and all(not isinstance(y, (dict, list)) for x in v for y in x.values())
+    ):
+        return v
+    return None
+
+
+def _split_tables(
+    prefix: str, v: Any, out: list[tuple[str, list[dict[str, Any]]]]
+) -> Any:
+    """把嵌套里的同构 dict 列表抽成子表，原位换成「见子表」占位（只影响渲染，不改 JSON）。"""
+    rows = _table_rows(v)
+    if rows is not None:
+        out.append((prefix, rows))
+        return f"见子表 {prefix}（{len(rows)} 行）"
+    if isinstance(v, dict):
+        return {k: _split_tables(f"{prefix}.{k}", x, out) for k, x in v.items()}
+    return v
+
+
+def _derived(digest: dict[str, Any]) -> list[tuple[str, Any]]:
+    """派生读数（确定性、只用已提取字段）：baseline 的剔 open_end 期望（runbook 读数口径）。"""
+    f = digest["fields"]
+    out: list[tuple[str, Any]] = []
+    if digest["kind"] == "baseline":
+        n, e = f.get("trade_summary.n"), f.get("trade_summary.expectancy")
+        oe = f.get("trade_summary.exit_reasons.open_end") or {}
+        if isinstance(n, (int, float)) and isinstance(e, (int, float)) and n:
+            k = oe.get("n") or 0
+            if n - k > 0:
+                real = (n * e - k * (oe.get("avg_return") or 0.0)) / (n - k)
+                out.append(("派生 expectancy_ex_open_end", round(real, 6)))
+    return out
+
+
 def render_md(digest: dict[str, Any]) -> str:
     """回填块（确定性渲染——守卫测试据此逐字比对）。"""
     rel = digest["path"]
@@ -283,10 +324,25 @@ def render_md(digest: dict[str, Any]) -> str:
         "| 字段 | 值 |",
         "|---|---|",
     ]
+    subs: list[tuple[str, list[dict[str, Any]]]] = []
     for k, v in sorted(digest["fields"].items()):  # 键序与入库 JSON（sort_keys）一致
-        lines.append(f"| `{k}` | {_fmt(v)} |")
+        lines.append(f"| `{k}` | {_fmt(_split_tables(k, v, subs))} |")
+    for k, v in _derived(digest):
+        lines.append(f"| {k} | {_fmt(v)} |")
     if digest["missing"]:
         lines.append(f"| ⚠️ 缺失字段 | {', '.join(digest['missing'])} |")
+    for name, rows in subs:
+        cols = sorted(
+            rows[0], key=lambda c: (c not in ("year", "date"), c)
+        )  # 年/日期列置首
+        lines += [
+            "",
+            f"子表 `{name}`：",
+            "",
+            "| " + " | ".join(cols) + " |",
+            "|" + "---|" * len(cols),
+        ]
+        lines += ["| " + " | ".join(_fmt(r[c]) for c in cols) + " |" for r in rows]
     lines.append("<!-- /digest -->")
     return "\n".join(lines)
 

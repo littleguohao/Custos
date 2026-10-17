@@ -42,7 +42,7 @@ ls <通达信根>/vipdoc/bj/lday/bj88* | head    # 北交所 88 段个股 vs 880
 | 2d | R43 挖掘段 | 见下 ④ | `r43`：`style.*.dims.*.verdict` 为 candidate 的（方向, 维度, 符号）清单 + `criteria.C4` |
 | 2e | R44 8 档扫描 | 见下 ⑤ | `r44_scan`：`criteria.C1~C4`、`x_star` |
 | 2f | R45 预演 | 见下 ⑥ | `r45`：`verdict`、`top.exit`、`criteria.C2.beats_no_trade`、`pools.entry_accounting` |
-| 2g | R46 家族配比 | 见下 ⑦ | `r46`：`verdict`、`criteria.C2.g_star/merged_delta/tie_seed_median_delta`、`base_equals_live` |
+| 2g | R46 家族配比（⏸ 暂停：复核更正后功效触 untested 线，待 owner 确认） | 见下 ⑦ | `r46`：`verdict`、`criteria.C2.g_star/merged_delta/tie_seed_median_delta`、`base_equals_live` |
 
 ```bash
 # ① R36（原 C4 复核报告做冻结源；v0.407 起臂读 top-N 选中子集，旧格子产物含逐笔可直接复用）
