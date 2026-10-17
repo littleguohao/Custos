@@ -219,3 +219,72 @@ def test_null_calibration(tmp_path, small_grid):
         rep = json.loads((tmp_path / "r46.json").read_text(encoding="utf-8"))
         passes += rep["criteria"]["C4"]["state"] == "confirmed_pass"
     assert passes / trials <= 0.25, passes
+
+
+# ---------------------------------------------------------------------------
+# v0.416：主读数 = 每日 top-N 选中集（不过组合并发约束）
+# ---------------------------------------------------------------------------
+
+
+def _day_trades(n_days=3, per_day=8):
+    out = []
+    for d in range(n_days):
+        for k in range(per_day):
+            out.append(
+                {
+                    "code": f"{k:06d}",
+                    "entry_date": f"2020-01-0{d + 1}",
+                    "exit_date": "2020-01-09",  # 持有跨全期 ⇒ 并发约束必然咬住
+                    "ret": 0.01 * (k - 3),
+                    "risk_frac": 0.05,
+                    "reason": "stop",
+                    "score": float(k % 4),  # 有平分
+                    "holding": 1,
+                    "r_multiple": 0.2 * (k - 3),
+                }
+            )
+    return out
+
+
+def test_select_daily_topn_same_order_as_portfolio():
+    from custos.research import backtest_factors as bt
+
+    tr = _day_trades(n_days=1)
+    taken: list = []
+    bt.simulate_portfolio_topn(
+        tr, top_n=5, max_concurrent=99, max_pos_frac=0.01, taken_out=taken, tie_seed=3
+    )
+    sel = bt.select_daily_topn(tr, 5, tie_seed=3)
+    assert [t["code"] for t in sel] == [t["code"] for t in taken]
+
+
+def test_reading_selected_not_bound_by_concurrency():
+    import numpy as np
+
+    tr = _day_trades()
+    rd = fl._reading(tr, np.array([t["score"] for t in tr]), 5, 0, None)
+    assert rd["n_selected"] == 15  # 3 日 × top5
+    assert rd["n_taken"] <= 5  # V0 组合并发 ≤5、持有跨日
+    assert rd["margin_portfolio"] is not None and "_sel" in rd
+
+
+def test_c1_requires_selected_count(tmp_path, small_grid, monkeypatch):
+    rc = fl.main(_args(tmp_path), collector=_collector(_world(0, edge=3.0)))
+    assert rc == 0
+    c1 = json.loads((tmp_path / "r46.json").read_text(encoding="utf-8"))["criteria"][
+        "C1"
+    ]
+    assert min(c1["n_selected_base"].values()) < fl.MIN_N_SELECTED and c1["ok"] is False
+    monkeypatch.setattr(fl, "MIN_N_SELECTED", 1)
+    assert fl.main(_args(tmp_path), collector=_collector(_world(0, edge=3.0))) == 0
+    c1 = json.loads((tmp_path / "r46.json").read_text(encoding="utf-8"))["criteria"][
+        "C1"
+    ]
+    assert c1["ok"] is (min(c1["n_taken_base"].values()) >= fl.MIN_N_TAKEN)
+
+
+def test_min_n_selected_anchored_to_power_line():
+    from custos.research import power_mde as pm
+
+    assert pm.mde(0.44, fl.MIN_N_SELECTED, 0.75, 5) <= 0.03
+    assert pm.mde(0.44, fl.MIN_N_SELECTED - 100, 0.75, 5) > 0.03

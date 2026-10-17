@@ -9,8 +9,12 @@
 ``test_family_lattice.py`` 钉住与 technical_score 逐位一致。
 
 判据（跑数前写死，预注册 v0.404 定稿）：
-- C1：A、B 两段基准格 n_taken ≥ 100；
-- C2：g* = 两段都过 rdd 相对门、满分占比 ≤30% 的格中，A∪B 合并 Δmargin（选中子集并集，vs 基准）最高者；
+**主读数口径（v0.416 修订，#92 功效复核后、跑数前）**：margin = 每日 top-N **选中集**
+（``bt.select_daily_topn``，不过组合并发约束）的已实现交易 margin——组合实际成交（V0 口径并发≤5）
+n 仅数百、MDE 3.4~6.4pp 触 untested 线；组合层读数降为 rdd 相对门 + 副读数 ``margin_portfolio``。
+
+- C1：A、B 两段基准格选中集 n_selected ≥ 5400（= 功效线 MDE≤3pp@deff5 反解）**且** 组合 n_taken ≥ 100（rdd 门要有意义）；
+- C2：g* = 两段都过 rdd 相对门、满分占比 ≤30% 的格中，A∪B 合并 Δmargin（选中集并集，vs 基准）最高者；
   要求 g* 在 A、B **各自** Δmargin > 0（平分种子 0 选格；另按种子 0~19 读 Δ 中位数作稳健副读数，中位数 ≤0
   的窗 ⇒ C2 不过）；
 - C3：g* 的 12 个邻格（每家族 ±1 档）≥ 2/3 在 A、B 两段 Δmargin 均 > 0；
@@ -86,6 +90,8 @@ GRID: list[tuple[int, ...]] = list(itertools.product(LEVELS, repeat=len(FAMILY_N
 BASE = tuple(1 for _ in FAMILY_NAMES)
 ONOFF = [m for m in GRID if all(x in (0, 1) for x in m)]
 MIN_N_TAKEN = 100
+#: v0.416：主读数=选中集；门槛 = 功效线反解——power_mde(wr 0.44, ρ 0.75, deff 5) ≤ 3pp ⇔ n ≥ 5400
+MIN_N_SELECTED = 5400
 FULL_SCORE_MAX = 0.30
 C3_FRAC = 2 / 3
 N_RANDOM = 100
@@ -141,8 +147,13 @@ def _reading(
         trades, top_n=top_n, taken_out=taken, tie_seed=tie_seed, **V0_PORTFOLIO
     )
     tsum = bt.summarize_realized(taken)
-    margin = sg._margin(
+    margin_pf = sg._margin(
         {"win": tsum.get("win_rate"), "payoff": tsum.get("payoff_ratio")}
+    )
+    sel = bt.select_daily_topn(trades, top_n, tie_seed)
+    ssum = bt.summarize_realized(sel)
+    margin = sg._margin(
+        {"win": ssum.get("win_rate"), "payoff": ssum.get("payoff_ratio")}
     )
     rdd = sg._ret_over_dd(pf)
     gate = (
@@ -152,11 +163,13 @@ def _reading(
     )
     return {
         "margin": margin,
+        "margin_portfolio": margin_pf,
         "ret_over_dd": rdd,
         "rdd_gate": gate,
+        "n_selected": ssum.get("n"),
         "n_taken": pf.get("n_taken"),
         "full_share": float((scores >= 100.0).mean()) if len(scores) else None,
-        "_taken": [dict(t) for t in taken],
+        "_sel": [dict(t) for t in sel],
     }
 
 
@@ -188,7 +201,7 @@ def eval_grid(
         )
         for w in segs
     }
-    base_merged = _merged_margin([t for w in segs for t in base[w]["_taken"]])
+    base_merged = _merged_margin([t for w in segs for t in base[w]["_sel"]])
     out: dict[tuple[int, ...], dict[str, Any]] = {}
     for m in cells or GRID:
         per: dict[str, Any] = {}
@@ -205,10 +218,18 @@ def eval_grid(
                     base[w]["ret_over_dd"],
                 )
             )
-            taken_all += rd["_taken"]
+            taken_all += rd["_sel"]
             per[w] = {
                 k: rd[k]
-                for k in ("margin", "ret_over_dd", "rdd_gate", "n_taken", "full_share")
+                for k in (
+                    "margin",
+                    "margin_portfolio",
+                    "ret_over_dd",
+                    "rdd_gate",
+                    "n_selected",
+                    "n_taken",
+                    "full_share",
+                )
             }
             per[w]["delta"] = _d(rd["margin"], base[w]["margin"])
         per["merged_delta"] = _d(_merged_margin(taken_all), base_merged)
@@ -383,9 +404,12 @@ def run_study(
     grid = eval_grid(segs, args.top_n)
     gs = pick_gstar(grid)
     base_n = {w: grid[BASE][w]["n_taken"] or 0 for w in SEG_NAMES}
+    base_sel = {w: grid[BASE][w]["n_selected"] or 0 for w in SEG_NAMES}
     c1: dict[str, Any] = {
-        "ok": all(v >= MIN_N_TAKEN for v in base_n.values()),
+        "ok": all(v >= MIN_N_TAKEN for v in base_n.values())
+        and all(v >= MIN_N_SELECTED for v in base_sel.values()),
         "n_taken_base": base_n,
+        "n_selected_base": base_sel,
     }
 
     # 稳健副读数：g* 与基准按平分种子 0~19 的 Δ 中位数
@@ -446,7 +470,7 @@ def run_study(
     from custos.research import provenance as pv  # noqa: PLC0415
 
     rep: dict[str, Any] = {
-        "schema": "family_lattice_report/v1",
+        "schema": "family_lattice_report/v2",  # v2 = 主读数选中集（v0.416）
         "unit": "R46",
         "families": {f: list(v) for f, v in FAMILIES.items()},
         "levels": list(LEVELS),
@@ -471,7 +495,7 @@ def run_study(
         "provenance": pv.build(
             args,
             unit="R46",
-            criteria_version="v0.404",
+            criteria_version="v0.416",
             pre_reg_doc=RESEARCH_DIR / "R46_v0_family_weight_lattice.md",
         ),
     }
@@ -516,7 +540,8 @@ def _judgment_read(args, collector, legs, gs, arms) -> dict[str, Any]:
             pool.append(r["delta"])
     line = jb.judgment_line(args.batch_id, cand, pool, min_pool=args.c4_min_pool)
     n_taken = base[BASE]["J"]["n_taken"] or 0
-    if n_taken < MIN_N_TAKEN:
+    n_sel = base[BASE]["J"]["n_selected"] or 0
+    if n_taken < MIN_N_TAKEN or n_sel < MIN_N_SELECTED:
         v = "untested"
     elif cand is None or cand <= 0 or not gate:
         v = "falsified"

@@ -418,6 +418,7 @@
 | 2026-10-17 | v0.413 | **回填协议（owner 2026-10-17）**：新工具 `result_digest <kind> <产物> --tag --write --backfill`：按预注册字段清单（11 种 kind：#91 探针 / #92 基线 / R36~R46 各终端）机械提取读数写入库 `governance/research/results/<单元>/<tag>.json` 并插回填块；守卫测试逐字重渲染防手改、results 必须被引用；runbook 每步改为 跑数→摘要→提交；合入清单加第 6 条 | owner 2026-10-17 | 钉测 +11 |
 | 2026-10-17 | v0.414 | **#91/#92 读数回填**：探针与基线 14 格落 README（SEG_A_START=2000-01-01；R11 剔 open_end 期望 A +0.968%/B +0.379%；R4 八格+2012 子窗四格）；R39/R44/R45/R46 功效节回填后无一触 untested 线（R44 MDE≈0.35pp、R46≈0.62pp、R45 n_taken 下限估>100、R39 最小桶≫50），步骤 2 全跑；R43 段数回填①（两窗两方向合格段 ≫8）；TODO #91/#92 闭环、#112 实测成立转 coder | 生产机跑数 | 各单元挖掘段读数 |
 | 2026-10-17 | v0.415 | **#91/#92 回填复核**：result_digest 渲染改进（同构列表展开子表、baseline 派生剔 open_end 期望），15 个回填块按入库 JSON 重渲染；README 手写读数逐格核对一致；功效更正——R46 的 n 应取组合实际成交（A 583 / B 236），MDE 3.4~6.4pp > 3pp 触 untested 线、runbook 2g 暂停待 owner 确认；R39 逐桶按 n_taken 估 B≈79 贴线（不触规则） | 复核 | 钉测不变 |
+| 2026-10-17 | v0.416 | **R46 定稿修订 2（owner 选 B）**：主读数改为每日 top-N 选中集 margin（新 `bt.select_daily_topn`，与组合 top-N 共用排序键 `_topn_rank`，组合行为逐位不变）；组合层降为 rdd 硬门 + 副读数 margin_portfolio；C1 双门 n_taken≥100 且 n_selected≥5400（3pp 功效线反解）；schema v2；功效 A 1.2pp / B 2.3pp（deff5），runbook 2g 恢复 | owner 2026-10-17 | 钉测 +4 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

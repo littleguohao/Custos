@@ -4428,6 +4428,32 @@ def _curve_cagr(
     return years, cagr
 
 
+def _topn_rank(t: dict[str, Any], tie_seed: int) -> tuple:
+    """横截面择优排序键：score 降序；None/非数排最后（E5——此前 None 当 0 排在负分前）；
+    平分按哈希（E1）。组合 top-N 与 ``select_daily_topn`` 共用（同序钉测）。"""
+    sc = t.get("score")
+    if isinstance(sc, (int, float)) and sc == sc:
+        return (0, -float(sc), _tie_key(t, tie_seed))
+    return (1, 0.0, _tie_key(t, tie_seed))
+
+
+def select_daily_topn(
+    candidates: list[dict[str, Any]], top_n: int, tie_seed: int = 0
+) -> list[dict[str, Any]]:
+    """每个进场日按 ``_topn_rank`` 取前 top_n 的**选中集**（不过并发/敞口/已持有约束）——
+    衡量打分的横截面排序质量（R46 主读数，v0.416）。准入同组合层（有日期 + ``_has_risk``）。"""
+    import collections as _c
+
+    by_date: dict[str, list] = _c.defaultdict(list)
+    for t in candidates:
+        if t.get("entry_date") and t.get("exit_date") and _has_risk(t):
+            by_date[t["entry_date"]].append(t)
+    out: list[dict[str, Any]] = []
+    for d in sorted(by_date):
+        out += sorted(by_date[d], key=lambda t: _topn_rank(t, tie_seed))[:top_n]
+    return out
+
+
 def _tie_key(t: dict[str, Any], tie_seed: int) -> int:
     """平分破序键（v0.384，审计 E1）：``blake2b(seed|entry_date|code)``——与输入顺序
     无关、不按代码号系统性偏向、同 seed 可复现。此前稳定排序按候选清单顺序
@@ -4563,14 +4589,9 @@ def _open_topn_for_date(
     skipped = 0
     taken_rets: list[float] = []
 
-    def _rank(t: dict) -> tuple:
-        # score 降序；None/非数排最后（E5——此前 None 当 0 排在负分前）；平分按哈希（E1）
-        sc = t.get("score")
-        if isinstance(sc, (int, float)) and sc == sc:
-            return (0, -float(sc), _tie_key(t, tie_seed))
-        return (1, 0.0, _tie_key(t, tie_seed))
-
-    ranked = sorted((t for t in day if t["code"] not in held), key=_rank)
+    ranked = sorted(
+        (t for t in day if t["code"] not in held), key=lambda t: _topn_rank(t, tie_seed)
+    )
     opened = 0
     for t in ranked:
         if opened >= top_n or len(open_heap) >= max_concurrent:
