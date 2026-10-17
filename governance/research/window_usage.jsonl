@@ -5,3 +5,4 @@
 {"schema": "window_usage/v1", "unit": "R37-C5", "window": "pre2019", "tag": "r37_c5_v2", "purpose": "C5 pre2019 终审读数（补登：v0.321 前工具无记录点；v0.288 全历史复跑）", "recorded_at": "2026-10-12T11:13:04+08:00"}
 {"schema": "window_usage/v1", "unit": "R36-P4", "window": "judgment", "tag": "r36_p4_v1", "purpose": "P4 判定窗读数（补登：v0.321 前工具无记录点）", "recorded_at": "2026-10-12T11:13:04+08:00"}
 {"schema": "window_usage/v1", "unit": "R41", "window": "judgment", "tag": "r41_probe", "purpose": "C1~C4 判定窗读数", "recorded_at": "2026-10-13T00:38:51+08:00"}
+{"schema": "window_usage/v1", "unit": "R40", "window": "judgment", "tag": "r40_a1", "purpose": "C1~C4 判定窗读数", "recorded_at": "2026-10-16T23:13:30+08:00"}

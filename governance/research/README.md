@@ -346,7 +346,7 @@ append-only、生产机写入提交）：
   uv run python -m custos.research backtest_factors --trade-sim \
     --scorer baseline --entry-filter j_low --stop-mode pct --stop-pct 8 \
     --bbi-consec 2 --cost-bps 25 --seed 0 \
-    --start 2000-01-01 --end 2016-12-31 --count 7200 \
+    --start 2000-01-01 --end 2016-12-31 --count 7200 --allow-tail-clip \
     --summary-only --out artifacts/logs/baseline_v2/r11_segA.json
   uv run python -m custos.research backtest_factors --trade-sim \
     --scorer baseline --entry-filter j_low --stop-mode pct --stop-pct 8 \
@@ -363,8 +363,9 @@ append-only、生产机写入提交）：
   （同 `score_return_study.py` 口径）；win_rate 按全量报并注明含 open_end。
 - **R4 择时网格** 2×2×2 = 8 条：公共参数上叠 `--portfolio --risk-pct 1 --max-concurrent 5 --max-pos 20`；
   AMV 腿加 `--amv-long-only`，板块腿加 `--sector-filter`（依赖 `data/market/sector_index/`
-  + `sector_members.json`，生产机已有）；挖掘 A 起点=SEG_A_START（步骤 0），挖掘 B
-  窗同 R11；产物 `artifacts/logs/baseline_v2/r4_seg{A,B}_{amv,sector,amv_sector,none}.json`。
+  + `sector_members.json`，生产机已有）；挖掘 A 起点=SEG_A_START（步骤 0），且挖掘 A 五格（R11 segA + R4 四格）同带 `--allow-tail-clip`：as-of 宇宙下多数票
+  IPO 晚于 2000 年，滚动尾部截断护栏（>50% 票首根晚于起点+10 日）会合法误触（#92 实证 388/750），尾部实际
+  已回溯到市场首个交易日、窗口无截断——v0.187 设计旁路正为此设；挖掘 B 窗同 R11；产物 `artifacts/logs/baseline_v2/r4_seg{A,B}_{amv,sector,amv_sector,none}.json`。
   读数口径：portfolio 块 `portfolio.cagr` / `portfolio.max_drawdown` /
   `portfolio.total_return` / `portfolio.return_over_maxdd`（收益/回撤比，
   注意键名不是 ret_dd）+ trades 层 `trade_summary.expectancy_R`（open_end 口径同上）。

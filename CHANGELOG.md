@@ -414,6 +414,7 @@
 | 2026-10-16 | v0.409 | **审计 2 修复 b（终端与性能）**：重放备忘指纹加 OHLCV 全列和、改挂 df 对象（随 df 回收）、已有序不复制 df；LazyGatePre pop/setdefault/update 物化；成簇随机入场整簇放得下才收（原长簇截短、臂 n 偏少）；R45 打过不交易读 total_return；_eval_lattice 同 expr 去重；pick_practice 选股日早于数据窗 ⇒ no_data、回看按最早选股日；R46 报告 base_equals_live | 审计 2 | 钉测 +5 |
 | 2026-10-16 | v0.410 | **第一批生产机跑数手册** `governance/research/batch1_runbook.md`：#91 探针 → #92 基线 → 7 个单元挖掘段（R36 前置核对 / R39 / R40 / R45 预演、R43 / R44 / R46）→ 冻结哈希 → 开批 → 判定段读数，逐步命令 + 贴回字段 + 入批条件 + 耗时估计；README 攒批协议加链接 | owner 2026-10-16 | 文档 |
 | 2026-10-16 | v0.411 | **审计 3 修复**：A-1 pick_practice 当天 add 当天 report 不再崩；B-1 timeout 移回冻结哈希（格子超时改变读数）；B-2 R44 锚点模式挖掘 C4 臂改每臂固定宽度（R41 原模式不变）；load_cell_selected_row 只读一次、按记录的 max_pos_frac 重放（topn 组合输出补该键，旧产物标 assumed）、汇总降级；_base_equals_live 双向；指纹容错非数值列；判定段臂接哨兵点 | 审计 3 | 钉测 +3 |
+| 2026-10-17 | v0.412 | **#92 基线 runbook 修订**：挖掘 A（2000 起）命令补 `--allow-tail-clip`——as-of 宇宙下多数票 IPO 晚于 2000 年，滚动尾部截断护栏合法误触（实证 388/750 票首根晚于起点+10 日）；尾部实际回溯到市场首个交易日、窗口无截断，v0.187 设计旁路正为此设 | 生产机 #92 实证 | segA 5 条重跑通过 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
