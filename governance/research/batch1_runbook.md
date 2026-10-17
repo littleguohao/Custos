@@ -36,7 +36,7 @@ ls <通达信根>/vipdoc/bj/lday/bj88* | head    # 北交所 88 段个股 vs 880
 
 | # | 单元 | 命令 | 摘要 kind / 复核重点 |
 |---|---|---|---|
-| 2a | R36 adx_gt_60 前置核对（#105） | 见下 ① | `r36_frozen`：`verdict`、`candidate.delta_median`、`candidate.gate_rate`、`candidate.n_taken_median`、`pool` 长度 |
+| 2a | R36 adx_gt_60 前置核对（#105；须 ≥ v0.417，产物 version 2） | 见下 ① | `r36_frozen`：`verdict`、`candidate.delta_median`、`candidate.gate_rate`、`candidate.n_taken_median`、`pool` 长度 |
 | 2b | R39 ADX 预演（A 选 B 验） | 见下 ② | `r39`：`verdict`、`criteria.C1~C4` |
 | 2c | R40 预演（#109） | 见下 ③ | `r40`：`verdict`、`criteria`、`pools.entry_accounting`（requested/returned 比 < 0.8 须说明） |
 | 2d | R43 挖掘段 | 见下 ④ | `r43`：`style.*.dims.*.verdict` 为 candidate 的（方向, 维度, 符号）清单 + `criteria.C4` |

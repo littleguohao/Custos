@@ -12,7 +12,7 @@
 > margin/expectancy_R 双项碾压全池、非 rdd 驱动）⇒ C5 pre2019 终审判毕
 > **untested**（v0.288——Δmargin +0.0309 但 CI95 [−0.072, +0.127] 跨 0，
 > pre2019 样本无法解析符号：既不进注册表也不按证伪归档）；**v2 重测预注册（2026-10-15）**：
-> adx_gt_60 冻结配置入判定段第一批候选（见「v2 重测预注册」节，不翻旧口径 untested）；
+> adx_gt_60 冻结配置入判定段第一批候选（见「v2 重测预注册」节，不翻旧口径 untested；🔄 v0.417 主读数改选中集，见其修订节）；
 > **Phase 4 排序器→过滤器判毕（❌ 4 对象 0 过线，2026-10-06，
 > v0.291 工具 `score_filter_study` + r36_p4_v1）**——过滤器路线证伪：
 > v0_self 空对照正常（管线无 bug）；neg4 硬剔净有害（双窗全负，
@@ -647,6 +647,18 @@ Phase 0 已完成：
   #    开批后加 --batch-id <bN> --candidate-id r36_adx_gt_60 逐字重跑
   ```
   （原报告 top_genome 若不是 adx_gt_60 单腿格，以原报告为准并在回填区注明。）
+
+
+### v2 预注册修订（v0.417，跑数前；owner 2026-10-17 选 1，同 R46 定稿修订 2）
+
+- **动机（如实记录）**：#92 功效复核——原口径 Δmargin 读 V0 组合实际成交（并发 ≤5），判定段 5 年 n_taken 量级数百，
+  MDE ≈ 4~6pp；旧口径 C5 untested 正是此因（CI95 [−0.07, +0.13] 跨 0）。本节无功效节，补上并改被估量；门槛不放松。
+- **主读数**：候选 / 等倍率对照 / 零假设池臂的 margin 全改读每日 top-N **选中集**（`bt.select_daily_topn`，同组合排序键与准入，
+  不过并发约束）；组合口径 Δ 降为副读数 `delta_portfolio_median`；rdd 门（过门率 ≥50%）不变。臂读数缺 `sel_margin`（旧产物）⇒ 不进池。
+- **C1 双门**：候选 n_taken 中位数 ≥ 100 **且** n_selected 中位数 ≥ 5400（= `power_mde` wr 0.44 / ρ 0.75 / deff 5 下 MDE ≤ 3pp 反解，
+  与 R46 `MIN_N_SELECTED` 同常量、钉测互锚）。
+- **功效**：判定段 n_selected 上限 = 判定段做多日 × 20（判定段受保护，不预读日数）；不过 5400 ⇒ 机械 untested，不消耗判读。
+- 产物 `version: 2`、`config.reading_basis = daily_topn_selected`；须用 ≥ v0.417 代码（runbook 2a 同）。
 
 ## 附录 · Phase 1 实施方案（生产机命令，v0.241 工具化落地，跑前 owner 复核）
 

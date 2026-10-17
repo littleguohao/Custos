@@ -69,3 +69,24 @@ def test_selected_unavailable_fail_closed(tmp_path):
     )
     r = sg.load_cell_selected_row(cell, p, False)
     assert r["margin"] is None and r["reading_basis"] == "selected_unavailable"
+
+
+def test_daily_selected_keys_v0416(tmp_path):
+    """v0.416：cell 行附带每日 top-N 选中集读数（R36 frozen-read 池用），不受并发约束。"""
+    cell = {"scorer": "x", "gate": "j_low", "exit": "e", "params": {}}
+    good = _cell_file(tmp_path, "g", lambda k, r: r + random.Random(k).gauss(0, 0.04))
+    bad = _cell_file(tmp_path, "b", lambda k, r: -r + random.Random(k).gauss(0, 0.04))
+    rg, rb = (
+        sg.load_cell_selected_row(cell, good, False),
+        sg.load_cell_selected_row(cell, bad, False),
+    )
+    assert (
+        rg["n_selected"] == 24 * 3 and rg["n_selected"] > rg["n"]
+    )  # 24 日 × top3 > 组合成交
+    assert rg["sel_margin"] > rb["sel_margin"]
+    p = tmp_path / "s.json"
+    p.write_text(
+        json.dumps({"trade_summary": {"n": 1}, "portfolio": {"mode": "topn"}}),
+        encoding="utf-8",
+    )
+    assert sg.load_cell_selected_row(cell, p, False)["sel_margin"] is None

@@ -619,6 +619,8 @@ def load_cell_selected_row(
         **row,
         **{k: None for k in stat},
         "reading_basis": "selected_unavailable",
+        "sel_margin": None,
+        "n_selected": None,
     }
     if (
         pf.get("mode") != "topn"
@@ -656,6 +658,30 @@ def load_cell_selected_row(
         "margin": _margin({"win": s.get("win_rate"), "payoff": s.get("payoff_ratio")}),
         "reading_basis": "selected_topn",
         "max_pos_frac_assumed": mpf_assumed,
+        # v0.416：每日 top-N 选中集（不过并发约束）——R36 v2 frozen-read 主读数 / 零假设池
+        **_daily_selected_keys(
+            trades, int(pf.get("top_n") or 0), int(pf.get("tie_seed", 0) or 0)
+        ),
+    }
+
+
+def _daily_selected_keys(
+    trades: list[dict[str, Any]], top_n: int, tie_seed: int
+) -> dict[str, Any]:
+    from custos.research import backtest_factors as bt  # noqa: PLC0415
+
+    sel = bt.select_daily_topn(trades, top_n, tie_seed)
+    try:
+        s = bt.summarize_realized(sel) if sel else {}
+    except (KeyError, TypeError):
+        return {"sel_margin": None, "n_selected": None}
+    return {
+        "sel_margin": _margin(
+            {"win": s.get("win_rate"), "payoff": s.get("payoff_ratio")}
+        )
+        if sel
+        else None,
+        "n_selected": s.get("n") or 0,
     }
 
 

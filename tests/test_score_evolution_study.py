@@ -32,6 +32,8 @@ def _reading(objective, margin=0.02, n=500):
         "win_rate": 0.4,
         "n": n,
         "cell_signature": "fake12345678",
+        "sel_margin": margin,  # v0.416 frozen-read 池读选中集
+        "n_selected": n,
     }
 
 
@@ -151,6 +153,8 @@ class TestEndToEnd:
             "win_rate",
             "n",
             "cell_signature",
+            "sel_margin",  # v0.416 选中集读数（cell 行同键）
+            "n_selected",
         }
         # 等权/单腿对照臂从格子结果按名取出（恒在保底集，零额外预算）
         assert rep["arms"]["equal_weight"]["weights"] == [1.0, 1.0]
@@ -1657,6 +1661,53 @@ class TestFrozenRead:
             (tmp_path / "fz" / "_score_evolution__fz.json").read_text(encoding="utf-8")
         )
         assert rep["line"]["m"] == 1 and rep["line"]["min_pool"] == ses.FROZEN_MIN_POOL
+
+    def test_v0416_selected_basis_and_c1_dual_gate(self, tmp_path, monkeypatch):
+        frozen = self._frozen_report(tmp_path)
+        fake = FakeRunner(default=_reading(0.2))
+        col = SpyCollector({JUDGMENT: _v0l_collected_judgment()})
+        assert (
+            ses.main(self._argv(tmp_path, frozen), cell_runner=fake, v0l_collector=col)
+            == 0
+        )
+        out = tmp_path / "fz" / "_score_evolution__fz.json"
+        rep = json.loads(out.read_text(encoding="utf-8"))
+        c = rep["candidate"]
+        assert (
+            rep["version"] == 2
+            and rep["config"]["reading_basis"] == "daily_topn_selected"
+        )
+        assert {"n_selected_median", "delta_portfolio_median"} <= set(c)
+        assert all(
+            "top_n_selected" in x and "delta_portfolio" in x for x in c["per_seed"]
+        )
+        assert (
+            c["n_selected_median"] < ses.FROZEN_MIN_N_SELECTED
+            and rep["verdict"] == "untested"
+        )
+        # 臂读数缺 sel_margin（旧产物）⇒ 不进池
+        legacy = {k: v for k, v in _reading(0.2).items() if k != "sel_margin"}
+        out.unlink()
+        assert (
+            ses.main(
+                self._argv(tmp_path, frozen),
+                cell_runner=FakeRunner(default=legacy),
+                v0l_collector=SpyCollector({JUDGMENT: _v0l_collected_judgment()}),
+            )
+            == 0
+        )
+        rep2 = json.loads(out.read_text(encoding="utf-8"))
+        assert rep2["pool"] == [] and {a["status"] for a in rep2["arms"]} <= {
+            "no_selected_reading",
+            "no_best",
+        }
+
+    def test_min_n_selected_anchor(self):
+        from custos.research import family_lattice_study as fl
+        from custos.research import power_mde as pm
+
+        assert ses.FROZEN_MIN_N_SELECTED == fl.MIN_N_SELECTED
+        assert pm.mde(0.44, ses.FROZEN_MIN_N_SELECTED, 0.75, 5) <= 0.03
 
 
 class TestJobsParallel:

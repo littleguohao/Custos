@@ -1232,6 +1232,9 @@ class _V0LatticeEvaluator:
             "selected_expectancy": pf.get("selected_expectancy"),
             "n_taken": pf.get("n_taken"),
             "n_candidates": len(cands),
+            **_selected_set_keys(
+                cands, self._args.top_n, getattr(self._args, "tie_seed", 0)
+            ),
         }
         if addon_expr is not None:
             out["n_addon_missing"] = n_missing
@@ -2930,6 +2933,31 @@ def _median(xs: list[float]) -> Optional[float]:
     return statistics.median(xs) if xs else None
 
 
+#: R36 v2 frozen-read C1 选中集门（v0.416 修订，owner 选 1）：同 R46 ``MIN_N_SELECTED``——
+#: power_mde(wr 0.44, ρ 0.75, deff 5) ≤ 3pp 的反解（钉测互锚）
+FROZEN_MIN_N_SELECTED = 5400
+FROZEN_MIN_N_TAKEN = 100
+
+
+def _selected_set_keys(
+    cands: list[dict[str, Any]], top_n: int, tie_seed: int
+) -> dict[str, Any]:
+    """每日 top-N **选中集**（不过组合并发约束，``bt.select_daily_topn``）的已实现读数——
+    R36 v2 frozen-read 主读数（v0.416）。附加键，不改既有读数键。"""
+    from custos.research import strategy_grid as sg  # noqa: PLC0415
+
+    sel = bt.select_daily_topn(cands, top_n, tie_seed)
+    s = bt.summarize_realized(sel)
+    return {
+        "sel_margin": sg._margin(
+            {"win": s.get("win_rate"), "payoff": s.get("payoff_ratio")}
+        )
+        if sel
+        else None,
+        "n_selected": s.get("n") or 0,
+    }
+
+
 def _run_frozen_read(
     args: Any,
     frozen: dict,
@@ -2949,6 +2977,10 @@ def _run_frozen_read(
     - 判决（R36 v2 节写死）：C1 候选 n_taken 中位数 ≥100（否则 untested）；候选 Δ 中位数 >0
       且过门率 ≥ 50%（否则 falsified）；带 --batch-id ⇒ judgment_line（m 来自名册）
       confirmed_pass ⇒ candidate，否则 provisional；无批次号 ⇒ 预览（no_batch）。
+    - **v0.416 修订（跑数前，owner 2026-10-17 选 1，同 R46 定稿修订 2）**：Δ 与零假设池改读每日
+      top-N **选中集** margin（``sel_margin``；组合成交 n 仅数百、MDE 4~6pp）；组合口径 Δ 降为副读数
+      ``delta_portfolio``，rdd 门（过门率）不变；C1 双门 = n_taken 中位数 ≥100 **且** n_selected
+      中位数 ≥ ``FROZEN_MIN_N_SELECTED``；臂读数无 ``sel_margin``（旧产物）⇒ 不进池（fail-closed）。
     """
     legs = list(frozen["legs"])
     top = frozen.get("top_genome") or {}
@@ -2962,16 +2994,22 @@ def _run_frozen_read(
             args.tie_seed = sd
             rt = evaluator.evaluate(w_top, legs, window)
             re_ = evaluator.evaluate(w_eq, legs, window)
-            mt = (rt or {}).get("margin")
-            me = (re_ or {}).get("margin")
+            mt = (rt or {}).get("sel_margin")
+            me = (re_ or {}).get("sel_margin")
+            pt = (rt or {}).get("margin")
+            pe = (re_ or {}).get("margin")
             per_seed.append(
                 {
                     "tie_seed": sd,
                     "top_margin": mt,
                     "equal_margin": me,
                     "delta": (mt - me) if mt is not None and me is not None else None,
+                    "delta_portfolio": (pt - pe)
+                    if pt is not None and pe is not None
+                    else None,
                     "top_gate": bool(rt and rt.get("objective") is not None),
                     "top_n_taken": (rt or {}).get("n_taken"),
+                    "top_n_selected": (rt or {}).get("n_selected"),
                 }
             )
     finally:
@@ -2983,6 +3021,10 @@ def _run_frozen_read(
     cand = _median(deltas)
     gate_rate = sum(1 for x in per_seed if x["top_gate"]) / len(per_seed)
     n_taken_med = _median([float(x["top_n_taken"] or 0) for x in per_seed])
+    n_sel_med = _median([float(x["top_n_selected"] or 0) for x in per_seed])
+    delta_pf_med = _median(
+        [x["delta_portfolio"] for x in per_seed if x["delta_portfolio"] is not None]
+    )
 
     pool: list[float] = []
     arms_out: list[dict[str, Any]] = []
@@ -3001,16 +3043,19 @@ def _run_frozen_read(
         rd = runner(
             f"expr:{expr}", args.gate, exit_spec, start=window.start, end=window.end
         )
-        ok = bool(
-            rd and rd.get("objective") is not None and rd.get("margin") is not None
-        )
+        gate_ok = bool(rd and rd.get("objective") is not None)
+        sm = (rd or {}).get("sel_margin")
+        ok = gate_ok and sm is not None
         if ok and eq_med is not None:
-            pool.append(rd["margin"] - eq_med)  # type: ignore[index]
+            pool.append(sm - eq_med)  # type: ignore[operator]
         arms_out.append(
             {
                 "arm": i,
-                "status": "ok" if ok else "gate_fail",
+                "status": "ok"
+                if ok
+                else ("gate_fail" if not gate_ok else "no_selected_reading"),
                 "margin": (rd or {}).get("margin"),
+                "sel_margin": sm,
             }
         )
 
@@ -3020,7 +3065,12 @@ def _run_frozen_read(
         from custos.research import judgment_batch as jb  # noqa: PLC0415
 
         line = jb.judgment_line(batch_id, cand, pool, min_pool=FROZEN_MIN_POOL)
-    if n_taken_med is None or n_taken_med < 100:
+    if (
+        n_taken_med is None
+        or n_taken_med < FROZEN_MIN_N_TAKEN
+        or n_sel_med is None
+        or n_sel_med < FROZEN_MIN_N_SELECTED
+    ):
         verdict = "untested"
     elif cand is None or cand <= 0 or gate_rate < 0.5:
         verdict = "falsified"
@@ -3029,9 +3079,10 @@ def _run_frozen_read(
     else:
         verdict = "candidate" if line["state"] == "confirmed_pass" else "provisional"
     return {
-        "version": 1,
+        "version": 2,  # v2 = 主读数选中集（v0.416）
         "config": {
             "mode": "frozen_read",
+            "reading_basis": "daily_topn_selected",
             "objective_version": _objective_version(),
             "frozen_from": str(args.frozen_read),
             "frozen_tag": (frozen.get("provenance") or {}).get("tag")
@@ -3049,13 +3100,16 @@ def _run_frozen_read(
             "delta_median": cand,
             "gate_rate": gate_rate,
             "n_taken_median": n_taken_med,
+            "n_selected_median": n_sel_med,
+            "delta_portfolio_median": delta_pf_med,
             "equal_margin_median": eq_med,
         },
         "pool": pool,
         "arms": arms_out,
         "line": line,
         "verdict": verdict,
-        "rule": "C1 候选 n_taken 中位数≥100 否则 untested；Δmargin 中位数>0 且过门率≥50% 否则 "
+        "rule": f"C1 候选 n_taken 中位数≥{FROZEN_MIN_N_TAKEN} 且 n_selected 中位数≥{FROZEN_MIN_N_SELECTED} "
+        "否则 untested；Δmargin（每日 top-N 选中集）中位数>0 且过门率≥50% 否则 "
         "falsified；带 --batch-id ⇒ judgment_line（冻结臂本窗重读池，m 来自名册）"
         "confirmed_pass ⇒ candidate，否则 provisional；无批次号 = 预览 no_batch",
     }
