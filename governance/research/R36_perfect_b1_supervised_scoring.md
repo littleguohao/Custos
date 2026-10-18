@@ -830,6 +830,35 @@ C4 死刑撤销（读数与分解见回填区「Phase 3 C4 复核」结果段，
 
 ## 附录 · Phase 4 跑数命令（生产机，v0.291 工具，判据见回填区 Phase 4 段/草案 v0.277）
 
+<!-- digest:results/R36/r36_v2_preB.json -->
+**跑数摘要** `r36_v2_preB`（kind=r36_frozen，产物 `_score_evolution__r36_v2_preB.json` sha256 `74f5375bec566374`，digest v1；数字只来自产物，勿手改）
+
+| 字段 | 值 |
+|---|---|
+| `candidate.delta_median` | 0.04981334337377094 |
+| `candidate.delta_portfolio_median` | 0.12009728680889933 |
+| `candidate.equal_margin_median` | -0.015686077931730102 |
+| `candidate.gate_rate` | 1.0 |
+| `candidate.n_selected_median` | 8893.5 |
+| `candidate.n_taken_median` | 297.5 |
+| `candidate.weights` | len=30 min=0 med=0 max=1（全量见 JSON） |
+| `config.frozen_tag` | "r36_p3_c4review" |
+| `config.reading_basis` | "daily_topn_selected" |
+| `line` | null |
+| `pool` | [] |
+| `provenance.cmdline` | "--v0-lattice --frozen-read artifacts/logs/score_evolution/r36_p3_c4review/_score_evolution__r36_p3_c4review.json --mining-start 2022-01-01 --mining-end 2024-07-31 --judgment-start 2022-01-01 --judgment-end 2026-09-04 --tag r36_v2_preB --jobs 4" |
+| `provenance.data_last_date` | null |
+| `provenance.git_dirty` | true |
+| `provenance.git_sha` | "34fd3fc869" |
+| `provenance.n_codes` | null |
+| `provenance.universe_rule` | null |
+| `provenance.universe_sha256` | "46ad8bb7da43c56b" |
+| `verdict` | "no_batch" |
+| `window` | {"end": "2026-09-04", "start": "2022-01-01"} |
+| `window_usage` | {"k": null, "note": "判定窗在挖掘段内（非受保护段 2017~2021）——读挖掘段不入台账（v2 口径）", "window": "mining_segment"} |
+<!-- /digest -->
+
+
 ```bash
 uv run python -m custos.research score_filter_study \
   --codes-file artifacts/logs/score_evolution/r36_p3_v1/_codes__r36_p3_v1.txt \
