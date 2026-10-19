@@ -177,3 +177,20 @@ R26（负边际）一致；高盈亏比来自低频长持，不代表选股能�
 - **R14**：vipdoc 宇宙带幸存者偏差；L3 不得进 live。
 - 宇宙漂移说明：本批 digest 与 R21 不同（vipdoc 日更），RD 读数逐位级复现
   R21 ⇒ 结论对宇宙扰动稳健，但跨批比较笔数时应以本批内对照为准。
+
+## 追加：标注因子交易分布画像（v0.423，owner 2026-10-19；描述性副读数，**不改本单元结论**）
+
+在本单元同一批格子产物上（`_ranked__{rsi_family,form_family,qg}_{cw,main}.json` 及其格子逐笔），用
+`label_trade_dist` 重读逐笔交易，补「1800 标注一览·盈亏比/胜率」列背后的分布：收益分位与分箱、赢亏均值 / 中位、
+高盈亏比交易占比（单笔盈利 ≥ 2/3/5 × 本格平均亏损）、利润集中度、出场原因、逐年；并给每个标注两个对照——
+同窗同出场的 **j_low 基底**、以及基底里**未命中**该标注的补集（命中 vs 未命中）。不重跑、不读新数据；
+入场 ≥ 2026-09-05 的交易剔除并计数。标注已在跨窗终审中否决，本画像只解释一览列的数字从哪来，不作选股依据。
+摘要 kind `label_dist`，回填 `results/R27_label_trade_dist.md`。生产机命令：
+
+```bash
+uv run python -m custos.research label_trade_dist --ranked artifacts/logs/strategy_grid/_ranked__rsi_family_cw.json \
+  artifacts/logs/strategy_grid/_ranked__rsi_family_main.json artifacts/logs/strategy_grid/_ranked__form_family_cw.json \
+  artifacts/logs/strategy_grid/_ranked__form_family_main.json artifacts/logs/strategy_grid/_ranked__qg_cw.json \
+  artifacts/logs/strategy_grid/_ranked__qg_main.json
+uv run python -m custos.research result_digest label_dist artifacts/logs/label_trade_dist/label_trade_dist.json --tag r27_label_dist --write --backfill
+```

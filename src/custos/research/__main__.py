@@ -180,6 +180,16 @@ TOOLS: dict[str, tuple[str, str]] = {
         "clamp(S·m) 矩阵化重打分（与 technical_score 逐位一致）；C1~C4（双挖掘段选格 / 邻格平滑 / "
         "簇级置换同预算零假设）；--batch-id 同次读判定段走 judgment_line；副读数 64 个家族开/关子格",
     ),
+    "trade_dist": (
+        "diagnostic",
+        "交易集分布画像库（v0.421，描述性副读数单源）：收益分位/分箱、赢亏均值中位、高盈亏比占比、"
+        "利润集中度、出场原因、逐年、与参照逐信号配对；被 R39/R40/R44/R45 --trade-dist 与 label_trade_dist 调用",
+    ),
+    "label_trade_dist": (
+        "diagnostic",
+        "1800 标注因子交易分布画像（v0.423，描述性副读数）：重读 R27 strategy_grid 格子逐笔，"
+        "报收益分位/分箱、高盈亏比占比、利润集中度、出场原因、逐年，及命中 vs 基底 / 未命中补集对照",
+    ),
     "result_digest": (
         "diagnostic",
         "跑数结果摘要（回填协议 v0.413）：按预注册字段清单从产物 JSON 机械提取读数，写入库的 "

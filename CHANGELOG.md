@@ -425,6 +425,7 @@
 | 2026-10-19 | v0.420 | result_digest `r44_scan` 字段清单补齐预注册「必报读数」：合并与逐窗（挖掘 A/B）各档的胜率、盈亏比、平均每笔收益、止损占比、平均持有、rdd、CAGR、最大回撤、n——v0.413 清单只收了 margin/rdd/n_taken/止损占比；生产机用新 tag `r44_scan_full` 重出摘要（产物不重跑） | owner 2026-10-19 问档位胜率/盈亏比 | 真实产物零缺失用例覆盖 |
 | 2026-10-19 | v0.421 | **交易分布画像（描述性副读数，不进判据）**：新模块 `research/trade_dist.describe`（收益分位/分箱、赢亏均值中位、高盈亏比占比 ≥2/3/5×均亏、利润集中度、出场原因、逐年、与参照逐信号配对迁移）；`plan_rules_replay --scan-widths --trade-dist` 接入（缺省关，旧产物/金样不变）；digest kind `r44_dist` 回填 results/R44_trade_dist.md | owner 2026-10-19 | 钉测 +5 |
 | 2026-10-19 | v0.422 | **R46 `-j` 并行**（主网格分块 + 零假设臂按臂序消费，fork/spawn 与串行逐位一致）；**--trade-dist 扩到 R39/R40/R45**（top/uniform 逐窗画像、逐桶、配对）；R45 必报扩展恒报（组合层/出场原因/不可卖笔数/段空头日数）；digest 复查补 R45 必报、R39 uniform_best、R40 reason 分布，新 kind r39/r40/r45_dist；R40 补功效节（不新增规则） | owner 2026-10-19 | 钉测 +3 |
+| 2026-10-19 | v0.423 | **新工具 `label_trade_dist`**：重读 R27 格子逐笔，为 1800 标注一览补分布画像（分位/分箱、高盈亏比占比、利润集中度、出场原因、逐年，命中 vs j_low 基底 / 未命中补集）；holdout 入场剔除计数；digest kind `label_dist`。修 v0.421 漏登记 `trade_dist` 进 TOOLS（test_research_entry 红，test_affected 未选中） | owner 2026-10-19 | 钉测 +2 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
