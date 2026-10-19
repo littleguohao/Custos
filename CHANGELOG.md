@@ -421,6 +421,7 @@
 | 2026-10-17 | v0.416 | **R46 定稿修订 2（owner 选 B）**：主读数改为每日 top-N 选中集 margin（新 `bt.select_daily_topn`，与组合 top-N 共用排序键 `_topn_rank`，组合行为逐位不变）；组合层降为 rdd 硬门 + 副读数 margin_portfolio；C1 双门 n_taken≥100 且 n_selected≥5400（3pp 功效线反解）；schema v2；功效 A 1.2pp / B 2.3pp（deff5），runbook 2g 恢复 | owner 2026-10-17 | 钉测 +4 |
 | 2026-10-17 | v0.417 | **R36 v2 预注册修订（owner 选 1）**：`score_evolution --frozen-read` 的 Δ 与零假设池改读每日 top-N 选中集 sel_margin（V0 格 evaluator 与 `load_cell_selected_row` 附加 sel_margin/n_selected 键，既有键不变）；组合 Δ 降副读数；C1 双门 n_taken≥100 且 n_selected≥5400（同 R46）；臂缺选中集读数不进池；产物 version 2；digest 字段同步 | owner 2026-10-17 | 钉测 +3 |
 | 2026-10-19 | v0.418 | **修 v0.417 漏传**：score_evolution 真实 cell runner 读数块（`_reading_of` 与参照缺失分支）透传 sel_margin/n_selected——此前 frozen-read 零假设池全空（生产机 r36_v2_preB pool=[]，作废须重跑）；宇宙元数据回传 provenance（n_codes/universe_rule）；frozen_read 产物 provenance 改标 R36/v0.417 | 复核 r36_v2_preB | 钉测 +1 |
+| 2026-10-19 | v0.419 | **R44 判毕 falsified**（挖掘 A∪B 扫描 r44_scan）：x*=7% 合并 Δmargin +0.11pp，B 窗 rdd 门不过、C3 两窗最优档 20%/10% 不一致、C4 低于 q95；8 档 margin 全在参照 ±1pp 内、x≥12% 单调变差；不入判定段第一批，live 止损 pct10 不改；runbook 判定段名单移除 R44 | 生产机 r44_scan | 复核 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

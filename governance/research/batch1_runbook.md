@@ -91,7 +91,7 @@ uv run python -m custos.research family_lattice_study --mining-a-start <SEG_A_ST
 | R39 | `factor_exit_study --tag r39_v2_j`（不给四参） |
 | R40 | `bear_regime_study --tag r40_v2_j --gates all` |
 | R43 | `regime_style_study --judgment-read <方向:维度:符号,…> --out artifacts/logs/regime_style/r43_j.json` |
-| R44 | `plan_rules_replay --stop-anchor signal_low --stop-buffer-pct <x*> --tag r44_j` |
+| R44（不入批） | ❌ 挖掘段 falsified（2026-10-19，r44_scan）——不入批，不跑判定段 |
 | R45 | `bear_regime_study --r45 --tag r45_v2_j` |
 | R46 | `family_lattice_study --mining-a-start <SEG_A_START> --out artifacts/logs/family_lattice/r46_j.json` |
 
