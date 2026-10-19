@@ -121,4 +121,63 @@ J<13 信号日已是超跌极限位，不再另找结构低点（owner 2026-10-1
 
 ### 回填区（逐 Phase 填）
 
+<!-- digest:results/R44/r44_scan.json -->
+**跑数摘要** `r44_scan`（kind=r44_scan，产物 `_plan_width_scan__r44_scan.json` sha256 `59cf58c7b94de0d2`，digest v1；数字只来自产物，勿手改）
+
+| 字段 | 值 |
+|---|---|
+| `accounting` | {"mining_a": {"anchor": "signal_low", "n_anchor_ge_entry": 8845, "n_clipped": 20756, "n_missing": 0, "n_score_missing": 0, "n_signals": 198147, "n_subset": 189302, "x_pct": 0.0}, "mining_b": {"anchor": "signal_low", "n_anchor_ge_entry": 22223, "n_clipped": 11217, "n_missing": 0, "n_score_missing": 0, "n_signals": 403056, "n_subset": 380833, "x_pct": 0.0}} |
+| `criteria.C1` | {"n_taken": {"mining_a": 865, "mining_b": 266}, "ok": true, "rule": "两段挖掘窗各自参照档 n_taken ≥ 100（不过=untested）"} |
+| `criteria.C2` | {"merged_delta_margin": 0.0011302478143200845, "merged_margin": 0.06068241353936715, "ok": false, "passing_rdd_merged": [5.0, 6.0, 7.0, 10.0, 15.0, 20.0], "rule": "x*=两窗合并 margin 最高且过 rdd 门的档；x* 两窗各自 Δmargin>0 且过门", "windows": {"mining_a": {"delta_margin": 0.00018327188606948042, "ok": true, "rdd_gate": true}, "mining_b": {"delta_margin": 0.0015335078485758658, "ok": false, "rdd_gate": false}}, "x_star": 7.0} |
+| `criteria.C3` | {"ok": false, "rule": "①x* 相邻两档（端点取单侧）两窗 Δmargin 均>0；②两窗各自最优档与 x* 相差 ≤1 档；任一不过 ⇒ C3 False（结局最高 provisional）", "smooth": {"x6": {"mining_a": -0.0009753452631369175, "mining_b": 0.0016548328843961069}, "x8": {"mining_a": 0.0014893814997263277, "mining_b": 0.0013060330157822486}}, "window_best": {"mining_a": 20.0, "mining_b": 10.0}, "x_star": 7.0} |
+| `criteria.C4` | {"arm_draws": 8, "evaluated": 200, "gate_pass": 200, "gate_pass_rate": 1.0, "max_arms": 2000, "min_pool": 20, "note": "随机宽度臂：逐信号 x~U[5%,20%]（同锚点），每臂抽 8 组取 max（与 8 档网格同预算）；池元素=臂两窗合并 Δmargin；N 指过门臂数（criteria_kit.assemble_c4_pool 单源）", "plan_delta_merged": 0.0011302478143200845, "pool_size": 200, "q95": 0.0014762561148931042, "state": "confirmed_fail", "target_pool": 200} |
+| `merged.ref.margin` | 0.05955216572504707 |
+| `merged.ref.n_taken` | 1131 |
+| `merged.ref.rdd_gate` | true |
+| `merged.ref.stop_share` | 0.17070693783051383 |
+| `merged.x10.margin` | 0.06037186311787068 |
+| `merged.x10.n_taken` | 1105 |
+| `merged.x10.rdd_gate` | true |
+| `merged.x10.stop_share` | 0.14781762214212424 |
+| `merged.x12.margin` | 0.05834862987263606 |
+| `merged.x12.n_taken` | 1089 |
+| `merged.x12.rdd_gate` | false |
+| `merged.x12.stop_share` | 0.11631981899023916 |
+| `merged.x15.margin` | 0.05524313725490193 |
+| `merged.x15.n_taken` | 1044 |
+| `merged.x15.rdd_gate` | true |
+| `merged.x15.stop_share` | 0.08294526734896121 |
+| `merged.x20.margin` | 0.05175228992433295 |
+| `merged.x20.n_taken` | 1018 |
+| `merged.x20.rdd_gate` | true |
+| `merged.x20.stop_share` | 0.04973383496891087 |
+| `merged.x5.margin` | 0.06033918252290349 |
+| `merged.x5.n_taken` | 1181 |
+| `merged.x5.rdd_gate` | true |
+| `merged.x5.stop_share` | 0.29154147701860084 |
+| `merged.x6.margin` | 0.06042832369942197 |
+| `merged.x6.n_taken` | 1178 |
+| `merged.x6.rdd_gate` | true |
+| `merged.x6.stop_share` | 0.252243766827155 |
+| `merged.x7.margin` | 0.06068241353936715 |
+| `merged.x7.n_taken` | 1151 |
+| `merged.x7.rdd_gate` | true |
+| `merged.x7.stop_share` | 0.21834653196172837 |
+| `merged.x8.margin` | 0.06090484893696385 |
+| `merged.x8.n_taken` | 1132 |
+| `merged.x8.rdd_gate` | false |
+| `merged.x8.stop_share` | 0.19016022520981873 |
+| `provenance.cmdline` | "--scan-widths --tag r44_scan" |
+| `provenance.data_last_date` | "2026-09-04" |
+| `provenance.git_dirty` | true |
+| `provenance.git_sha` | "af920b8cd1" |
+| `provenance.n_codes` | 5576 |
+| `provenance.universe_rule` | "ashare_full_asof" |
+| `provenance.universe_sha256` | "f0692547ad66f1b2" |
+| `verdict` | "falsified" |
+| `window_usage` | {"k": null, "note": "扫描模式只读挖掘 A∪B——判定段不读、批次门不触发（v2 纪律）", "window": "not_read"} |
+| `windows` | {"mining_a": ["2000-01-01", "2016-12-31"], "mining_b": ["2022-01-01", "2026-09-04"]} |
+<!-- /digest -->
+
+
 （空）
