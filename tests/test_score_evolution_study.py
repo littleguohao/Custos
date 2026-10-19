@@ -1709,6 +1709,20 @@ class TestFrozenRead:
         assert ses.FROZEN_MIN_N_SELECTED == fl.MIN_N_SELECTED
         assert pm.mde(0.44, ses.FROZEN_MIN_N_SELECTED, 0.75, 5) <= 0.03
 
+    def test_real_reading_of_passes_selected_keys(self):
+        """v0.418 回归：真实 cell runner 的读数块必须透传 sel_margin/n_selected
+        （v0.417 漏传 ⇒ 生产机 r36_v2_preB 零假设池全空；FakeRunner 直给键掩盖了它）。"""
+        from custos.research import strategy_grid as sg
+
+        row = {
+            "margin": 0.01,
+            "ret_over_dd": 1.0,
+            "sel_margin": 0.03,
+            "n_selected": 9000,
+        }
+        r = ses._reading_of(sg, row, row)
+        assert r["sel_margin"] == 0.03 and r["n_selected"] == 9000
+
 
 class TestJobsParallel:
     """v0.403：--jobs 并行格子，报告与串行逐位一致（行序按格子序）；jobs 不进冻结哈希。"""

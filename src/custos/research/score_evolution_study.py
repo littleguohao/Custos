@@ -508,7 +508,11 @@ def _resolve_universe(args: Any, ap: argparse.ArgumentParser) -> list[str]:
         seed=args.universe_seed,
         codes=args.codes,
     )
-    return bt._resolve_universe(ns, ap)
+    codes = bt._resolve_universe(ns, ap)
+    args.universe_meta = getattr(
+        ns, "universe_meta", None
+    )  # v0.418：provenance 宇宙三件套
+    return codes
 
 
 # ---------------------------------------------------------------------------
@@ -538,6 +542,9 @@ def _reading_of(sg: Any, row: dict, ref: Optional[dict] = None) -> dict:
         "win_rate": row.get("win_rate"),
         "n": row.get("n"),
         "cell_signature": _row_signature(row),
+        # v0.418：透传每日 top-N 选中集读数（v0.417 漏传 ⇒ frozen-read 零假设池全空）
+        "sel_margin": row.get("sel_margin"),
+        "n_selected": row.get("n_selected"),
     }
 
 
@@ -660,6 +667,8 @@ def _make_cell_runner(args: Any, codes_file: str, cells_dir: Path) -> CellRunner
                 "win_rate": row.get("win_rate"),
                 "n": row.get("n"),
                 "cell_signature": _row_signature(row),
+                "sel_margin": row.get("sel_margin"),
+                "n_selected": row.get("n_selected"),
             }
         return _reading_of(sg, row, ref)
 
@@ -2875,11 +2884,17 @@ def main(
 
     from custos.research import provenance as pv  # noqa: PLC0415
 
+    _frozen = rep["config"].get("mode") == "frozen_read"
     rep["provenance"] = pv.build(
         args,
-        unit="R34",
-        criteria_version="v0.230/v0.267/v0.269",
-        pre_reg_doc=RESEARCH_DIR / "R34_score_system_evolution.md",
+        unit="R36" if _frozen else "R34",
+        criteria_version="v0.417" if _frozen else "v0.230/v0.267/v0.269",
+        pre_reg_doc=RESEARCH_DIR
+        / (
+            "R36_perfect_b1_supervised_scoring.md"
+            if _frozen
+            else "R34_score_system_evolution.md"
+        ),
     )
     rep["provenance"]["universe_sha256"] = pv.file_sha256(
         codes_path

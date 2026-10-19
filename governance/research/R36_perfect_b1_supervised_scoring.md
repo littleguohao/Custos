@@ -858,6 +858,16 @@ C4 死刑撤销（读数与分解见回填区「Phase 3 C4 复核」结果段，
 | `window_usage` | {"k": null, "note": "判定窗在挖掘段内（非受保护段 2017~2021）——读挖掘段不入台账（v2 口径）", "window": "mining_segment"} |
 <!-- /digest -->
 
+- **复核（2026-10-19）r36_v2_preB**：⚠️ **零假设池 `pool=[]` 是代码缺陷，非读数**——v0.417 只在 V0 格 evaluator 与 `load_cell_selected_row`
+  加了 `sel_margin`，真实 cell runner 的读数块（`_reading_of`）漏传 ⇒ 每条 DSL 臂都被判 `no_selected_reading` 不进池（测试用 FakeRunner
+  直给该键，掩盖了漏传）。v0.418 已修 + 回归钉测；**本份作废，须用 ≥ v0.418 重跑**（读挖掘段，不占判定段预算；格子产物可复用，较快）。
+  候选侧读数不受影响、可作量级参考：Δ（选中集）中位 +0.050、组合副读数 +0.120、过门率 100%；**n_selected 中位 8893.5 ≥ 5400**，
+  n_taken 中位 297.5 ≥ 100 ⇒ C1 双门在挖掘 B 上可过（判定段 5 年量级相近，预期也可过）。
+  - 注意：窗口 2022-01~2026-09 含原选格窗 2022-01~2024-07（r36_p3_c4review 在其上选出 adx_gt_60），**Δ>0 不是独立证据**，只用于核对
+    工具与 C1 量级；独立证据只来自判定段。
+  - 溯源：`git_dirty=true`（生产机工作区有未提交改动，重跑前请 `git status` 确认干净）；`n_codes/universe_rule` 为 null 是 score_evolution
+    未回传宇宙元数据（v0.418 已修），provenance 单元误标 R34（v0.418 frozen_read 改标 R36）。
+
 
 ```bash
 uv run python -m custos.research score_filter_study \
