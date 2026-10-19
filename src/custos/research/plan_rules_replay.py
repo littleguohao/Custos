@@ -1185,6 +1185,9 @@ def run_width_scan(
 
     # ── 逐窗 × 逐档重放（参照档 = LIVE_PARAMS pct10，自参照门恒真）──
     win_names = [name for name, _s, _e in mining_segs]
+    from custos.research import trade_dist as td  # noqa: PLC0415
+
+    dist_on = bool(getattr(args, "trade_dist", False))
     readings: dict[str, dict[str, Any]] = {}
     ref_trades_all: list[dict] = []
     x_trades_all: dict[float, list[dict]] = {x: [] for x in WIDTH_GRID}
@@ -1194,6 +1197,8 @@ def run_width_scan(
         )
         ref_rd = fes.combine_readings(ref_trades, args.top_n, ref="self")
         block: dict[str, Any] = {"ref": _width_reading(ref_trades, args.top_n, "self")}
+        if dist_on and block["ref"] is not None:
+            block["ref"]["dist"] = td.describe(ref_trades)
         for x in WIDTH_GRID:
             trades_x, n_ge = _replay_width(
                 [g], _anchor_stop(x), PLAN_PARAMS, regime, args.cost_bps, replay_fn
@@ -1201,6 +1206,8 @@ def run_width_scan(
             blk_x = _width_reading(trades_x, args.top_n, ref_rd)
             if blk_x is not None:
                 blk_x["n_anchor_ge_entry"] = n_ge  # 防御记账（应恒 0）
+                if dist_on:
+                    blk_x["dist"] = td.describe(trades_x, ref_trades)
             block[f"x{x:g}"] = blk_x
             x_trades_all[x].extend(trades_x)  # 合并窗复用同一批交易（不重放两遍）
         readings[name] = block
@@ -1210,6 +1217,12 @@ def run_width_scan(
     merged: dict[str, Any] = {"ref": _width_reading(ref_trades_all, args.top_n, "self")}
     for x in WIDTH_GRID:
         merged[f"x{x:g}"] = _width_reading(x_trades_all[x], args.top_n, ref_rd_m)
+    if dist_on:  # 描述性副读数（v0.421，不进判据）
+        if merged["ref"] is not None:
+            merged["ref"]["dist"] = td.describe(ref_trades_all)
+        for x in WIDTH_GRID:
+            if merged[f"x{x:g}"] is not None:
+                merged[f"x{x:g}"]["dist"] = td.describe(x_trades_all[x], ref_trades_all)
 
     # ── C1：两段挖掘窗各自参照档 n_taken ≥ 100 ──
     c1 = _scan_c1(readings, win_names)
@@ -1446,6 +1459,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "产出选档表 + C2~C4",
     )
     ap.add_argument(
+        "--trade-dist",
+        action="store_true",
+        help="扫描模式附加各档交易分布画像（描述性副读数，v0.421，不进判据）："
+        "收益分位/分箱、赢亏均值与中位、高盈亏比交易占比、利润集中度、出场原因、逐年、与参照档逐信号配对",
+    )
+    ap.add_argument(
         "--scan-random",
         type=int,
         default=SCAN_N_RANDOM,
@@ -1485,6 +1504,8 @@ def main(
         ap.error("--stop-anchor signal_low 需要 --stop-buffer-pct（x，%）")
     if args.stop_buffer_pct is not None and args.stop_anchor != "signal_low":
         ap.error("--stop-buffer-pct 只在 --stop-anchor signal_low 下有意义")
+    if getattr(args, "trade_dist", False) and not args.scan_widths:
+        ap.error("--trade-dist 只用于 --scan-widths（只读挖掘段的描述性副读数）")
     if args.scan_widths and args.stop_anchor == "signal_low":
         ap.error("--scan-widths 自带 8 档网格，与 --stop-anchor signal_low 互斥")
     if args.scan_widths and any(

@@ -210,6 +210,34 @@ SPECS: dict[str, tuple[str, list[str]]] = {
             *_PROV,
         ],
     ),
+    "r44_dist": (
+        "R44",
+        [
+            "verdict",
+            "merged.*.dist.n",
+            "merged.*.dist.win_rate",
+            "merged.*.dist.payoff_ratio",
+            "merged.*.dist.margin",
+            "merged.*.dist.avg_win",
+            "merged.*.dist.avg_loss",
+            "merged.*.dist.median_win",
+            "merged.*.dist.median_loss",
+            "merged.*.dist.expectancy",
+            "merged.*.dist.quantiles",
+            "merged.*.dist.big_win_share",
+            "merged.*.dist.profit_concentration",
+            "merged.*.dist.holding",
+            "merged.*.dist.buckets",
+            "merged.*.dist.by_reason",
+            "merged.*.dist.by_year",
+            "merged.*.dist.paired_vs_ref?",
+            "readings.*.*.dist.win_rate",
+            "readings.*.*.dist.payoff_ratio",
+            "readings.*.*.dist.margin",
+            "readings.*.*.dist.big_win_share",
+            *_PROV,
+        ],
+    ),
     "r44_judgment": (
         "R44",
         [
@@ -385,6 +413,22 @@ def build_digest(kind: str, product: Path, tag: str) -> dict[str, Any]:
     }
 
 
+#: kind → 回填文档覆盖（体量大的描述性副读数不进单元正文，落 results/ 附录）
+DOC_OVERRIDE: dict[str, str] = {"r44_dist": "results/R44_trade_dist.md"}
+
+
+def _appendix_doc(rel: str, title: str) -> Path:
+    doc = RESEARCH_DIR / rel
+    if not doc.exists():
+        doc.parent.mkdir(parents=True, exist_ok=True)
+        doc.write_text(
+            f"# {title}\n\n由 `result_digest --backfill` 写入，数字只来自产物；**描述性副读数，不是判据**，"
+            "判读写在块外。\n\n### 回填区\n",
+            encoding="utf-8",
+        )
+    return doc
+
+
 def _unit_doc(unit: str) -> Optional[Path]:
     if not unit.startswith(
         "R"
@@ -476,7 +520,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
         print(f"[OK] 写出 {out}", file=sys.stderr)
     if args.backfill:
-        doc = _unit_doc(d["unit"])
+        doc = (
+            _appendix_doc(
+                DOC_OVERRIDE[d["kind"]], f"{d['unit']} 各档交易分布画像（{d['kind']}）"
+            )
+            if d["kind"] in DOC_OVERRIDE
+            else _unit_doc(d["unit"])
+        )
         if doc is None:
             print(f"[FAIL] 找不到单元 {d['unit']} 的文档", file=sys.stderr)
             return 2
