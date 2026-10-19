@@ -856,6 +856,8 @@ def _cost_side_readings(
             args.cost_bps,
             replay_fn,
         )
+    if getattr(args, "trade_dist", False):
+        args._trade_sets = named  # --trade-dist 复用同一批重建交易（不重放第二遍）
     return cost_side_block(
         named,
         base_bps=args.cost_bps,
@@ -864,6 +866,32 @@ def _cost_side_readings(
             "d_margin_judgment": ("top_judgment", "uniform_judgment"),
         },
     )
+
+
+def _trade_dist_block(named: dict[str, list[dict]]) -> dict[str, Any]:
+    """--trade-dist（v0.422，描述性副读数，不进判据）：top 映射与 uniform-best 逐窗画像，
+    top 对 uniform 逐信号配对；top 逐桶画像（各桶分到的出场档带来什么分布）。"""
+    from custos.research import trade_dist as td  # noqa: PLC0415
+
+    out: dict[str, Any] = {}
+    for key, tr in named.items():
+        w = key.split("_", 1)[1]
+        ref = named.get(f"uniform_{w}") if key.startswith("top_") else None
+        blk = td.describe(tr, ref)
+        if key.startswith("top_"):
+            by_b: dict[str, list[dict]] = {}
+            for t in tr:
+                by_b.setdefault(str(t.get("_bucket")), []).append(t)
+            blk["by_bucket"] = {
+                b: {
+                    k: v
+                    for k, v in td.describe(g).items()
+                    if k not in ("by_year", "buckets")
+                }
+                for b, g in sorted(by_b.items())
+            }
+        out[key] = blk
+    return out
 
 
 def _assemble_report(
@@ -1230,6 +1258,13 @@ def run_study(
             "mining_merged": {"n_signals": len(signals["mining"])},
         }
 
+    trade_dist_blk = (
+        _trade_dist_block(args._trade_sets)
+        if getattr(args, "_trade_sets", None)
+        else None
+    )
+    if hasattr(args, "_trade_sets"):
+        del args._trade_sets  # 不让交易集进入后续 provenance / 配置读取
     rep = _assemble_report(
         args,
         injected,
@@ -1251,6 +1286,8 @@ def run_study(
         sg,
         segments=segments_blk,
     )
+    if trade_dist_blk is not None:
+        rep["trade_dist"] = trade_dist_blk
     if judgment_batch_blk is not None:
         rep["criteria"]["judgment_batch"] = judgment_batch_blk
     return rep
@@ -1294,6 +1331,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--n-random", type=int, default=DEFAULT_N_RANDOM, help="C4 随机分桶臂数"
     )
     ap.add_argument("--c4-min-pool", type=int, default=C4_MIN_POOL, help="C4 最小池")
+    ap.add_argument(
+        "--trade-dist",
+        action="store_true",
+        help="top 映射 / uniform-best 逐窗交易分布画像 + 逐桶画像（描述性副读数，v0.422，不进判据）",
+    )
     ap.add_argument("--seed", type=int, default=20261008, help="全局种子（C3/C4 派生）")
     ap.add_argument(
         "--out-dir",

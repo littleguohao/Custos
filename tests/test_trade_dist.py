@@ -84,3 +84,64 @@ def test_trade_dist_requires_scan():
 
     with pytest.raises(SystemExit):
         prr.main(["--trade-dist"])
+
+
+def test_bear_r45_extended_and_r40_dist(tmp_path):
+    """R45 恒报必报扩展子集；R40 只在 --trade-dist 下附加；判决不变。"""
+    import helpers_null as hn
+    import test_null_calibration as tn
+
+    r45 = tn._r45_run(hn.null_replay)(0)
+    ext = r45["top"]["extended"]
+    assert set(ext) == {"mining", "judgment"}
+    assert {"cagr", "max_drawdown", "return_over_maxdd"} <= set(
+        ext["mining"]["portfolio"]
+    )
+    assert (
+        "by_reason" in ext["mining"]["dist"]
+        and "quantiles" not in ext["mining"]["dist"]
+    )
+    r40 = tn._bear_run(hn.null_replay)(0)
+    assert "extended" not in (r40["top"] or {})
+    r40d = tn._bear_run(hn.null_replay, trade_dist=True)(0)
+    assert r40d["verdict"] == r40["verdict"] and r40d["criteria"] == r40["criteria"]
+    assert r40d["top"] is not None and "extended" in r40d["top"]
+    if True:
+        assert "quantiles" in r40d["top"]["extended"]["mining"]["dist"]
+        p = tmp_path / "b.json"
+        p.write_text(json.dumps(r40d, default=str), encoding="utf-8")
+        assert rd.build_digest("r40_dist", p, "t")["missing"] == []
+
+
+def test_fes_trade_dist(tmp_path, monkeypatch):
+    import helpers_null as hn
+    import test_factor_exit_study as fxt
+
+    base = fxt._run(
+        monkeypatch,
+        fxt._three_level_spec(180),
+        hn.null_replay,
+        n_random=5,
+        c4_min_pool=3,
+    )
+    rep = fxt._run(
+        monkeypatch,
+        fxt._three_level_spec(180),
+        hn.null_replay,
+        n_random=5,
+        c4_min_pool=3,
+        trade_dist=True,
+    )
+    assert rep["verdict"] == base["verdict"] and rep["criteria"] == base["criteria"]
+    assert "trade_dist" not in base
+    assert rep.get("top") is not None
+    if True:
+        td_blk = rep["trade_dist"]
+        assert {"top_mining", "uniform_mining"} <= set(td_blk)
+        assert (
+            "paired_vs_ref" in td_blk["top_mining"]
+            and "by_bucket" in td_blk["top_mining"]
+        )
+        p = tmp_path / "f.json"
+        p.write_text(json.dumps(rep, default=str), encoding="utf-8")
+        assert rd.build_digest("r39_dist", p, "t")["missing"] == []

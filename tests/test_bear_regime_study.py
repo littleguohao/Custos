@@ -1039,6 +1039,7 @@ class TestV2SegmentBuffer:
         )
         rep = _run_v2(spec, replay_spy, n_random=2, c4_min_pool=2, gates="j_low")
         segs = rep["segments"]
+        assert isinstance(segs["mining_a"].pop("n_bear_days"), int)  # v0.422 必报
         assert segs["mining_a"] == {
             "start": "2000-01-01",
             "end": "2016-12-31",
@@ -1046,6 +1047,7 @@ class TestV2SegmentBuffer:
             "n_signals": 1,
             "n_clipped": 1,
         }
+        assert isinstance(segs["judgment"].pop("n_bear_days"), int)  # v0.422 必报
         assert segs["judgment"] == {
             "start": "2017-01-01",
             "end": "2021-12-31",
@@ -1053,6 +1055,7 @@ class TestV2SegmentBuffer:
             "n_signals": 2,
             "n_clipped": 1,
         }
+        assert isinstance(segs["mining_b"].pop("n_bear_days"), int)  # v0.422 必报
         assert segs["mining_b"] == {
             "start": "2022-01-01",
             "end": "2026-09-04",

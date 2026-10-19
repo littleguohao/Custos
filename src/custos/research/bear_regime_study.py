@@ -1004,6 +1004,54 @@ def _judge_c4(
     return c4_state, c4
 
 
+def _top_extended(
+    trades_by_w: dict[str, list[dict]], top_n: int, with_dist: bool
+) -> dict[str, Any]:
+    """top 交易集逐窗必报扩展（R45 预注册「必报」v0.422 补齐；R40 需 --trade-dist）：
+    平均每笔收益 / 出场原因占比 / 平均持有（trade_dist 画像）+ 组合层 CAGR·最大回撤·收益回撤比
+    （同判据组合口径）+ 不可卖笔数（``*_unfillable``：连续跌停 / 停牌持到数据末；逐次顺延
+    天数引擎不记录，如实缺）。描述性读数，不进判据。"""
+    from custos.research import backtest_factors as bt  # noqa: PLC0415
+    from custos.research import trade_dist as td  # noqa: PLC0415
+    from custos.research.exit_campaign import V0_PORTFOLIO  # noqa: PLC0415
+
+    out: dict[str, Any] = {}
+    for w, tr in trades_by_w.items():
+        pf = bt.simulate_portfolio_topn(tr, top_n=top_n, **(_PORTFOLIO or V0_PORTFOLIO))
+        d = td.describe(tr)
+        if not with_dist:
+            d = {
+                k: d.get(k)
+                for k in (
+                    "n",
+                    "win_rate",
+                    "payoff_ratio",
+                    "expectancy",
+                    "avg_win",
+                    "avg_loss",
+                    "holding",
+                    "by_reason",
+                )
+            }
+        out[w] = {
+            "dist": d,
+            "portfolio": {
+                k: pf.get(k)
+                for k in (
+                    "n_taken",
+                    "total_return",
+                    "cagr",
+                    "max_drawdown",
+                    "return_over_maxdd",
+                )
+            },
+            "n_unfillable": sum(
+                1 for t in tr if str(t.get("reason", "")).endswith("_unfillable")
+            ),
+        }
+    return out
+
+
 def _cost_side(
     top: Optional[dict],
     top_params: Optional[dict],
@@ -1011,6 +1059,7 @@ def _cost_side(
     windows: dict[str, tuple[str, str]],
     replay: Callable[[str, str, list[dict], dict[str, Any]], list[dict]],
     cost_bps: float,
+    top_trades: Optional[dict[str, list[dict]]] = None,
 ) -> Optional[dict]:
     """成本副读数（owner review #6）：top 交易集双窗定向重建（replay 同
     路径），50bps 解析双报——R40 C2 是**绝对口径**（margin>0），本副读数
@@ -1020,7 +1069,9 @@ def _cost_side(
     from custos.research.cost_sensitivity import cost_side_block  # noqa: PLC0415
 
     return cost_side_block(
-        {
+        top_trades
+        if top_trades is not None
+        else {
             w: replay(w, top["gate"], gate_sigs[w][top["gate"]], top_params)
             for w in windows
         },
@@ -1245,6 +1296,12 @@ def _run_study_body(
             "end": se[1],
             "entry_deadline": lw.entry_deadline(se[1]),
             "n_signals": n_kept,  # 逐门合计（与 n_signals_by_gate 同口径）
+            # 段内空头日数（台账反转后 = "做多"；R45 必报，v0.422）
+            "n_bear_days": sum(
+                1
+                for d, v in regime_bear.items()
+                if se[0] <= str(d)[:10] <= se[1] and v == "做多"
+            ),
             "n_clipped": n_clipped,
         }
     gate_sigs: dict[str, dict[str, list[dict]]] = {
@@ -1388,7 +1445,20 @@ def _run_study_body(
     # ── 成本副读数（owner review #6）：top 交易集双窗定向重建（_replay 同
     # 路径），50bps 解析双报——R40 C2 是**绝对口径**（margin>0），本副读数
     # 是主战场：空头期做多 margin 薄，翻号 ⇒ 判读降权 ──
-    cost_sens = _cost_side(top, top_params, gate_sigs, windows, _replay, args.cost_bps)
+    top_trades = (
+        {
+            w: _replay(w, top["gate"], gate_sigs[w][top["gate"]], top_params)
+            for w in windows
+        }
+        if top is not None and top_params is not None
+        else None
+    )
+    cost_sens = _cost_side(
+        top, top_params, gate_sigs, windows, _replay, args.cost_bps, top_trades
+    )
+    want_dist = bool(getattr(args, "trade_dist", False))
+    if top is not None and top_trades is not None and (r45 or want_dist):
+        top["extended"] = _top_extended(top_trades, args.top_n, with_dist=want_dist)
 
     criteria = {
         "C1": c1,
@@ -1477,6 +1547,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="R45 模式（v0.397）：j_low 单门 × 4 止损（信号日最低价×(1−x%%)，x∈5/8/12/15）"
         "× 4 止盈（现行/trail8/cz3/时间止损10）；总敞口 ≤30%%（并发 3 × 单仓 10%%）；"
         "参照格 x8_T1；C2 另须两窗组合收益>0（打过不交易）；忽略 --gates",
+    )
+    ap.add_argument(
+        "--trade-dist",
+        action="store_true",
+        help="top 交易集逐窗附加完整分布画像（描述性副读数，v0.422，不进判据；R45 模式恒报必报子集）",
     )
     ap.add_argument("--c4-min-pool", type=int, default=C4_MIN_POOL, help="C4 最小池")
     ap.add_argument("--seed", type=int, default=20261008, help="全局种子（C3/C4 派生）")

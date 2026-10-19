@@ -288,3 +288,18 @@ def test_min_n_selected_anchored_to_power_line():
 
     assert pm.mde(0.44, fl.MIN_N_SELECTED, 0.75, 5) <= 0.03
     assert pm.mde(0.44, fl.MIN_N_SELECTED - 100, 0.75, 5) > 0.03
+
+
+def test_jobs_bitwise_equal_serial(tmp_path, small_grid):
+    """v0.422：-j 2 与 -j 1 报告逐位一致（主网格分块 + 零假设臂按臂序消费）。"""
+    outs = []
+    for j in ("1", "2"):
+        out = tmp_path / f"j{j}.json"
+        argv = _args(tmp_path, "--jobs", j)
+        argv[argv.index("--out") + 1] = str(out)
+        assert fl.main(argv, collector=_collector(_world(3, edge=3.0))) == 0
+        rep = json.loads(out.read_text(encoding="utf-8"))
+        rep.pop("provenance")
+        outs.append(rep)
+    assert outs[0] == outs[1]
+    assert outs[0]["criteria"]["C4"]["evaluated"] >= 1

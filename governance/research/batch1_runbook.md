@@ -9,6 +9,9 @@
 - **开工前 `git pull`**，记下 `git log -1 --oneline`（贴回时附上）；跑数期间不要在同一工作目录 pull（懒加载模块会混跑新旧代码）。
 - 长任务一律脱钩后台（Windows：`Start-Process`；见 R36 附录 2026-09-25 教训），stdout/stderr 落文件。
 - 每条命令的 stderr 里 `[TIME]` / `[MEM]` 行一起贴回（#112 加载 / 评估耗时占比）。
+- **分布画像（v0.422，描述性副读数，不进判据）**：R39 / R40 / R44 / R45 命令加 `--trade-dist`，跑完多出一份摘要：
+  `result_digest r39_dist|r40_dist|r44_dist|r45_dist <产物> --tag <tag>_dist --write --backfill`（回填 `results/R*_trade_dist.md`）。
+  R45 的必报扩展（组合层、出场原因、不可卖笔数、空头日数）不加开关也恒报。
 - **回填协议（v0.413）**：每条命令跑完立刻
   `uv run python -m custos.research result_digest <kind> <产物.json> --tag <tag> --write --backfill`，
   然后 `git add governance/research/results/ governance/research/*.md && git commit && git push`。
@@ -42,7 +45,7 @@ ls <通达信根>/vipdoc/bj/lday/bj88* | head    # 北交所 88 段个股 vs 880
 | 2d | R43 挖掘段 | 见下 ④ | `r43`：`style.*.dims.*.verdict` 为 candidate 的（方向, 维度, 符号）清单 + `criteria.C4` |
 | 2e | R44 8 档扫描 | 见下 ⑤ | `r44_scan`：`criteria.C1~C4`、`x_star` |
 | 2f | R45 预演 | 见下 ⑥ | `r45`：`verdict`、`top.exit`、`criteria.C2.beats_no_trade`、`pools.entry_accounting` |
-| 2g | R46 家族配比（v0.416 主读数改选中集后恢复；须用 ≥ v0.416 代码，产物 schema v2） | 见下 ⑦ | `r46`：`verdict`、`criteria.C2.g_star/merged_delta/tie_seed_median_delta`、`base_equals_live` |
+| 2g | R46 家族配比（v0.416 主读数改选中集后恢复；须用 ≥ v0.416 代码，产物 schema v2；**加 `-j <核数>`**，v0.422 起逐位一致，串行估 >1 天） | 见下 ⑦ | `r46`：`verdict`、`criteria.C2.g_star/merged_delta/tie_seed_median_delta`、`base_equals_live` |
 
 ```bash
 # ① R36（原 C4 复核报告做冻结源；v0.407 起臂读 top-N 选中子集，旧格子产物含逐笔可直接复用）

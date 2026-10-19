@@ -42,6 +42,27 @@ _PROV = [
     "window_usage?",
 ]
 
+#: R40 / R45（bear_regime_study --trade-dist）top 交易集分布画像字段
+_BEAR_DIST = [
+    "verdict",
+    "top.exit",
+    "top.extended.*.portfolio",
+    "top.extended.*.n_unfillable",
+    "top.extended.*.dist.n",
+    "top.extended.*.dist.win_rate",
+    "top.extended.*.dist.payoff_ratio",
+    "top.extended.*.dist.margin",
+    "top.extended.*.dist.expectancy",
+    "top.extended.*.dist.quantiles",
+    "top.extended.*.dist.big_win_share",
+    "top.extended.*.dist.profit_concentration",
+    "top.extended.*.dist.buckets",
+    "top.extended.*.dist.by_reason",
+    "top.extended.*.dist.by_year",
+    "top.extended.*.dist.holding",
+    *_PROV,
+]
+
 #: kind → (单元文档前缀, 字段清单)。单元前缀用于 --backfill 定位文档与 results 子目录。
 SPECS: dict[str, tuple[str, list[str]]] = {
     "probe": (
@@ -108,6 +129,8 @@ SPECS: dict[str, tuple[str, list[str]]] = {
             "top.mining?",
             "top.judgment?",
             "uniform_best.profile?",
+            "uniform_best.mining?",  # 必报副读数：uniform-best vs pct5_trail08（v0.422 复查补）
+            "uniform_best.judgment?",
             "criteria.C1",
             "criteria.C2",
             "criteria.C3",
@@ -136,6 +159,10 @@ SPECS: dict[str, tuple[str, list[str]]] = {
             "pools.entry_accounting",
             "n_signals_by_gate",
             "cost_sensitivity.deltas?",
+            # 必报 reason 分布（风险注记；v0.422 起 --trade-dist 下产出）
+            "top.extended.*.dist.by_reason?",
+            "top.extended.*.portfolio?",
+            "segments.*.n_signals?",
             *_PROV,
         ],
     ),
@@ -152,6 +179,14 @@ SPECS: dict[str, tuple[str, list[str]]] = {
             "criteria.C3",
             "criteria.C4",
             "criteria.r45",
+            # v0.422：R45 预注册「必报」（产物 v0.422 起恒报；旧产物缺 ⇒ 拒写）
+            "top.extended.*.portfolio",
+            "top.extended.*.n_unfillable",
+            "top.extended.*.dist.expectancy",
+            "top.extended.*.dist.holding",
+            "top.extended.*.dist.by_reason",
+            "segments.*.n_bear_days?",  # v2 布局才有 segments 块（生产缺省即 v2）
+            "segments.*.n_signals?",
             "pools.q95_mining",
             "pools.q95_judgment",
             "pools.batch_m?",
@@ -238,6 +273,30 @@ SPECS: dict[str, tuple[str, list[str]]] = {
             *_PROV,
         ],
     ),
+    "r39_dist": (
+        "R39",
+        [
+            "verdict",
+            "trade_dist.*.n",
+            "trade_dist.*.win_rate",
+            "trade_dist.*.payoff_ratio",
+            "trade_dist.*.margin",
+            "trade_dist.*.avg_win",
+            "trade_dist.*.avg_loss",
+            "trade_dist.*.expectancy",
+            "trade_dist.*.quantiles",
+            "trade_dist.*.big_win_share",
+            "trade_dist.*.profit_concentration",
+            "trade_dist.*.buckets",
+            "trade_dist.*.by_reason",
+            "trade_dist.*.by_year",
+            "trade_dist.*.paired_vs_ref?",
+            "trade_dist.*.by_bucket?",
+            *_PROV,
+        ],
+    ),
+    "r40_dist": ("R40", _BEAR_DIST),
+    "r45_dist": ("R45", _BEAR_DIST),
     "r44_judgment": (
         "R44",
         [
@@ -414,7 +473,12 @@ def build_digest(kind: str, product: Path, tag: str) -> dict[str, Any]:
 
 
 #: kind → 回填文档覆盖（体量大的描述性副读数不进单元正文，落 results/ 附录）
-DOC_OVERRIDE: dict[str, str] = {"r44_dist": "results/R44_trade_dist.md"}
+DOC_OVERRIDE: dict[str, str] = {
+    "r44_dist": "results/R44_trade_dist.md",
+    "r39_dist": "results/R39_trade_dist.md",
+    "r40_dist": "results/R40_trade_dist.md",
+    "r45_dist": "results/R45_trade_dist.md",
+}
 
 
 def _appendix_doc(rel: str, title: str) -> Path:

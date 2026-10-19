@@ -297,26 +297,93 @@ def permute_clusters(
     return out
 
 
+def _arm_value(
+    segs: dict[str, dict[str, Any]],
+    top_n: int,
+    seed: int,
+    i: int,
+    cells: Optional[list[tuple[int, ...]]] = None,
+) -> tuple[Optional[float], Optional[list[int]]]:
+    """第 i 条置换臂：(合并 Δ, 选中格)。臂级种子写死 ⇒ 与执行顺序 / 进程无关。"""
+    rng = random.Random(f"{seed}-p{i}")
+    pseg = {
+        w: {**segs[w], "S": permute_clusters(segs[w]["items"], segs[w]["S"], rng)}
+        for w in segs
+    }
+    g = eval_grid(pseg, top_n, cells=cells)
+    gs = pick_gstar(g)
+    return (g[gs]["merged_delta"] if gs is not None else None), (
+        list(gs) if gs else None
+    )
+
+
+# ---- 多进程（v0.422，-j/--jobs）：worker 只做纯计算，数据经 initializer 一次下发 ----
+_W: dict[str, Any] = {}
+
+
+def _w_init(segs: dict, top_n: int, seed: int, cells: list) -> None:
+    _W.update(segs=segs, top_n=top_n, seed=seed, cells=[tuple(c) for c in cells])
+
+
+def _w_arm(i: int) -> tuple[Optional[float], Optional[list[int]]]:
+    return _arm_value(_W["segs"], _W["top_n"], _W["seed"], i, _W["cells"])
+
+
+def _w_grid(chunk: list[tuple[int, ...]]) -> dict:
+    return eval_grid(_W["segs"], _W["top_n"], cells=[BASE, *chunk])
+
+
+def _executor(jobs: int, segs: dict, top_n: int, seed: int):  # type: ignore[no-untyped-def]
+    from concurrent.futures import ProcessPoolExecutor  # noqa: PLC0415
+
+    return ProcessPoolExecutor(
+        max_workers=jobs,
+        initializer=_w_init,
+        initargs=(segs, top_n, seed, list(GRID)),
+    )
+
+
+def eval_grid_jobs(
+    segs: dict[str, dict[str, Any]], top_n: int, jobs: int, ex: Any = None
+) -> dict[tuple[int, ...], dict[str, Any]]:
+    """全网格读数，按格分块多进程；每格读数只依赖本格 + 基准（确定性），与串行逐位一致。"""
+    if jobs <= 1 or ex is None:
+        return eval_grid(segs, top_n)
+    cells = list(GRID)
+    k = max(1, len(cells) // (jobs * 4))
+    chunks = [cells[a : a + k] for a in range(0, len(cells), k)]
+    out: dict[tuple[int, ...], dict[str, Any]] = {}
+    for part in ex.map(_w_grid, chunks):
+        out.update(part)
+    return {m: out[m] for m in cells}  # 恢复 GRID 序（pick_gstar 并列取格序在前）
+
+
 def run_null_pool(
     segs: dict[str, dict[str, Any]],
     top_n: int,
     n_random: int,
     seed: int,
+    jobs: int = 1,
+    ex: Any = None,
 ) -> dict[str, Any]:
+    """簇级置换零假设池。``jobs>1``：按臂序分批并行预算，再按臂序逐个交给
+    ``kit.assemble_c4_pool`` 消费——停止点之后多算的臂直接丢弃 ⇒ 池 / 臂记录与串行逐位一致。"""
     from custos.research import criteria_kit as kit  # noqa: PLC0415
 
     arms: list[dict[str, Any]] = []
+    cache: dict[int, tuple[Optional[float], Optional[list[int]]]] = {}
+    batch = max(1, jobs) * 2
 
     def _arm(i: int) -> Optional[float]:
-        rng = random.Random(f"{seed}-p{i}")
-        pseg = {
-            w: {**segs[w], "S": permute_clusters(segs[w]["items"], segs[w]["S"], rng)}
-            for w in segs
-        }
-        g = eval_grid(pseg, top_n)
-        gs = pick_gstar(g)
-        arms.append({"arm": i, "cell": list(gs) if gs else None})
-        return g[gs]["merged_delta"] if gs is not None else None
+        if i not in cache:
+            if jobs > 1 and ex is not None:
+                ids = list(range(i, i + batch))
+                cache.update(zip(ids, ex.map(_w_arm, ids)))
+            else:
+                cache[i] = _arm_value(segs, top_n, seed, i)
+        v, cell = cache.pop(i)
+        arms.append({"arm": i, "cell": cell})
+        return v
 
     pool = kit.assemble_c4_pool(n_random, _arm)
     return {**pool, "arms": arms}
@@ -401,7 +468,14 @@ def run_study(
     }
     if not all(len(segs[w]["trades"]) for w in segs):
         return {}
-    grid = eval_grid(segs, args.top_n)
+    jobs = max(1, int(getattr(args, "jobs", 1) or 1))
+    ex = _executor(jobs, segs, args.top_n, args.seed) if jobs > 1 else None
+    try:
+        grid = eval_grid_jobs(segs, args.top_n, jobs, ex)
+        null = run_null_pool(segs, args.top_n, args.n_random, args.seed, jobs, ex)
+    finally:
+        if ex is not None:
+            ex.shutdown()
     gs = pick_gstar(grid)
     base_n = {w: grid[BASE][w]["n_taken"] or 0 for w in SEG_NAMES}
     base_sel = {w: grid[BASE][w]["n_selected"] or 0 for w in SEG_NAMES}
@@ -446,7 +520,6 @@ def run_study(
     else:
         c3 = {"ok": None}
 
-    null = run_null_pool(segs, args.top_n, args.n_random, args.seed)
     cand = grid[gs]["merged_delta"] if gs else None
     c4_state = kit.c4_state_of(null["pool"], min_pool=args.c4_min_pool, plan_delta=cand)
     c4 = {
@@ -575,6 +648,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--tie-seeds", type=int, default=TIE_SEEDS, help="g* 稳健副读数平分种子数"
     )
     ap.add_argument("--seed", type=int, default=20261016)
+    ap.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=1,
+        help="主网格与零假设臂多进程数（v0.422；结果与 -j 1 逐位一致，不进配置哈希）",
+    )
     ap.add_argument("--out", default=str(LOGS / "family_lattice" / "r46.json"))
     ap.add_argument("--batch-id", default="", help="判定段批次号（攒批协议）")
     ap.add_argument("--candidate-id", default="", help="批内候选 id")
