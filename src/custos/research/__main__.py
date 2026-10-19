@@ -180,6 +180,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "clamp(S·m) 矩阵化重打分（与 technical_score 逐位一致）；C1~C4（双挖掘段选格 / 邻格平滑 / "
         "簇级置换同预算零假设）；--batch-id 同次读判定段走 judgment_line；副读数 64 个家族开/关子格",
     ),
+    "trade_counterfactual": (
+        "diagnostic",
+        "实盘操作反事实复盘（v0.424，live 跟踪）：同一笔买入严格按现行出场规则 / 买入计划止损推演 vs 实际，"
+        "归因止损拖延 / 该清未清 / 过早卖出 / 执行价差 / 主动优于规则；周报月报默认附录",
+    ),
     "trade_dist": (
         "diagnostic",
         "交易集分布画像库（v0.421，描述性副读数单源）：收益分位/分箱、赢亏均值中位、高盈亏比占比、"

@@ -109,6 +109,13 @@ def _redirect_pick_practice_ledger_tmp(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _skip_trade_counterfactual_subprocess(monkeypatch):
+    """周报/月报的操作反事实小节走子进程跑研究 CLI（v0.424）——测试默认跳过，
+    专测 ``trade_cf_section`` 的用例自行 delenv。"""
+    monkeypatch.setenv("CUSTOS_SKIP_TRADE_CF", "1")
+
+
+@pytest.fixture(autouse=True)
 def _redirect_window_usage_ledger_tmp(monkeypatch, tmp_path):
     """把判定窗/pre2019 使用台账改道 tmp（v0.321）。
 

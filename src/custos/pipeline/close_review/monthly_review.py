@@ -655,7 +655,12 @@ def main(argv=None) -> int:
     json_path.write_text(
         json.dumps(review, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    md_path.write_text(render_markdown(review), encoding="utf-8")
+    from custos.pipeline.close_review import trade_cf_section  # noqa: PLC0415
+
+    cf = trade_cf_section.section(
+        base, review["start"], review["end"], stem
+    )  # v0.424，fail-soft
+    md_path.write_text(render_markdown(review) + cf, encoding="utf-8")
     print(f"monthly review written: {json_path}")
     print(f"monthly review written: {md_path}")
     return 0

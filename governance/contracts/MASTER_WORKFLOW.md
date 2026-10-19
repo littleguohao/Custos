@@ -245,7 +245,7 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 
 ### 实现状态（2026-07-19 起）
 
-由 `src/custos/pipeline/close_review/weekly_review.py` 确定性生成，cron `f15c0d06`（每周六 10:07）触发，LLM 仅基于脚本事实写归因总结。已覆盖：交易明细与 FIFO 平仓盈亏、计划内/外交易、止损合规（-7% 线）、无交易确认完备性、卖飞分析（MFE）、持有期画像、0AMV 背景、执行/策略归因规则命中。未覆盖（待后续）：A/B/C/D 池迁移（候选池重建后）、组合回撤曲线、报告准时率、下周情景与风险预算（由 LLM 总结部分承担）。
+由 `src/custos/pipeline/close_review/weekly_review.py` 确定性生成，cron `f15c0d06`（每周六 10:07）触发，LLM 仅基于脚本事实写归因总结。已覆盖：交易明细与 FIFO 平仓盈亏、计划内/外交易、止损合规（-7% 线）、无交易确认完备性、卖飞分析（MFE）、持有期画像、0AMV 背景、执行/策略归因规则命中。**操作反事实附录（v0.424）**：报告末尾默认附「同一笔买入严格按规则操作 vs 实际」小节（`trade_cf_section` 子进程调研究 CLI `trade_counterfactual --period 本周`，fail-soft，明细 JSON 落 `artifacts/logs/trade_counterfactual/`）；也可随时手动跑 `uv run python -m custos.research trade_counterfactual [--period S E | --start/--end]`。未覆盖（待后续）：A/B/C/D 池迁移（候选池重建后）、组合回撤曲线、报告准时率、下周情景与风险预算（由 LLM 总结部分承担）。
 
 ---
 
@@ -255,6 +255,7 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 > 计算件复用 `weekly_review` / `loss_streak`（口径只有一份）。缺数据源的小节
 > （换手率资金基数、板块归因、版本归因等）按 fail-closed 惯例如实报 unavailable。
 > 调度需在 OpenClaw cron 加一条（建议每月 1 日上午复盘上月）。
+> **v0.424**：报告末尾默认附操作反事实小节（同周报，期间=本月）。
 
 ### 时间范围
 
