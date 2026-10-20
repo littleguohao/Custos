@@ -7,7 +7,6 @@ import pytest
 
 import helpers_null as hn
 from custos.research import plan_rules_replay as prr
-from custos.research import protect_scan as ps
 
 
 def _args(**kw):
@@ -57,7 +56,7 @@ def _run(seed, **kw):
 
     spec = tp._scan_fixture()
     replay = kw.pop("replay", None) or _replay_factory(seed)
-    return ps.run_protect_scan(
+    return prr.run_protect_scan(
         _args(seed=seed, **kw), warm_fn=lambda s, e: spec[(s, e)], replay_fn=replay
     )
 
@@ -124,7 +123,7 @@ class TestSentinelProtectMaxOfOne:
     """回归哨兵：随机臂退化成 max-of-1（预算不对等）⇒ 噪声下校准必须失败。"""
 
     def test_calibration_catches_unequal_budget(self, monkeypatch):
-        monkeypatch.setattr(ps, "C4_ARM_DRAWS", 1)
+        monkeypatch.setattr(prr, "PROTECT_ARM_DRAWS", 1)
         with pytest.raises(AssertionError, match="零假设校准失败"):
             hn.assert_noise_calibration(
                 "protect_scan[max-of-1 哨兵]",
