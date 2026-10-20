@@ -158,7 +158,7 @@ def render_r43(d: dict[str, Any]) -> str:
                 f"| {name} | {_num(a.get('mean_spread'), 2, True)} | {_num(a.get('t'))} | "
                 f"{_num(a.get('frac_same_sign'), 0, True).lstrip('+')} | {_num(b.get('mean_spread'), 2, True)} | "
                 f"{_num(b.get('t'))} | {_num(b.get('frac_same_sign'), 0, True).lstrip('+')} | "
-                f"{c4.get('A', '—')}/{c4.get('B', '—')} | {VERDICT_ICON.get(v.get('verdict'), '')} {v.get('verdict')} |"
+                f"{c4.get('A', '—')}/{c4.get('B', '—')} | {VERDICT_ICON.get(str(v.get('verdict')), '')} {v.get('verdict')} |"
             )
         top = [
             r
@@ -235,7 +235,7 @@ def render_r43(d: dict[str, Any]) -> str:
             L.append(
                 f"| {c} | {v.get('group', '—')} | {_num(a.get('mean_excess'), 2, True)} | {_num(a.get('t'))} | "
                 f"{_num(b.get('mean_excess'), 2, True)} | {_num(b.get('t'))} | "
-                f"{VERDICT_ICON.get(v.get('verdict'), '')} {v.get('verdict')} |"
+                f"{VERDICT_ICON.get(str(v.get('verdict')), '')} {v.get('verdict')} |"
             )
         L.append("")
     return "\n".join(L).rstrip() + "\n"
@@ -269,14 +269,14 @@ def render_r39(d: dict[str, Any]) -> str:
         if m and len(set(m)) == 1 and m[0] not in uni:
             uni[m[0]] = c
     for p in profiles:
-        c = uni.get(p)
+        cu = uni.get(p)
         g = str(((f.get("profiles") or {}).get(p) or {}).get("key", "")).replace(
             "|", " · "
         )  # 表格内禁竖线
-        if c is None:
+        if cu is None:
             L.append(f"| {p} | `{g}` | — | — | — | — | — | — | — |")
             continue
-        a, b = c.get("mining") or {}, c.get("judgment") or {}
+        a, b = cu.get("mining") or {}, cu.get("judgment") or {}
         L.append(
             f"| {p} | `{g}` | {_pp(a.get('margin'))} | {_num(a.get('win_rate'), 1, True).lstrip('+')} | "
             f"{a.get('payoff_ratio', '—')} | {_pp(b.get('margin'))} | {_num(b.get('win_rate'), 1, True).lstrip('+')} | "
@@ -305,7 +305,7 @@ def render_r39(d: dict[str, Any]) -> str:
         ],
         "margin pp",
     )
-    for bk in sorted({c.get("bucketing") for c in cfgs if c.get("bucketing")}):
+    for bk in sorted({str(c["bucketing"]) for c in cfgs if c.get("bucketing")}):
         sub = [c for c in cfgs if c.get("bucketing") == bk]
         nb = len((sub[0].get("mapping") or [])) if sub else 0
         cuts = ((f.get("bucketings") or {}).get(bk) or {}).get("cuts_mining_estimated")
@@ -321,8 +321,8 @@ def render_r39(d: dict[str, Any]) -> str:
             for p0 in profiles:
                 cells = []
                 for p1 in profiles:
-                    c = grid.get((p0, p1))
-                    v = _pp((c or {}).get("mining", {}).get("margin")) if c else "—"
+                    cg = grid.get((p0, p1))
+                    v = _pp((cg or {}).get("mining", {}).get("margin")) if cg else "—"
                     cells.append(f"**{v}**" if p0 == p1 else v)
                 L.append(f"| {p0} | " + " | ".join(cells) + " |")
         ranked = sorted(
@@ -353,7 +353,7 @@ def render_r39(d: dict[str, Any]) -> str:
         f"B {_pp((f.get('criteria.C2') or {}).get('d_margin_judgment'))}；C4 池 q95 = {_pp((f.get('criteria.C4') or {}).get('q95'))}。",
         f"- C1 逐桶组合成交：A {((c1.get('mining') or {}).get('by_bucket'))}、B {((c1.get('judgment') or {}).get('by_bucket'))}"
         f"（桶下限 {c1.get('min_bucket')}）。",
-        f"- 机械判决：{VERDICT_ICON.get(f.get('verdict'), '')} **{f.get('verdict')}**。",
+        f"- 机械判决：{VERDICT_ICON.get(str(f.get('verdict')), '')} **{f.get('verdict')}**。",
     ]
     return "\n".join(L).rstrip() + "\n"
 
