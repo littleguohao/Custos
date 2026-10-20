@@ -29,6 +29,7 @@
 | 80 | LLM 转岗：从「提数值表达式」改为「读失败模式、提机制假设」（证据：表达式提案不比随机好，Phase 1 诊断是机制级洞察）。原落地形态 R37 Phase 3 已随 R37 收口失效，需重定落点 | P3 | 挂起 | 落点定为 R43（owner 2026-10-14）：风格规律出来后由 LLM 读失败区间段提机制假设、不碰数值 | owner 方法论 review 2026-09-23 ③（①②④ 已闭环 v0.267/0.286/0.296） |
 | 86 | R36 后续维度剩余三项：③条件化/regime（0AMV 作因子条件变量）④盈亏比排序（服务仓位）⑤horizon 与出场轴对齐；另「结构因子基准臂」待打分侧重开时议 | P3 | 挂起 | 判据新建成本高，排在 #81 之后 | owner 2026-09-23 五维度③④⑤；原 #81/#80① |
 | 59 | scorer 双形态剩余：pvcorr / low_vol / momentum / reversal_quality± 可接 `_SCORER_PRECOMPUTE`（每键需逐位等价钉测）；mcap 与黑盒 detector 不接 | P3 | 挂起 | 随回测批次顺带做 | v0.73 审查（③批量写 ④分页并发已否决，理由见 `fetch_pit_financials.py` docstring）；v0.236（s_shape 系已落地） |
+| 114 | R47 工具：`plan_rules_replay --scan-protect`（保本 × 移动止损 4×4 网格叠加 LIVE_PARAMS，C3② 右尾护栏 + 浮盈回吐读数，随机参数臂 max-of-15，校准两连测 + 哨兵 + digest/report 登记） | P2 | coder | 按 R47 工程落点实现；第一批判定段读完后跑挖掘段 | [R47](governance/research/R47_profit_protection_breakeven_trail.md) |
 
 ## 已闭环索引
 
