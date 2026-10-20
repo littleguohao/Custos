@@ -1,22 +1,39 @@
 # -*- coding: utf-8 -*-
-"""研究结果可视化报告（v0.427，owner 2026-10-20：「更具体、多维度、表格 / 图表展示结论」）。
+"""研究结果可视化报告（通用引擎，v0.428；owner 2026-10-20「做成通用模块，以后每个研究结果都能用」）。
 
 从**入库摘要** ``governance/research/results/<单元>/<tag>.json``（``result_digest`` 产出，数字只来自产物）
-机械渲染 markdown 报告：多维读数表 + mermaid 图（``xychart-beta`` 柱状 / ``pie``，GitHub / 飞书文档可渲染）。
+机械渲染 markdown：判决总览 + 多维表格 + mermaid 图（``xychart-beta`` 柱状 / ``pie``，GitHub / 飞书可渲染）。
 报告是摘要 JSON 的**纯函数**：``tests/test_result_report.py`` 逐字重渲染比对，手改即红。
+
+**三层，新研究按需取用**（新终端合入清单第 6 条：登记 digest SPECS 时顺手登记 ``REPORTS``）：
+
+1. **自动兜底**（任何 kind，零配置）：判决 + C1~C4 状态表 → 标量字段表 → 每个「同构子项族」
+   （如 ``merged.x5.margin / merged.x7.margin …``）自动透视成一张表（行 = 子项，列 = 叶字段）→
+   判决类字段（``*.verdict``）自动出饼图；
+2. **声明式规格** ``REPORTS[kind] = [section, ...]``，section 类型：
+   - ``{"type": "kv", "title", "paths": [...]}``：指定字段的「字段 | 值」表；
+   - ``{"type": "pivot", "title", "rows": "merged.*", "cols": [(叶路径, 列名, 格式)], "sort": (叶路径, desc),
+     "limit"}``：通配行透视表（行路径支持多个 ``*``，如 ``style.bear.dims.*``）；
+   - ``{"type": "bar", "title", "rows", "series": [(叶路径, 图例, 倍数)], "limit", "sort"}``：柱状图；
+   - ``{"type": "pie", "title", "values": "style.*.dims.*.verdict"}``：取值计数饼图；
+   - ``{"type": "count", "title", "rows", "by": 分组叶路径, "of": 计数叶路径}``：分组 × 取值计数表；
+   - ``{"type": "custom", "fn": callable(d) -> list[str]}``：通用件表达不了的（如 R39 映射矩阵）；
+3. 格式：``pp``（×100 + pp）、``pct``（×100 + %）、``num``（±2 位）、``int``、``raw``。
 
 用法（开发机即可跑，不需要行情数据）::
 
     uv run python -m custos.research result_report governance/research/results/R43/r43_v1_detail.json --write
 
-写到同目录 ``<tag>_report.md``。描述性展示，判决仍以单元结论段与 ``criteria`` 为准。
+``result_digest --write`` 缺省同时出报告（``--no-report`` 关）。描述性展示，判决以单元结论段为准。
 """
 
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import math
+import re
 import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -29,41 +46,132 @@ VERDICT_ICON = {
     "falsified": "❌",
     "untested": "⏸",
 }
+_MISSING = object()
+
+# ---------------------------------------------------------------------------
+# 取值：扁平键（digest fields）+ 值内下钻
+# ---------------------------------------------------------------------------
 
 
-def _num(x: Any, nd: int = 2, pct: bool = False) -> str:
-    if not isinstance(x, (int, float)) or (isinstance(x, float) and math.isnan(x)):
+def get_path(fields: dict[str, Any], path: str) -> Any:
+    """``a.b.c``：先找完全匹配的扁平键；否则找最长前缀键，再在其值里按剩余段下钻。"""
+    if path in fields:
+        return fields[path]
+    parts = path.split(".")
+    for k in range(len(parts) - 1, 0, -1):
+        head = ".".join(parts[:k])
+        if head in fields:
+            v: Any = fields[head]
+            for seg in parts[k:]:
+                if isinstance(v, dict) and seg in v:
+                    v = v[seg]
+                else:
+                    return _MISSING
+            return v
+    return _MISSING
+
+
+def expand_rows(fields: dict[str, Any], pattern: str) -> list[str]:
+    """通配行路径 → 具体行路径（按出现的扁平键 + 值内 dict 键展开；保持字典序稳定）。"""
+    rx = re.compile("^" + re.escape(pattern).replace(r"\*", r"([^.]+)") + r"(?:\.|$)")
+    rows: set[str] = set()
+    for k in fields:
+        m = rx.match(k)
+        if m:
+            rows.add(k[: m.end()].rstrip("."))
+    # 值内展开：最长前缀键是 dict ⇒ 按其键填 *
+    pre = pattern.split("*")[0].rstrip(".")
+    if pre and not rows:
+        base = get_path(fields, pre)
+        if isinstance(base, dict) and pattern.count("*") == 1 and pattern.endswith("*"):
+            rows = {f"{pre}.{k}" for k in base}
+    return sorted(rows, key=_natural)
+
+
+def _natural(s: str) -> list[Any]:
+    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", s)]
+
+
+def row_label(pattern: str, row: str) -> str:
+    """行标签 = 通配位置上的段（多个 * 用 · 连接）。"""
+    pp, rp = pattern.split("."), row.split(".")
+    return " · ".join(r for p, r in zip(pp, rp) if p == "*") or row
+
+
+# ---------------------------------------------------------------------------
+# 格式
+# ---------------------------------------------------------------------------
+
+
+def fmt(v: Any, kind: str = "auto") -> str:
+    if v is _MISSING or v is None:
         return "—"
-    return f"{x * 100:+.{nd}f}%" if pct else f"{x:+.{nd}f}"
+    if isinstance(v, bool):
+        return "✓" if v else "✗"
+    if isinstance(v, (int, float)):
+        if isinstance(v, float) and math.isnan(v):
+            return "NaN"
+        if kind == "pp":
+            return f"{v * 100:+.2f}pp"
+        if kind == "pct":
+            return f"{v * 100:.1f}%"
+        if kind == "num":
+            return f"{v:+.2f}"
+        if kind == "int":
+            return f"{int(v):,}"
+        if kind == "auto":
+            return f"{v:,}" if isinstance(v, int) else f"{v:.4g}"
+    if isinstance(v, str):
+        return (f"{VERDICT_ICON[v]} {v}" if v in VERDICT_ICON else v).replace(
+            "|", " · "
+        )
+    s = json.dumps(v, ensure_ascii=False, sort_keys=True, default=str)
+    return (s if len(s) <= 160 else s[:157] + "…").replace("|", " · ")
 
 
-def _pp(x: Any) -> str:
-    return "—" if not isinstance(x, (int, float)) else f"{x * 100:+.2f}pp"
+def _md_table(
+    header: list[str], rows: list[list[str]], align_right: Optional[list[bool]] = None
+) -> list[str]:
+    al = align_right or [False] + [True] * (len(header) - 1)
+    return [
+        "| " + " | ".join(header) + " |",
+        "|" + "".join("---:|" if a else "---|" for a in al),
+    ] + ["| " + " | ".join(r) + " |" for r in rows]
 
 
-def _xychart(
+# ---------------------------------------------------------------------------
+# 图
+# ---------------------------------------------------------------------------
+
+
+def xychart(
     title: str, xs: list[str], series: list[tuple[str, list[float]]], y_label: str
 ) -> list[str]:
-    """mermaid xychart-beta 柱状图（多序列 = 多组 bar；图例写在标题里，xychart 无图例语法）。"""
     vals = [v for _n, ys in series for v in ys]
     if not xs or not vals:
         return []
     lo, hi = min(0.0, min(vals)), max(0.0, max(vals))
+    cut = ""
+    if min(vals) > 0 and (max(vals) - min(vals)) < 0.3 * max(
+        vals
+    ):  # 同号差异小：截断纵轴，否则看不出差
+        lo, cut = min(vals), "，纵轴未从 0 起"
+    elif max(vals) < 0 and (max(vals) - min(vals)) < 0.3 * abs(min(vals)):
+        hi, cut = max(vals), "，纵轴未从 0 起"
     pad = (hi - lo) * 0.1 or 1.0
     legend = " / ".join(n for n, _ in series)
     out = [
         "```mermaid",
         "xychart-beta",
-        f'    title "{title}（{legend}）"',
-        "    x-axis [" + ", ".join(f'"{x}"' for x in xs) + "]",
+        f'    title "{title}（{legend}{cut}）"',
+        "    x-axis [" + ", ".join('"' + x.replace('"', "'") + '"' for x in xs) + "]",
         f'    y-axis "{y_label}" {lo - pad:.2f} --> {hi + pad:.2f}',
     ]
     out += [f"    bar [{', '.join(f'{v:.2f}' for v in ys)}]" for _n, ys in series]
-    out.append("```")
-    return out
+    return out + ["```"]
 
 
-def _pie(title: str, counts: dict[str, int]) -> list[str]:
+def pie(title: str, counts: dict[str, int]) -> list[str]:
     items = [(k, v) for k, v in counts.items() if v]
     if not items:
         return []
@@ -74,314 +182,550 @@ def _pie(title: str, counts: dict[str, int]) -> list[str]:
     )
 
 
-def _verdict_counts(vals: list[str]) -> dict[str, int]:
-    out: dict[str, int] = {}
-    for v in vals:
-        k = f"{VERDICT_ICON.get(v, '')} {v}".strip()
-        out[k] = out.get(k, 0) + 1
-    return out
-
-
-def _group(fields: dict[str, Any], prefix: str) -> dict[str, dict[str, Any]]:
-    """``style.bear.dims.age.verdict`` 型扁平键 → {'bear.age': {'verdict': ...}}（prefix 之后两段作键）。"""
-    out: dict[str, dict[str, Any]] = {}
-    for k, v in fields.items():
-        if not k.startswith(prefix):
-            continue
-        parts = k[len(prefix) :].split(".")
-        if len(parts) < 2:
-            continue
-        out.setdefault(parts[0], {})[".".join(parts[1:])] = v
-    return out
-
-
 # ---------------------------------------------------------------------------
-# R43
+# section 实现
 # ---------------------------------------------------------------------------
 
 
-def render_r43(d: dict[str, Any]) -> str:
+def _sorted_rows(
+    f: dict[str, Any], rows: list[str], sort: Optional[tuple[str, bool]]
+) -> list[str]:
+    """按叶字段排序（``leaf|abs`` = 按绝对值）；非数值垫底，稳定。"""
+    if not sort:
+        return rows
+    leaf, desc = sort
+    use_abs = leaf.endswith("|abs")
+    leaf = leaf.removesuffix("|abs")
+
+    def key(r: str) -> tuple[int, float]:
+        v = get_path(f, f"{r}.{leaf}")
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or v != v:
+            return (1, 0.0)
+        x = abs(v) if use_abs else float(v)
+        return (0, -x if desc else x)
+
+    return sorted(rows, key=key)
+
+
+def sec_kv(d: dict[str, Any], s: dict[str, Any]) -> list[str]:
     f = d["fields"]
-    L = [
-        f"# R43 区间段风格 / 板块 · 多维结果报告（`{d['tag']}`）",
-        "",
-        "> 由入库摘要机械渲染（`result_report`），数字只来自产物；判决以 R43 结论段为准。"
-        "价差 = 段内「该维度高五分位 − 低五分位」个股超额收益的段均值；t = 跨段 t 统计量；"
-        "同号比例 = 价差与均值同号的段占比。",
-        "",
+    rows = [
+        [f"`{p}`", fmt(get_path(f, p), k)]
+        for p, k in (_pk(x) for x in s["paths"])
+        if get_path(f, p) is not _MISSING
     ]
-    segs = {
-        k.split(".")[1]: v
-        for k, v in f.items()
-        if k.startswith("style.") and k.endswith(".n_qualified_segs")
-    }
-    L += ["## 1. 样本：合格区间段", "", "| 方向 | 挖掘 A | 挖掘 B |", "|---|---:|---:|"]
-    for dr in sorted(segs):
-        L.append(
-            f"| {'空头段' if dr == 'bear' else '多头段'} | {segs[dr].get('A', '—')} | {segs[dr].get('B', '—')} |"
-        )
-    drops = f.get("segment_drops") or {}
-    L += [
-        "",
-        f"合格段合计 {f.get('n_qualified_segments', '—')}；剔除 跨挖掘段 {drops.get('crossing', '—')}、"
-        f"短于 5 日 {drops.get('short', '—')}。",
-        "",
+    return _md_table(["字段", "值"], rows, [False, False]) if rows else []
+
+
+def _pk(x: Any) -> tuple[str, str]:
+    return (x, "auto") if isinstance(x, str) else (x[0], x[1])
+
+
+def sec_pivot(d: dict[str, Any], s: dict[str, Any]) -> list[str]:
+    f = d["fields"]
+    rows = _sorted_rows(f, expand_rows(f, s["rows"]), s.get("sort"))[
+        : s.get("limit") or None
     ]
-    for dr, label in (("bear", "空头段"), ("bull", "多头段")):
-        dims = _group(f, f"style.{dr}.dims.")
-        if not dims:
-            continue
-        L += [
-            f"## 2{'a' if dr == 'bear' else 'b'}. {label} · 风格维度（{len(dims)} 维）",
-            "",
+    if not rows:
+        return []
+    cols = s["cols"]
+    body = [
+        [row_label(s["rows"], r)]
+        + [
+            fmt(get_path(f, f"{r}.{c[0]}"), c[2] if len(c) > 2 else "auto")
+            for c in cols
         ]
-        L += _pie(
-            f"{label}风格维度判决分布",
-            _verdict_counts([v.get("verdict", "") for v in dims.values()]),
+        for r in rows
+    ]
+    return _md_table([s.get("row_title", "项")] + [c[1] for c in cols], body)
+
+
+def sec_bar(d: dict[str, Any], s: dict[str, Any]) -> list[str]:
+    f = d["fields"]
+    rows = _sorted_rows(f, expand_rows(f, s["rows"]), s.get("sort"))[
+        : s.get("limit") or None
+    ]
+    series = []
+    for leaf, name, mult in s["series"]:
+        ys = [get_path(f, f"{r}.{leaf}") for r in rows]
+        series.append(
+            (
+                name,
+                [
+                    float(y) * mult
+                    if isinstance(y, (int, float)) and not isinstance(y, bool)
+                    else 0.0
+                    for y in ys
+                ],
+            )
         )
+    return xychart(
+        s["title"],
+        [row_label(s["rows"], r) for r in rows],
+        series,
+        s.get("y_label", ""),
+    )
 
-        def tA(item: tuple[str, dict]) -> float:
-            t = ((item[1].get("windows") or {}).get("A") or {}).get("t")
-            return -abs(t) if isinstance(t, (int, float)) else 0.0
 
-        rows = sorted(dims.items(), key=tA)
-        L += [
-            "",
-            "| 维度 | A 价差 | A t | A 同号比例 | B 价差 | B t | B 同号比例 | C4 A/B | 判决 |",
-            "|---|---:|---:|---:|---:|---:|---:|---|---|",
-        ]
-        for name, v in rows:
-            w = v.get("windows") or {}
-            a, b = w.get("A") or {}, w.get("B") or {}
-            c4 = v.get("c4_by_window") or {}
-            L.append(
-                f"| {name} | {_num(a.get('mean_spread'), 2, True)} | {_num(a.get('t'))} | "
-                f"{_num(a.get('frac_same_sign'), 0, True).lstrip('+')} | {_num(b.get('mean_spread'), 2, True)} | "
-                f"{_num(b.get('t'))} | {_num(b.get('frac_same_sign'), 0, True).lstrip('+')} | "
-                f"{c4.get('A', '—')}/{c4.get('B', '—')} | {VERDICT_ICON.get(str(v.get('verdict')), '')} {v.get('verdict')} |"
-            )
-        top = [
-            r
-            for r in rows
-            if isinstance(
-                ((r[1].get("windows") or {}).get("A") or {}).get("t"), (int, float)
-            )
-        ][:12]
-        L += [""] + _xychart(
-            f"{label} |t| 最大的 12 维：两窗价差（%）",
-            [n for n, _ in top],
-            [
-                (
-                    lab,
-                    [
-                        float(
-                            (
-                                ((v.get("windows") or {}).get(w) or {}).get(
-                                    "mean_spread"
-                                )
-                                or 0.0
-                            )
-                            * 100
-                        )
-                        for _n, v in top
-                    ],
-                )
-                for lab, w in (("挖掘A", "A"), ("挖掘B", "B"))
-            ],
-            "价差 %",
-        )
-        L.append("")
-    for dr, label in (("bear", "空头段"), ("bull", "多头段")):
-        idx = _group(f, f"sector.{dr}.indices.")
-        if not idx:
-            continue
-        L += [
-            f"## 3{'a' if dr == 'bear' else 'b'}. {label} · 板块层（{len(idx)} 个板块指数）",
-            "",
-        ]
-        by_g: dict[str, dict[str, int]] = {}
-        for v in idx.values():
-            g = str(v.get("group") or "未分组")
-            vv = str(v.get("verdict"))
-            by_g.setdefault(g, {}).setdefault(vv, 0)
-            by_g[g][vv] += 1
-        verds = sorted({k for g in by_g.values() for k in g})
-        L += [
-            "| 板块类型 | "
-            + " | ".join(f"{VERDICT_ICON.get(x, '')} {x}" for x in verds)
-            + " |",
-            "|---|" + "---:|" * len(verds),
-        ]
-        for g in sorted(by_g):
-            L.append(
-                f"| {g} | " + " | ".join(str(by_g[g].get(x, 0)) for x in verds) + " |"
-            )
+def sec_pie(d: dict[str, Any], s: dict[str, Any]) -> list[str]:
+    f = d["fields"]
+    vals = [v for k, v in f.items() if fnmatch.fnmatchcase(k, s["values"])]
+    counts: dict[str, int] = {}
+    for v in vals:
+        k = fmt(v)
+        counts[k] = counts.get(k, 0) + 1
+    return pie(s["title"], dict(sorted(counts.items())))
 
-        def tAs(item: tuple[str, dict]) -> float:
-            t = ((item[1].get("windows") or {}).get("A") or {}).get("t")
-            return -t if isinstance(t, (int, float)) else math.inf
 
-        best = sorted(idx.items(), key=tAs)[:15]
-        L += [
-            "",
-            f"A 窗 t 最高的 15 个板块（两窗对照——A 强 B 不跟 = 不可复现）：",
-            "",
-            "| 板块 | 类型 | A 段均超额 | A t | B 段均超额 | B t | 判决 |",
-            "|---|---|---:|---:|---:|---:|---|",
-        ]
-        for c, v in best:
-            w = v.get("windows") or {}
-            a, b = w.get("A") or {}, w.get("B") or {}
-            L.append(
-                f"| {c} | {v.get('group', '—')} | {_num(a.get('mean_excess'), 2, True)} | {_num(a.get('t'))} | "
-                f"{_num(b.get('mean_excess'), 2, True)} | {_num(b.get('t'))} | "
-                f"{VERDICT_ICON.get(str(v.get('verdict')), '')} {v.get('verdict')} |"
-            )
-        L.append("")
-    return "\n".join(L).rstrip() + "\n"
+def sec_count(d: dict[str, Any], s: dict[str, Any]) -> list[str]:
+    f = d["fields"]
+    rows = expand_rows(f, s["rows"])
+    tab: dict[str, dict[str, int]] = {}
+    for r in rows:
+        g = fmt(get_path(f, f"{r}.{s['by']}"))
+        v = fmt(get_path(f, f"{r}.{s['of']}"))
+        tab.setdefault(g, {}).setdefault(v, 0)
+        tab[g][v] += 1
+    if not tab:
+        return []
+    vs = sorted({v for g in tab.values() for v in g})
+    return _md_table(
+        [s.get("row_title", "分组")] + vs + ["合计"],
+        [
+            [g] + [str(tab[g].get(v, 0)) for v in vs] + [str(sum(tab[g].values()))]
+            for g in sorted(tab)
+        ],
+    )
 
+
+SECTIONS: dict[str, Callable[[dict[str, Any], dict[str, Any]], list[str]]] = {
+    "kv": sec_kv,
+    "pivot": sec_pivot,
+    "bar": sec_bar,
+    "pie": sec_pie,
+    "count": sec_count,
+}
 
 # ---------------------------------------------------------------------------
-# R39
+# 自动兜底
 # ---------------------------------------------------------------------------
 
 
-def render_r39(d: dict[str, Any]) -> str:
+def _verdict_block(f: dict[str, Any]) -> list[str]:
+    out: list[str] = []
+    v = f.get("verdict")
+    if v is not None:
+        out += [f"**机械判决：{fmt(v)}**", ""]
+    crit = [(k, f[k]) for k in sorted(f) if re.fullmatch(r"criteria\.C\d", k)]
+    if crit:
+        rows = []
+        for k, c in crit:
+            c = c if isinstance(c, dict) else {"value": c}
+            st = c.get("state", c.get("ok"))
+            rule = str(c.get("rule", ""))[:80]
+            rows.append([k.split(".")[1], fmt(st), rule.replace("|", " · ") or "—"])
+        out += _md_table(["判据", "结果", "规则"], rows, [False, False, False]) + [""]
+    return out
+
+
+def _families(f: dict[str, Any]) -> list[tuple[str, list[str]]]:
+    """同构子项族：``P.X.leaf`` 键里 P 相同、X 不同、leaf 集合相同 ⇒ 一张透视表（P.* 为行模式）。"""
+    groups: dict[tuple[str, str], set[str]] = {}
+    for k in f:
+        parts = k.split(".")
+        for i in range(1, len(parts) - 1):
+            pre, mid, leaf = ".".join(parts[:i]), parts[i], ".".join(parts[i + 1 :])
+            groups.setdefault((pre, leaf), set()).add(mid)
+    fam: dict[str, set[str]] = {}
+    for (pre, leaf), mids in groups.items():
+        if len(mids) >= 3 and isinstance(
+            get_path(f, f"{pre}.{sorted(mids)[0]}.{leaf}"), (int, float, str, bool)
+        ):
+            fam.setdefault(pre, set()).add(leaf)
+    out = []
+    used: set[str] = set()
+    for pre in sorted(fam, key=lambda p: (p.count("."), p)):
+        if any(pre.startswith(u + ".") for u in used):
+            continue
+        used.add(pre)
+        out.append((pre, sorted(fam[pre])[:10]))
+    return out
+
+
+def auto_sections(d: dict[str, Any]) -> list[str]:
+    f = d["fields"]
+    L = ["## 判决", ""] + _verdict_block(f)
+    fams = _families(f)
+    in_fam = {k for pre, _ in fams for k in f if k.startswith(pre + ".")}
+    scalars = [
+        k
+        for k in sorted(f)
+        if k not in in_fam
+        and not k.startswith(("criteria.C", "provenance."))
+        and k != "verdict"
+        and isinstance(f[k], (int, float, str, bool))
+    ]
+    if scalars:
+        L += (
+            ["## 读数", ""]
+            + _md_table(
+                ["字段", "值"], [[f"`{k}`", fmt(f[k])] for k in scalars], [False, False]
+            )
+            + [""]
+        )
+    for pre, leaves in fams:
+        L += (
+            [f"## {pre}.*", ""]
+            + sec_pivot(d, {"rows": f"{pre}.*", "cols": [(lf, lf) for lf in leaves]})
+            + [""]
+        )
+        verd = [lf for lf in leaves if lf.endswith("verdict")]
+        for lf in verd:
+            L += sec_pie(
+                d, {"title": f"{pre}.* {lf} 分布", "values": f"{pre}.*.{lf}"}
+            ) + [""]
+    return L
+
+
+# ---------------------------------------------------------------------------
+# 单元规格
+# ---------------------------------------------------------------------------
+
+
+def _r39_profiles(d: dict[str, Any]) -> list[str]:
     f = d["fields"]
     cfgs: list[dict] = f.get("configs") or []
     profiles = list((f.get("profiles") or {}).keys())
-    L = [
-        f"# R39 因子 × 出场交互 · 多维结果报告（`{d['tag']}`）",
-        "",
-        "> 由入库摘要机械渲染（`result_report`），数字只来自产物；判决以 R39 结论段为准。"
-        "margin = 胜率 − 盈亏平衡胜率（全候选交易口径）；「A」= 挖掘段选型窗，「B」= 验证窗。",
-        "",
-    ]
-    L += [
-        "## 1. 四个出场档（统一用于所有信号时）",
-        "",
-        "| 出场档 | 参数 | A margin | A 胜率 | A 盈亏比 | B margin | B 胜率 | B 盈亏比 | A 组合成交 |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|",
-    ]
     uni: dict[str, dict] = {}
     for c in cfgs:
         m = c.get("mapping") or []
         if m and len(set(m)) == 1 and m[0] not in uni:
             uni[m[0]] = c
+    rows = []
     for p in profiles:
-        cu = uni.get(p)
-        g = str(((f.get("profiles") or {}).get(p) or {}).get("key", "")).replace(
-            "|", " · "
-        )  # 表格内禁竖线
-        if cu is None:
-            L.append(f"| {p} | `{g}` | — | — | — | — | — | — | — |")
-            continue
+        cu = uni.get(p) or {}
         a, b = cu.get("mining") or {}, cu.get("judgment") or {}
-        L.append(
-            f"| {p} | `{g}` | {_pp(a.get('margin'))} | {_num(a.get('win_rate'), 1, True).lstrip('+')} | "
-            f"{a.get('payoff_ratio', '—')} | {_pp(b.get('margin'))} | {_num(b.get('win_rate'), 1, True).lstrip('+')} | "
-            f"{b.get('payoff_ratio', '—')} | {a.get('n_taken', '—')} |"
+        key = str(((f.get("profiles") or {}).get(p) or {}).get("key", ""))
+        rows.append(
+            [
+                p,
+                f"`{key.replace('|', ' · ')}`",
+                fmt(a.get("margin"), "pp"),
+                fmt(a.get("win_rate"), "pct"),
+                fmt(a.get("payoff_ratio")),
+                fmt(b.get("margin"), "pp"),
+                fmt(b.get("win_rate"), "pct"),
+                fmt(b.get("payoff_ratio")),
+                fmt(a.get("n_taken"), "int"),
+            ]
         )
-    L += [""] + _xychart(
-        "统一出场档 margin（pp）",
-        [p for p in profiles if p in uni],
+    L = _md_table(
         [
-            (
-                "A",
-                [
-                    float(((uni[p].get("mining") or {}).get("margin") or 0) * 100)
-                    for p in profiles
-                    if p in uni
-                ],
-            ),
-            (
-                "B",
-                [
-                    float(((uni[p].get("judgment") or {}).get("margin") or 0) * 100)
-                    for p in profiles
-                    if p in uni
-                ],
-            ),
+            "出场档",
+            "参数",
+            "A margin",
+            "A 胜率",
+            "A 盈亏比",
+            "B margin",
+            "B 胜率",
+            "B 盈亏比",
+            "A 组合成交",
         ],
-        "margin pp",
+        rows,
+        [False, False] + [True] * 7,
     )
+    ps = [p for p in profiles if p in uni]
+    return (
+        L
+        + [""]
+        + xychart(
+            "统一出场档 margin（pp）",
+            ps,
+            [
+                (
+                    "A",
+                    [
+                        float(((uni[p].get("mining") or {}).get("margin") or 0) * 100)
+                        for p in ps
+                    ],
+                ),
+                (
+                    "B",
+                    [
+                        float(((uni[p].get("judgment") or {}).get("margin") or 0) * 100)
+                        for p in ps
+                    ],
+                ),
+            ],
+            "margin pp",
+        )
+    )
+
+
+def _r39_matrix(d: dict[str, Any]) -> list[str]:
+    f = d["fields"]
+    cfgs: list[dict] = f.get("configs") or []
+    profiles = list((f.get("profiles") or {}).keys())
+    L: list[str] = []
     for bk in sorted({str(c["bucketing"]) for c in cfgs if c.get("bucketing")}):
         sub = [c for c in cfgs if c.get("bucketing") == bk]
-        nb = len((sub[0].get("mapping") or [])) if sub else 0
+        nb = len(sub[0].get("mapping") or []) if sub else 0
         cuts = ((f.get("bucketings") or {}).get(bk) or {}).get("cuts_mining_estimated")
-        L += ["", f"## 2. 分桶 {bk}（{nb} 桶，挖掘 A 切点 {cuts}）· 映射矩阵", ""]
+        L += [f"### 分桶 {bk}（{nb} 桶，挖掘 A 切点 {cuts}）", ""]
         if nb == 2:
-            L += [
-                "A 窗 margin（pp）：行 = 桶 0（低 ADX）出场档，列 = 桶 1（高 ADX）出场档；对角线 = 统一出场。",
-                "",
-                "| 桶0 \\ 桶1 | " + " | ".join(profiles) + " |",
-                "|---|" + "---:|" * len(profiles),
-            ]
             grid = {tuple(c["mapping"]): c for c in sub}
+            L += [
+                "A 窗 margin：行 = 桶 0（低因子值）出场档，列 = 桶 1（高因子值）出场档；**对角线 = 统一出场**。",
+                "",
+            ]
+            body = []
             for p0 in profiles:
                 cells = []
                 for p1 in profiles:
                     cg = grid.get((p0, p1))
-                    v = _pp((cg or {}).get("mining", {}).get("margin")) if cg else "—"
+                    v = (
+                        fmt(((cg or {}).get("mining") or {}).get("margin"), "pp")
+                        if cg
+                        else "—"
+                    )
                     cells.append(f"**{v}**" if p0 == p1 else v)
-                L.append(f"| {p0} | " + " | ".join(cells) + " |")
+                body.append([p0] + cells)
+            L += _md_table(["桶0 \\ 桶1"] + profiles, body) + [""]
         ranked = sorted(
             sub, key=lambda c: -(((c.get("mining") or {}).get("margin")) or -9)
         )[:10]
-        L += [
-            "",
-            f"{bk} 下 A 窗 margin 前 10 的映射：",
-            "",
-            "| 映射（按桶） | A margin | A 胜率 | A 盈亏比 | B margin | 各桶组合成交 A | 各桶组合成交 B |",
-            "|---|---:|---:|---:|---:|---|---|",
+        body = [
+            [
+                " → ".join(c.get("mapping") or []),
+                fmt((c.get("mining") or {}).get("margin"), "pp"),
+                fmt((c.get("mining") or {}).get("win_rate"), "pct"),
+                fmt((c.get("mining") or {}).get("payoff_ratio")),
+                fmt((c.get("judgment") or {}).get("margin"), "pp"),
+                fmt((c.get("mining") or {}).get("n_taken_by_bucket")),
+                fmt((c.get("judgment") or {}).get("n_taken_by_bucket")),
+            ]
+            for c in ranked
         ]
-        for c in ranked:
-            a, b = c.get("mining") or {}, c.get("judgment") or {}
-            L.append(
-                f"| {' → '.join(c.get('mapping') or [])} | {_pp(a.get('margin'))} | "
-                f"{_num(a.get('win_rate'), 1, True).lstrip('+')} | {a.get('payoff_ratio', '—')} | {_pp(b.get('margin'))} | "
-                f"{a.get('n_taken_by_bucket', '—')} | {b.get('n_taken_by_bucket', '—')} |"
+        L += (
+            [f"{bk} 下 A 窗 margin 前 10 的映射：", ""]
+            + _md_table(
+                [
+                    "映射（按桶）",
+                    "A margin",
+                    "A 胜率",
+                    "A 盈亏比",
+                    "B margin",
+                    "各桶组合成交 A",
+                    "各桶组合成交 B",
+                ],
+                body,
+                [False, True, True, True, True, False, False],
             )
-    top = f.get("top") or {}
-    c1 = f.get("criteria.C1") or {}
-    L += [
-        "",
-        "## 3. 结论链",
-        "",
-        f"- 选型结果：分桶 `{top.get('bucketing')}`、映射 `{top.get('mapping')}`；uniform-best = `{(f.get('uniform_best') or {}).get('profile')}`。",
-        f"- C2 Δ（vs uniform-best）：A {_pp((f.get('criteria.C2') or {}).get('d_margin_mining'))} / "
-        f"B {_pp((f.get('criteria.C2') or {}).get('d_margin_judgment'))}；C4 池 q95 = {_pp((f.get('criteria.C4') or {}).get('q95'))}。",
-        f"- C1 逐桶组合成交：A {((c1.get('mining') or {}).get('by_bucket'))}、B {((c1.get('judgment') or {}).get('by_bucket'))}"
-        f"（桶下限 {c1.get('min_bucket')}）。",
-        f"- 机械判决：{VERDICT_ICON.get(str(f.get('verdict')), '')} **{f.get('verdict')}**。",
+            + [""]
+        )
+    return L
+
+
+def _style_sections(dr: str, label: str) -> list[dict[str, Any]]:
+    rows = f"style.{dr}.dims.*"
+    return [
+        {
+            "type": "pie",
+            "title": f"{label}风格维度判决分布",
+            "values": f"style.{dr}.dims.*.verdict",
+        },
+        {
+            "type": "pivot",
+            "title": f"{label} · 风格维度（按 A 窗 |t| 排序）",
+            "rows": rows,
+            "row_title": "维度",
+            "sort": ("windows.A.t|abs", True),
+            "cols": [
+                ("windows.A.mean_spread", "A 价差", "pct"),
+                ("windows.A.t", "A t", "num"),
+                ("windows.A.frac_same_sign", "A 同号比例", "pct"),
+                ("windows.B.mean_spread", "B 价差", "pct"),
+                ("windows.B.t", "B t", "num"),
+                ("windows.B.frac_same_sign", "B 同号比例", "pct"),
+                ("c4_by_window.A", "C4 A"),
+                ("c4_by_window.B", "C4 B"),
+                ("verdict", "判决"),
+            ],
+        },
+        {
+            "type": "bar",
+            "title": f"{label} |t| 最大的 12 维：两窗价差（%）",
+            "rows": rows,
+            "limit": 12,
+            "sort": ("windows.A.t|abs", True),
+            "y_label": "价差 %",
+            "series": [
+                ("windows.A.mean_spread", "挖掘A", 100.0),
+                ("windows.B.mean_spread", "挖掘B", 100.0),
+            ],
+        },
+        {
+            "type": "count",
+            "title": f"{label} · 板块层判决（按板块类型）",
+            "rows": f"sector.{dr}.indices.*",
+            "by": "group",
+            "of": "verdict",
+            "row_title": "板块类型",
+        },
+        {
+            "type": "pivot",
+            "title": f"{label} · A 窗 t 最高的 15 个板块（A 强 B 不跟 = 不可复现）",
+            "rows": f"sector.{dr}.indices.*",
+            "row_title": "板块",
+            "sort": ("windows.A.t", True),
+            "limit": 15,
+            "cols": [
+                ("group", "类型"),
+                ("windows.A.mean_excess", "A 段均超额", "pct"),
+                ("windows.A.t", "A t", "num"),
+                ("windows.B.mean_excess", "B 段均超额", "pct"),
+                ("windows.B.t", "B t", "num"),
+                ("verdict", "判决"),
+            ],
+        },
     ]
-    return "\n".join(L).rstrip() + "\n"
 
 
-RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
-    "r43_detail": render_r43,
-    "r39_detail": render_r39,
+REPORTS: dict[str, dict[str, Any]] = {
+    "r43_detail": {
+        "title": "R43 区间段风格 / 板块 · 多维结果报告",
+        "note": "价差 = 段内「该维度高五分位 − 低五分位」个股超额收益的段均值；t = 跨段 t；同号比例 = 价差与均值同号的段占比。",
+        "sections": [
+            {
+                "type": "kv",
+                "title": "样本：合格区间段",
+                "paths": [
+                    "n_qualified_segments",
+                    "segment_drops",
+                    "style.bear.n_qualified_segs",
+                    "style.bull.n_qualified_segs",
+                ],
+            },
+            *_style_sections("bear", "空头段"),
+            *_style_sections("bull", "多头段"),
+        ],
+    },
+    "r39_detail": {
+        "title": "R39 因子 × 出场交互 · 多维结果报告",
+        "note": "margin = 胜率 − 盈亏平衡胜率（全候选交易口径）；A = 挖掘选型窗，B = 验证窗。",
+        "sections": [
+            {
+                "type": "custom",
+                "title": "四个出场档（统一用于所有信号时）",
+                "fn": _r39_profiles,
+            },
+            {"type": "custom", "title": "分桶映射矩阵", "fn": _r39_matrix},
+            {
+                "type": "kv",
+                "title": "结论链",
+                "paths": [
+                    "top.bucketing",
+                    "top.mapping",
+                    "uniform_best.profile",
+                    ("criteria.C2.d_margin_mining", "pp"),
+                    ("criteria.C2.d_margin_judgment", "pp"),
+                    ("criteria.C4.q95", "pp"),
+                    "criteria.C1.mining.by_bucket",
+                    "criteria.C1.judgment.by_bucket",
+                    "criteria.C1.min_bucket",
+                    "verdict",
+                ],
+            },
+        ],
+    },
+    "r44_scan": {
+        "title": "R44 J 日低点止损宽度 · 结果报告",
+        "note": "margin = 胜率 − 盈亏平衡胜率；ref = 现行 pct10；合并 = 挖掘 A∪B。",
+        "sections": [
+            {
+                "type": "pivot",
+                "title": "各档（两段合并）",
+                "rows": "merged.*",
+                "row_title": "档位",
+                "cols": [
+                    ("margin", "margin", "pp"),
+                    ("win_rate", "胜率", "pct"),
+                    ("payoff_ratio", "盈亏比"),
+                    ("rdd_gate", "过 rdd 门"),
+                    ("stop_share", "止损占比", "pct"),
+                    ("n_taken", "组合成交", "int"),
+                ],
+            },
+            {
+                "type": "bar",
+                "title": "各档合并 margin（pp）",
+                "rows": "merged.*",
+                "y_label": "margin pp",
+                "series": [("margin", "合并", 100.0)],
+            },
+            {
+                "type": "pivot",
+                "title": "逐窗读数",
+                "rows": "readings.*.*",
+                "row_title": "窗 · 档",
+                "cols": [
+                    ("margin", "margin", "pp"),
+                    ("win_rate", "胜率", "pct"),
+                    ("payoff_ratio", "盈亏比"),
+                    ("expectancy", "每笔均收益", "pct"),
+                    ("rdd_gate", "过 rdd 门"),
+                    ("cagr", "CAGR", "pct"),
+                    ("max_drawdown", "最大回撤", "pct"),
+                ],
+            },
+        ],
+    },
 }
+
+
+def render(d: dict[str, Any]) -> str:
+    spec = REPORTS.get(d.get("kind", ""), {})
+    title = spec.get("title") or f"{d.get('unit')} · {d.get('kind')} 结果报告"
+    L = [
+        f"<!-- report-of:{d['path']} -->",
+        f"# {title}（`{d['tag']}`）",
+        "",
+        "> 由入库摘要机械渲染（`result_report`），数字只来自产物，勿手改；判决以单元结论段为准。"
+        + (" " + spec["note"] if spec.get("note") else ""),
+        "",
+    ]
+    if spec.get("sections"):
+        L += _verdict_block(d["fields"])
+        for s in spec["sections"]:
+            body = s["fn"](d) if s["type"] == "custom" else SECTIONS[s["type"]](d, s)
+            if body:
+                L += [f"## {s['title']}", ""] + body + [""]
+    else:
+        L += auto_sections(d)
+    return "\n".join(L).rstrip() + "\n"
 
 
 def report_path(json_path: Path) -> Path:
     return json_path.with_name(json_path.stem + "_report.md")
 
 
-def render(d: dict[str, Any]) -> str:
-    fn = RENDERERS.get(d.get("kind", ""))
-    if fn is None:
-        raise ValueError(
-            f"kind {d.get('kind')!r} 没有报告渲染器（支持：{sorted(RENDERERS)}）"
-        )
-    return f"<!-- report-of:{d['path']} -->\n" + fn(d)
+def write_report(json_path: Path) -> Path:
+    out = report_path(json_path)
+    out.write_text(
+        render(json.loads(json_path.read_text(encoding="utf-8"))), encoding="utf-8"
+    )
+    return out
 
 
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        description="研究结果可视化报告（入库摘要 → 表格 + mermaid 图）"
+        description="研究结果可视化报告（入库摘要 → 表格 + mermaid 图；任意 kind 可用）"
     )
-    ap.add_argument("digest_json", help="governance/research/results/<单元>/<tag>.json")
+    ap.add_argument(
+        "digest_json",
+        nargs="+",
+        help="governance/research/results/<单元>/<tag>.json（可多份）",
+    )
     ap.add_argument(
         "--write", action="store_true", help="写同目录 <tag>_report.md（入库）"
     )
@@ -392,21 +736,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     args = _build_parser().parse_args(argv)
-    p = Path(args.digest_json)
-    d = json.loads(p.read_text(encoding="utf-8"))
-    try:
-        md = render(d)
-    except ValueError as exc:
-        print(f"[FAIL] {exc}", file=sys.stderr)
-        return 2
-    if args.write:
-        out = report_path(p)
-        out.write_text(md, encoding="utf-8")
-        print(
-            f"[OK] 写出 {out.relative_to(RESEARCH_DIR) if out.is_relative_to(RESEARCH_DIR) else out}"
-        )
-    else:
-        print(md)
+    for p in map(Path, args.digest_json):
+        if args.write:
+            print(f"[OK] 写出 {write_report(p)}")
+        else:
+            print(render(json.loads(p.read_text(encoding="utf-8"))))
     return 0
 
 

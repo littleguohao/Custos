@@ -613,6 +613,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--backfill", action="store_true", help="同时把回填块插入研究单元回填区"
     )
     ap.add_argument(
+        "--no-report",
+        action="store_true",
+        help="--write 时不同时生成可视化报告 <tag>_report.md（缺省生成，result_report 通用引擎）",
+    )
+    ap.add_argument(
         "--allow-missing",
         action="store_true",
         help="必需字段缺失也写（默认拒写，exit 2）",
@@ -651,6 +656,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             encoding="utf-8",
         )
         print(f"[OK] 写出 {out}", file=sys.stderr)
+        if not args.no_report:
+            from custos.research import result_report as rr  # noqa: PLC0415
+
+            print(f"[OK] 报告 {rr.write_report(out)}", file=sys.stderr)
     if args.backfill:
         doc = (
             _appendix_doc(

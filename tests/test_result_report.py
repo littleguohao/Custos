@@ -2,8 +2,6 @@
 
 import json
 
-import pytest
-
 from custos.core.paths import RESEARCH_DIR
 from custos.research import result_digest as rd
 from custos.research import result_report as rr
@@ -43,11 +41,56 @@ def test_r39_detail(tmp_path, monkeypatch):
     assert "映射矩阵" in md and "桶0 \\ 桶1" in md and md.count("| P") >= 4
 
 
-def test_unknown_kind_refused(tmp_path):
-    p = _dump(
-        tmp_path, "x", {"kind": "r40", "path": "results/R40/x.json", "fields": {}}
+def test_auto_fallback_on_every_repo_digest():
+    """无规格的 kind 走自动兜底：仓库里每份摘要都能渲染（判决 / 标量表 / 同构族透视）。"""
+    n = 0
+    for p in sorted((RESEARCH_DIR / "results").rglob("*.json")):
+        md = rr.render(json.loads(p.read_text(encoding="utf-8")))
+        assert md.startswith("<!-- report-of:") and "# " in md
+        n += 1
+    assert n >= 1
+
+
+def test_generic_sections_and_family_detection():
+    d = {
+        "kind": "zz",
+        "unit": "RX",
+        "tag": "t",
+        "path": "results/RX/t.json",
+        "fields": {
+            "verdict": "falsified",
+            "criteria.C1": {"ok": True, "rule": "n≥100"},
+            "merged.x5.margin": 0.01,
+            "merged.x7.margin": 0.02,
+            "merged.x10.margin": -0.01,
+            "merged.x5.verdict": "falsified",
+            "merged.x7.verdict": "untested",
+            "merged.x10.verdict": "falsified",
+            "n": 5,
+        },
+    }
+    md = rr.render(d)
+    assert (
+        "## merged.*" in md
+        and "| x5 |" in md
+        and md.index("| x5 |") < md.index("| x10 |")
+    )  # 自然序
+    assert "pie title" in md and "❌ falsified" in md and "`n`" in md
+    piv = rr.sec_pivot(
+        d,
+        {"rows": "merged.*", "cols": [("margin", "m", "pp")], "sort": ("margin", True)},
     )
-    assert rr.main([str(p)]) == 2
+    assert piv[2].startswith("| x7 | +2.00pp")
+
+
+def test_digest_write_emits_report(tmp_path, monkeypatch):
+    import helpers_null as hn
+    import test_null_calibration as tn
+
+    monkeypatch.setattr(rd, "RESEARCH_DIR", tmp_path)
+    prod = _dump(tmp_path, "r40", tn._bear_run(hn.null_replay)(0))
+    assert rd.main(["r40", str(prod), "--tag", "x", "--write"]) == 0
+    assert (tmp_path / "results/R40/x_report.md").exists()
 
 
 def test_repo_reports_are_pure_functions_of_digests():
@@ -60,8 +103,3 @@ def test_repo_reports_are_pure_functions_of_digests():
         assert rp.read_text(encoding="utf-8") == rr.render(d), (
             f"{rp.name} 与摘要不一致（手改？重跑 result_report）"
         )
-
-
-@pytest.mark.parametrize("v,exp", [(0.0123, "+1.23pp"), (None, "—")])
-def test_pp(v, exp):
-    assert rr._pp(v) == exp
