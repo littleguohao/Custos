@@ -82,6 +82,26 @@ def parse_ledger(text: str, categories: Optional[dict[str, int]] = None) -> list
     return rows
 
 
+#: 场内基金 / 可转债（本地 vipdoc 有日线）：沪 5xx 基金、11x 转债；深 15/16/18 基金、12x 转债
+_FUND_BOND_PREFIX = {"SH": ("5", "11"), "SZ": ("15", "16", "18", "12")}
+
+
+def instrument_of(code: str, name: str) -> str:
+    """``stock`` = A 股个股（主口径）；``etf_bond`` = 场内基金 / 转债（v0.431 单列：本地有日线，但 B1 出场规则
+    为个股设计——波动、涨跌停、转债 T+0 都不同，读数只作参考）；``other`` = 港股（台账裸码撞 A 股同号，本地无日线，
+    TDX 扩展市场只有在线不复权行情）/ 指数等，不推演。"""
+    from custos.core.code_utils import is_a_share_trade_row, is_ashare_stock, market_of  # noqa: PLC0415
+
+    if not is_a_share_trade_row({"代码": code, "名称": name}):
+        return "other"
+    if is_ashare_stock(code):
+        return "stock"
+    m = market_of(code)
+    if m in _FUND_BOND_PREFIX and code.startswith(_FUND_BOND_PREFIX[m]):
+        return "etf_bond"
+    return "other"
+
+
 def is_comparable(code: str, name: str) -> bool:
     """只比 A 股**个股**：剔港股（台账裸码撞 A 股同号，见 code_utils.HK_LEDGER_CODES）、ETF、转债、指数——
     出场规则是个股 B1 规则，且港股裸码会取到张冠李戴的 A 股 K 线。"""
@@ -356,13 +376,13 @@ def analyze(
         {
             f"{e['code']} {e['name']}"
             for e in all_eps
-            if not is_comparable(e["code"], e["name"])
+            if instrument_of(e["code"], e["name"]) == "other"
         }
     )
     eps = [
         e
         for e in all_eps
-        if is_comparable(e["code"], e["name"])
+        if instrument_of(e["code"], e["name"]) != "other"
         and (not start or e["entry_date"] >= start)
         and (not end or e["entry_date"] <= end)
     ]
@@ -387,6 +407,7 @@ def analyze(
         avg = _avg_cost(e)
         row: dict[str, Any] = {
             "code": e["code"],
+            "instrument": instrument_of(e["code"], e["name"]),
             "name": e["name"],
             "entry_date": e["entry_date"],
             "exit_date": e["exit_date"],
@@ -462,7 +483,16 @@ def analyze(
         "note": "live 跟踪（读 holdout 期 K 线，allow_holdout）；「主动优于规则」不得直接用于改规则",
         "excluded_instruments": excluded,
         "episodes": out_eps,
-        "summary": {b: summarize(out_eps, b) for b in ("rule", "plan")},
+        # 主口径只含 A 股个股；场内基金 / 转债单列（B1 规则为个股设计，只作参考）
+        "summary": {
+            b: summarize(
+                [e for e in out_eps if e.get("instrument", "stock") == "stock"], b
+            )
+            for b in ("rule", "plan")
+        },
+        "summary_etf_bond": summarize(
+            [e for e in out_eps if e.get("instrument") == "etf_bond"], "rule"
+        ),
     }
 
 
@@ -691,11 +721,37 @@ def render_md(rep: dict[str, Any]) -> str:
         f"副口径（买入计划止损）：可推演 {p['n_episodes']} 个回合，合计 Δ {p['total_delta_amount']:+,.0f} 元；"
         "明细见 JSON `summary.plan`。",
     ]
+    eb = rep.get("summary_etf_bond") or {}
+    if eb.get("n_episodes"):
+        lines += [
+            "",
+            "## 场内基金 / 可转债（单列，规则只作参考：B1 出场规则为个股设计）",
+            "",
+            "| 口径 | 笔数 | 胜率 | 盈亏比 | 平均收益 |",
+            "|---|---:|---:|---:|---:|",
+        ]
+        for lab, st in (
+            ("实际（首笔那手）", eb.get("first_lot_closed") or {}),
+            ("首笔按规则", eb.get("rule_closed") or {}),
+        ):
+            wr, pr = st.get("win_rate"), st.get("payoff_ratio")
+            lines.append(
+                f"| {lab} | {st.get('n', 0)} | {'—' if wr is None else f'{wr * 100:.1f}%'} | "
+                f"{'—' if pr is None else f'{pr:.2f}'} | {pct(st.get('avg_ret'))} |"
+            )
+        lines += [
+            "",
+            f"出场差 Δ 合计 {eb['total_delta_amount']:+,.0f} 元；分类："
+            + "；".join(
+                f"{c} {g['n']} 笔 {g['delta_amount']:+,.0f}"
+                for c, g in eb["categories"].items()
+            ),
+        ]
     if rep.get("excluded_instruments"):
         ex = rep["excluded_instruments"]
         lines += [
             "",
-            f"未纳入（非 A 股个股：港股 / ETF / 转债等，出场规则不适用）{len(ex)} 只："
+            f"未纳入（港股：台账裸码撞 A 股同号、本地无日线；或指数等）{len(ex)} 只："
             + "、".join(ex[:20])
             + (" …" if len(ex) > 20 else ""),
         ]

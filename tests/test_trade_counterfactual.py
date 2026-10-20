@@ -249,8 +249,15 @@ def test_v0426_adjust_bias_and_exclusions(tmp_path):
         == 0
     )
     rep = json.loads(out.read_text(encoding="utf-8"))
-    assert [e["code"] for e in rep["episodes"]] == ["600000"]
-    assert {x.split()[0] for x in rep["excluded_instruments"]} == {"002158", "159938"}
+    assert {e["code"]: e["instrument"] for e in rep["episodes"]} == {
+        "600000": "stock",
+        "159938": "etf_bond",
+    }
+    assert {x.split()[0] for x in rep["excluded_instruments"]} == {
+        "002158"
+    }  # 港股仍剔除
+    assert rep["summary"]["rule"]["n_episodes"] == 1  # 主口径只含个股
+    assert rep["summary_etf_bond"]["n_episodes"] == 1
     r = rep["episodes"][0]["rule"]
     assert r["ret"] > -0.05  # 横盘：规则收益≈ −成本，不是 −30%
     assert rep["ledger_categories"]["红利入账"] == 1
