@@ -830,6 +830,35 @@ C4 死刑撤销（读数与分解见回填区「Phase 3 C4 复核」结果段，
 
 ## 附录 · Phase 4 跑数命令（生产机，v0.291 工具，判据见回填区 Phase 4 段/草案 v0.277）
 
+<!-- digest:results/R36/r36_v2_preB2.json -->
+**跑数摘要** `r36_v2_preB2`（kind=r36_frozen，产物 `_score_evolution__r36_v2_preB2.json` sha256 `9878713d8f22e11d`，digest v1；数字只来自产物，勿手改）
+
+| 字段 | 值 |
+|---|---|
+| `candidate.delta_median` | 0.04981334337377094 |
+| `candidate.delta_portfolio_median` | 0.12009728680889933 |
+| `candidate.equal_margin_median` | -0.015686077931730102 |
+| `candidate.gate_rate` | 1.0 |
+| `candidate.n_selected_median` | 8893.5 |
+| `candidate.n_taken_median` | 297.5 |
+| `candidate.weights` | len=30 min=0 med=0 max=1（全量见 JSON） |
+| `config.frozen_tag` | "r36_p3_c4review" |
+| `config.reading_basis` | "daily_topn_selected" |
+| `line` | null |
+| `pool` | [0.028497379460215494, 0.04662343805961314, 0.02489804076564414, 0.07433689239339078, 0.043992632989499486, 0.021300714574514157, 0.035638906106756796, 0.013186902249092303, 0.0824735779317301, 0.052707408952757634] |
+| `provenance.cmdline` | "--v0-lattice --frozen-read artifacts/logs/score_evolution/r36_p3_c4review/_score_evolution__r36_p3_c4review.json --mining-start 2022-01-01 --mining-end 2024-07-31 --judgment-start 2022-01-01 --judgment-end 2026-09-04 --tag r36_v2_preB2 --jobs 4" |
+| `provenance.data_last_date` | null |
+| `provenance.git_dirty` | false |
+| `provenance.git_sha` | "e3f3f09a78" |
+| `provenance.n_codes` | 5576 |
+| `provenance.universe_rule` | "ashare_full_asof" |
+| `provenance.universe_sha256` | "46ad8bb7da43c56b" |
+| `verdict` | "no_batch" |
+| `window` | {"end": "2026-09-04", "start": "2022-01-01"} |
+| `window_usage` | {"k": null, "note": "判定窗在挖掘段内（非受保护段 2017~2021）——读挖掘段不入台账（v2 口径）", "window": "mining_segment"} |
+<!-- /digest -->
+
+
 <!-- digest:results/R36/r36_v2_preB.json -->
 **跑数摘要** `r36_v2_preB`（kind=r36_frozen，产物 `_score_evolution__r36_v2_preB.json` sha256 `74f5375bec566374`，digest v1；数字只来自产物，勿手改）
 

@@ -237,6 +237,37 @@ owner 拍板发令）；**falsified**（C2/C3 不过或 C4 confirmed_fail ⇒ �
 
 ### 回填区（逐 Phase 填）
 
+<!-- digest:results/R39/r39_v2_pre.json -->
+**跑数摘要** `r39_v2_pre`（kind=r39，产物 `_factor_exit__r39_v2_pre.json` sha256 `4c03a9def90ef861`，digest v1；数字只来自产物，勿手改）
+
+| 字段 | 值 |
+|---|---|
+| `cost_sensitivity.deltas` | {"d_margin_judgment": {"base": 0.0, "flip": false, "side": 0.0}, "d_margin_mining": {"base": 0.0, "flip": false, "side": 0.0}} |
+| `criteria.C1` | {"judgment": {"below_floor": {"0": 32}, "by_bucket": {"0": 32, "1": 271}, "n_taken": 303, "ok": false}, "min_bucket": 50, "min_total": 100, "mining": {"below_floor": {}, "by_bucket": {"0": 198, "1": 472}, "n_taken": 670, "ok": true}, "n_buckets": 2, "ok": false} |
+| `criteria.C2` | {"d_margin_judgment": 0.0, "d_margin_mining": 0.0, "ok": false, "rule": "双窗同向为正（vs uniform-best）"} |
+| `criteria.C3` | {"draws": [{"c2_holds": false, "cuts": [21.50650958293959], "d_margin_judgment": 0.0, "d_margin_mining": 0.0, "draw": 0, "qs_perturbed": [0.4584376395424537]}, {"c2_holds": false, "cuts": [22.188822218927676], "d_margin_judgment": 0.0, "d_margin_mining": 0.0, "draw": 1, "qs_perturbed": [0.48771734720483906]}, {"c2_holds": false, "cuts": [24.833642884238873], "d_margin_judgment": 0.0, "d_margin_mining": 0.0, "draw": 2, "qs_perturbed": [0.5940292003054757]}, {"c2_holds": false, "cuts": [21.454579609303757], "d_margin_judgment": 0.0, "d_margin_mining": 0.0, "draw": 3, "qs_perturbed": [0.45596128997772156]}], "n_flips": 4, "ok": false, "rule": "分位切点 ±20% ×4 扰动零翻转"} |
+| `criteria.C4` | {"evaluated": 50, "gate_pass": 50, "gate_pass_rate": 1.0, "min_pool": 50, "ok": false, "pool": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "pool_size": 50, "q95": 0.0, "state": "confirmed_fail"} |
+| `n_signals` | {"judgment": 414273, "mining": 218894} |
+| `provenance.cmdline` | "--tag r39_v2_pre --mining-start 2000-01-01 --mining-end 2016-12-31 --judgment-start 2022-01-01 --judgment-end 2026-09-04" |
+| `provenance.data_last_date` | "2026-09-04" |
+| `provenance.git_dirty` | false |
+| `provenance.git_sha` | "e3f3f09a78" |
+| `provenance.n_codes` | 5576 |
+| `provenance.universe_rule` | "ashare_full_asof" |
+| `provenance.universe_sha256` | "f0692547ad66f1b2" |
+| `top.bucketing` | "B2" |
+| `top.judgment` | {"expectancy_R": 0.069, "margin": 0.036557148303469345, "n": 413750, "n_taken": 303, "n_taken_by_bucket": {"0": 32, "1": 271}, "n_unrealized": 523, "objective": null, "objective_version": "v2.1-margin-rddref", "payoff_ratio": 1.623, "rdd_gate": false, "ret_over_dd": -0.08129378000000001, "trade_set_note": "margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）", "win_rate": 0.4178} |
+| `top.mapping` | ["P3_slow", "P3_slow"] |
+| `top.mining` | {"expectancy_R": 0.108, "margin": 0.05584751587598058, "n": 216737, "n_taken": 670, "n_taken_by_bucket": {"0": 198, "1": 472}, "n_unrealized": 2157, "objective": 0.05584751587598058, "objective_version": "v2.1-margin-rddref", "payoff_ratio": 1.677, "rdd_gate": true, "ret_over_dd": -0.17491968, "trade_set_note": "margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）", "win_rate": 0.4294} |
+| `uniform_best.judgment` | {"expectancy_R": 0.069, "margin": 0.036557148303469345, "n": 413750, "n_taken": 303, "n_unrealized": 523, "objective": null, "objective_version": "v2.1-margin-rddref", "payoff_ratio": 1.623, "rdd_gate": false, "ret_over_dd": -0.08129378000000001, "trade_set_note": "margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）", "win_rate": 0.4178} |
+| `uniform_best.mining` | {"expectancy_R": 0.108, "margin": 0.05584751587598058, "n": 216737, "n_taken": 670, "n_unrealized": 2157, "objective": 0.05584751587598058, "objective_version": "v2.1-margin-rddref", "payoff_ratio": 1.677, "rdd_gate": true, "ret_over_dd": -0.17491968, "trade_set_note": "margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）", "win_rate": 0.4294} |
+| `uniform_best.profile` | "P3_slow" |
+| `verdict` | "untested" |
+| `window_usage` | {"k": null, "note": "判定窗在挖掘段内（非受保护段 2017~2021）——读挖掘段不入台账（v2 口径）", "window": "mining_segment"} |
+| `windows` | {"judgment": {"end": "2026-09-04", "start": "2022-01-01"}, "mining": {"end": "2016-12-31", "start": "2000-01-01"}} |
+<!-- /digest -->
+
+
 - **Phase 1 工程（✅ 2026-10-08，v0.300；判据 v0.301 修订）**：见
   「工程落点」。跑数命令（生产机）：
   `uv run python -m custos.research factor_exit_study --tag r39_a1
