@@ -253,7 +253,15 @@ def replay_rule(
     if not trs:
         return {"unable": "引擎未产出交易（数据不足）"}
     tr = trs[0]
+    # 规则持有期路径（入场收盘 → 规则离场日）：最大浮盈 / 浮亏（v0.432 诊断「规则为何亏」）
+    j = dates.index(tr["exit_date"]) if tr["exit_date"] in dates else len(dates) - 1
+    ce = float(df["close"].iloc[i])
+    seg = df.iloc[i + 1 : j + 1]
+    mfe = float(seg["high"].max()) / ce - 1 if len(seg) else 0.0
+    mae = float(seg["low"].min()) / ce - 1 if len(seg) else 0.0
     return {
+        "mfe": mfe,
+        "mae": mae,
         "exit_date": tr["exit_date"],
         "reason": tr["reason"],
         "ret_close": float(tr["ret"]),
@@ -425,6 +433,7 @@ def analyze(
         act = actual_result(e, last_close)
         fl = first_lot_result(e, last_close)
         row["b1_entry"] = b1_entry(df, e["entry_date"], regime)
+        row["regime_at_entry"] = (regime or {}).get(e["entry_date"])
         row["first_lot_ret"] = fl["ret"]
         row["first_lot_cost"] = fl["cost"]
         row["first_lot_exit"] = fl["exit_date"]
@@ -455,7 +464,7 @@ def analyze(
             row[name] = {
                 **{
                     k: rr.get(k)
-                    for k in ("exit_date", "reason", "holding", "unable")
+                    for k in ("exit_date", "reason", "holding", "unable", "mfe", "mae")
                     if k in rr
                 },
                 **({"stop_price": stop} if stop is not None else {}),
@@ -511,6 +520,55 @@ def _stats(rets: list[float]) -> dict[str, Any]:
         "payoff_ratio": aw / abs(al) if aw is not None and al else None,
         "avg_ret": sum(rets) / len(rets),
     }
+
+
+def _rule_diag(closed: list[dict], basis: str) -> dict[str, Any]:
+    """规则侧为何亏（v0.432）：按入场类型 × 规则出场原因的笔数 / 平均收益 / 平均持有 / 平均路径最大浮盈；
+    「先浮盈 ≥5% 后仍亏损离场」笔数（盈利回吐）；按入场时 0AMV 状态的规则平均收益。"""
+
+    def grp(lab: str, es: list[dict]) -> dict[str, Any]:
+        by: dict[str, list[dict]] = {}
+        for e in es:
+            by.setdefault(str(e[basis].get("reason")), []).append(e[basis])
+        rows = {
+            r: {
+                "n": len(g),
+                "avg_ret": sum(x["ret"] for x in g) / len(g),
+                "avg_holding": _mean_num([x.get("holding") for x in g]),
+                "avg_mfe": _mean_num([x.get("mfe") for x in g]),
+                "avg_mae": _mean_num([x.get("mae") for x in g]),
+            }
+            for r, g in sorted(by.items(), key=lambda kv: -len(kv[1]))
+        }
+        return {
+            "n": len(es),
+            "by_reason": rows,
+            "gave_back_5pct": sum(
+                1
+                for e in es
+                if (e[basis].get("mfe") or 0) >= 0.05 and e[basis]["ret"] <= 0
+            ),
+            "never_up_3pct": sum(1 for e in es if (e[basis].get("mfe") or 0) < 0.03),
+        }
+
+    out = {"全部": grp("全部", closed)}
+    for lab, flag in (("B1 合规入场", True), ("非 B1 入场", False)):
+        es = [e for e in closed if e.get("b1_entry") is flag]
+        if es:
+            out[lab] = grp(lab, es)
+    by_reg: dict[str, list[float]] = {}
+    for e in closed:
+        by_reg.setdefault(str(e.get("regime_at_entry")), []).append(e[basis]["ret"])
+    out["by_regime"] = {
+        k: {"n": len(v), "avg_rule_ret": sum(v) / len(v)}
+        for k, v in sorted(by_reg.items())
+    }
+    return out
+
+
+def _mean_num(xs: list[Any]) -> Optional[float]:
+    v = [float(x) for x in xs if isinstance(x, (int, float))]
+    return sum(v) / len(v) if v else None
 
 
 def summarize(eps: list[dict], basis: str) -> dict[str, Any]:
@@ -578,6 +636,7 @@ def summarize(eps: list[dict], basis: str) -> dict[str, Any]:
             )
             if g
         },
+        "rule_diag": _rule_diag(closed, basis),
         "best": sorted(
             (
                 {
@@ -695,6 +754,37 @@ def render_md(rep: dict[str, Any]) -> str:
             f"| {w['episode']} | {w['category']} | {w['delta_pp']:+.2f}pp | {w['delta_amount']:+,.0f} | "
             f"{w['rule_exit'] or '持有中'}（{w['rule_reason']}） | {w['actual_exit'] or '持有中'} |"
         )
+    dg = s.get("rule_diag") or {}
+    if dg:
+        lines += [
+            "",
+            "## 规则侧为何亏：出场原因拆解（已清仓）",
+            "",
+            "| 入场类型 | 规则出场原因 | 笔数 | 平均收益 | 平均持有（日） | 持有期最大浮盈均值 | 最大浮亏均值 |",
+            "|---|---|---:|---:|---:|---:|---:|",
+        ]
+        for lab in ("全部", "B1 合规入场", "非 B1 入场"):
+            g = dg.get(lab)
+            if not g:
+                continue
+            for r, x in g["by_reason"].items():
+                hd = x["avg_holding"]
+                lines.append(
+                    f"| {lab} | {r} | {x['n']} | {pct(x['avg_ret'])} | {'—' if hd is None else f'{hd:.1f}'} | "
+                    f"{pct(x['avg_mfe'])} | {pct(x['avg_mae'])} |"
+                )
+            lines.append(
+                f"| {lab} | 先浮盈≥5% 仍亏损离场 / 全程浮盈<3% | {g['gave_back_5pct']} / {g['never_up_3pct']} | | | | |"
+            )
+        reg = dg.get("by_regime") or {}
+        if reg:
+            lines += [
+                "",
+                "入场时 0AMV 状态 × 规则平均收益："
+                + "；".join(
+                    f"{k} {v['n']} 笔 {pct(v['avg_rule_ret'])}" for k, v in reg.items()
+                ),
+            ]
     lines += [
         "",
         "## Δ 最好 10 笔（「主动优于规则」从哪来：分散还是集中）",

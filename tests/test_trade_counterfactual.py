@@ -316,3 +316,40 @@ def test_v0430_first_lot_basis_and_add_on(tmp_path):
     assert s["n_with_add_on"] == 1 and "by_entry" in s and s["best"]
     md = (tmp_path / "o.md").read_text(encoding="utf-8")
     assert "按入场类型" in md and "Δ 最好 10 笔" in md and "加仓 / 补仓部分盈亏" in md
+
+
+def test_v0432_rule_diag(tmp_path):
+    df = _bars(_crash())
+    buy, sell = _d(df, 40), _d(df, 51)
+    lp = _ledger(
+        tmp_path,
+        [
+            (buy, "14:50", "600000", "浦发", "买入", 1000, 10.0, 10000, 0),
+            (sell, "10:00", "600000", "浦发", "卖出", 1000, 8.0, 8000, 0),
+        ],
+    )
+    out = tmp_path / "o.json"
+    assert (
+        tc.main(
+            [
+                "--ledger",
+                str(lp),
+                "--plans",
+                str(tmp_path / "n.json"),
+                "--out",
+                str(out),
+            ],
+            loader=lambda c, d: df,
+            regime={buy: "空头"},
+        )
+        == 0
+    )
+    rep = json.loads(out.read_text(encoding="utf-8"))
+    r = rep["episodes"][0]["rule"]
+    assert r["mae"] < -0.1 and r["mfe"] < 0.03  # 一路跌：最高价都没回到入场收盘
+    dg = rep["summary"]["rule"]["rule_diag"]
+    assert (
+        dg["全部"]["by_reason"]["stop"]["n"] == 1 and dg["全部"]["never_up_3pct"] == 1
+    )
+    assert dg["by_regime"]["空头"]["n"] == 1
+    assert "规则侧为何亏" in (tmp_path / "o.md").read_text(encoding="utf-8")
