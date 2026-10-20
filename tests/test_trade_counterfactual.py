@@ -214,3 +214,57 @@ def test_section_fail_soft_and_embed(tmp_path, monkeypatch):
     CP.returncode = 2
     CP.stderr = "[FAIL] 0 个可推演回合"
     assert "0 个可推演回合" in sec.section(tmp_path, "2026-01-01", "2026-01-31", "s")
+
+
+def test_v0426_adjust_bias_and_exclusions(tmp_path):
+    """前复权 K 线（价格被压低 30%）下，规则收益不得把复权缺口当亏损；港股撞号 / ETF 剔除。"""
+    closes = [7.0] * 40 + [7.0] * 12  # 复权后 7 元；实际成交价 10 元（缺口 30%）
+    df = _bars(closes)
+    buy, sell = _d(df, 40), _d(df, 51)
+    lp = _ledger(
+        tmp_path,
+        [
+            (buy, "14:50", "600000", "浦发", "买入", 1000, 10.0, 10000, 0),
+            (sell, "10:00", "600000", "浦发", "卖出", 1000, 10.0, 10000, 0),
+            (buy, "14:50", "002158", "医渡科技", "买入", 100, 10.0, 1000, 0),
+            (buy, "14:50", "159938", "医药ETF", "买入", 100, 1.0, 100, 0),
+            (buy, "15:00", "600000", "浦发", "红利入账", 0, 0, 0, 0),
+        ],
+    )
+    out = tmp_path / "o.json"
+    assert (
+        tc.main(
+            [
+                "--ledger",
+                str(lp),
+                "--plans",
+                str(tmp_path / "n.json"),
+                "--out",
+                str(out),
+                "--no-regime",
+            ],
+            loader=lambda c, d: df,
+            regime={},
+        )
+        == 0
+    )
+    rep = json.loads(out.read_text(encoding="utf-8"))
+    assert [e["code"] for e in rep["episodes"]] == ["600000"]
+    assert {x.split()[0] for x in rep["excluded_instruments"]} == {"002158", "159938"}
+    r = rep["episodes"][0]["rule"]
+    assert r["ret"] > -0.05  # 横盘：规则收益≈ −成本，不是 −30%
+    assert rep["ledger_categories"]["红利入账"] == 1
+
+
+def test_split_credit_keeps_episode_open_until_all_sold():
+    rows = tc.parse_ledger(
+        HDR + "2026-01-02,09:30,600000,浦发,买入,1000,10,10000,5\n"
+        "2026-01-05,15:00,600000,浦发,拆股,1000,0,0,0\n"
+        "2026-01-08,10:00,600000,浦发,卖出,1000,6,6000,5\n"
+        "2026-01-09,10:00,600000,浦发,卖出,1000,6,6000,5\n"
+    )
+    eps = tc.build_episodes(rows)
+    assert len(eps) == 1 and eps[0]["closed"] and eps[0]["exit_date"] == "2026-01-09"
+    assert tc.actual_result(eps[0], None)["ret"] == pytest.approx(
+        (11990 - 10005) / 10005
+    )

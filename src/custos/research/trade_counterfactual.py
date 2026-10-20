@@ -41,6 +41,8 @@ from custos.core.paths import LOGS, POSITION_PLANS_FILE, TRADES_DIR
 
 LEDGER = TRADES_DIR / "master_trade_ledger.csv"
 BUY, SELL = "买入", "卖出"
+#: 只加股数不加成本的入账类别（同 incremental_ledger.SHARE_CREDIT_CATEGORIES 口径；拆股/送转）
+SHARE_CREDIT = ("拆股",)
 TOL_PP = 0.5  # |Δ| ≤ 0.5pp 记一致
 CATEGORIES = ("止损拖延", "该清未清", "过早卖出", "执行价差", "主动优于规则", "一致")
 NEGATIVE = ("止损拖延", "该清未清", "过早卖出", "执行价差")
@@ -50,12 +52,15 @@ NEGATIVE = ("止损拖延", "该清未清", "过早卖出", "执行价差")
 # ---------------------------------------------------------------------------
 
 
-def parse_ledger(text: str) -> list[dict]:
-    """主台账 CSV → 买卖行（同 weekly_review.parse_ledger 口径：只留买入/卖出）。"""
+def parse_ledger(text: str, categories: Optional[dict[str, int]] = None) -> list[dict]:
+    """主台账 CSV → 买卖行（+ 拆股入账：只加股数）。``categories`` 提供时计各交易类别行数
+    （报告里列出，红利 / 送转等未纳入的类别一眼可见）。"""
     rows = []
     for raw in csv.DictReader(io.StringIO(text)):
         side = (raw.get("交易类别") or "").strip()
-        if side not in (BUY, SELL):
+        if categories is not None:
+            categories[side] = categories.get(side, 0) + 1
+        if side not in (BUY, SELL, *SHARE_CREDIT):
             continue
         try:
             rows.append(
@@ -73,8 +78,16 @@ def parse_ledger(text: str) -> list[dict]:
             )
         except ValueError:
             continue
-    rows.sort(key=lambda r: (r["date"], r["time"], 0 if r["side"] == BUY else 1))
+    rows.sort(key=lambda r: (r["date"], r["time"], 0 if r["side"] != SELL else 1))
     return rows
+
+
+def is_comparable(code: str, name: str) -> bool:
+    """只比 A 股**个股**：剔港股（台账裸码撞 A 股同号，见 code_utils.HK_LEDGER_CODES）、ETF、转债、指数——
+    出场规则是个股 B1 规则，且港股裸码会取到张冠李戴的 A 股 K 线。"""
+    from custos.core.code_utils import is_a_share_trade_row, is_ashare_stock  # noqa: PLC0415
+
+    return is_ashare_stock(code) and is_a_share_trade_row({"代码": code, "名称": name})
 
 
 def build_episodes(rows: list[dict]) -> list[dict]:
@@ -87,6 +100,13 @@ def build_episodes(rows: list[dict]) -> list[dict]:
         pos = 0.0
         cur: Optional[dict] = None
         for r in rs:
+            if (
+                r["side"] in SHARE_CREDIT
+            ):  # 拆股 / 送转：只加股数，不算买入决策、不开新回合
+                if cur is not None:
+                    cur.setdefault("credits", []).append(r)
+                    pos += r["qty"]
+                continue
             if r["side"] == BUY:
                 if cur is None:
                     cur = {"code": code, "name": r["name"], "buys": [], "sells": []}
@@ -194,10 +214,18 @@ def replay_rule(
     }
 
 
-def _on_cost(rr: dict[str, Any], avg_cost: float) -> Optional[float]:
-    if "unable" in rr or not avg_cost:
+def _on_cost(
+    rr: dict[str, Any], first_price: float, avg_cost: float
+) -> Optional[float]:
+    """规则收益折回实际成本基准。
+
+    ⚠️ v0.426 修：K 线是**前复权**，``close_entry`` 比当时真实价低（分红 / 送转越多越低），旧式
+    ``close_entry / avg_cost`` 把复权缺口当成规则亏损（越老的回合偏差越大）。现以**首笔实际买价**代表
+    规则的进场价（复权空间里的路径收益 ``ret_close`` 本身已含分红送转，不受影响），再按实际
+    摊薄成本折算——补仓带来的成本差仍记在实际侧。"""
+    if "unable" in rr or not avg_cost or not first_price:
         return None
-    return (1.0 + rr["ret_close"]) * rr["close_entry"] / avg_cost - 1.0
+    return (1.0 + rr["ret_close"]) * first_price / avg_cost - 1.0
 
 
 def classify(
@@ -273,10 +301,19 @@ def analyze(
 ) -> dict[str, Any]:
     from custos.research import plan_rules_replay as prr  # noqa: PLC0415
 
+    all_eps = build_episodes(rows)
+    excluded = sorted(
+        {
+            f"{e['code']} {e['name']}"
+            for e in all_eps
+            if not is_comparable(e["code"], e["name"])
+        }
+    )
     eps = [
         e
-        for e in build_episodes(rows)
-        if (not start or e["entry_date"] >= start)
+        for e in all_eps
+        if is_comparable(e["code"], e["name"])
+        and (not start or e["entry_date"] >= start)
         and (not end or e["entry_date"] <= end)
     ]
     if period is not None:  # 周报/月报口径：期间内清仓的回合 + 期末仍持有的回合
@@ -326,7 +363,7 @@ def analyze(
                 row[name] = {"unable": "无买入计划止损"}
                 continue
             rr = replay_rule(df, e["entry_date"], params, cost_bps, stop_override=stop)
-            rret = _on_cost(rr, avg)
+            rret = _on_cost(rr, e["buys"][0]["price"], avg)
             cat = classify(act["ret"], rret, e, rr, tol_pp)
             row[name] = {
                 **{
@@ -357,6 +394,7 @@ def analyze(
             "period": list(period) if period else None,
         },
         "note": "live 跟踪（读 holdout 期 K 线，allow_holdout）；「主动优于规则」不得直接用于改规则",
+        "excluded_instruments": excluded,
         "episodes": out_eps,
         "summary": {b: summarize(out_eps, b) for b in ("rule", "plan")},
     }
@@ -495,6 +533,22 @@ def render_md(rep: dict[str, Any]) -> str:
         f"副口径（买入计划止损）：可推演 {p['n_episodes']} 个回合，合计 Δ {p['total_delta_amount']:+,.0f} 元；"
         "明细见 JSON `summary.plan`。",
     ]
+    if rep.get("excluded_instruments"):
+        ex = rep["excluded_instruments"]
+        lines += [
+            "",
+            f"未纳入（非 A 股个股：港股 / ETF / 转债等，出场规则不适用）{len(ex)} 只："
+            + "、".join(ex[:20])
+            + (" …" if len(ex) > 20 else ""),
+        ]
+    if rep.get("ledger_categories"):
+        lines += [
+            "",
+            "台账交易类别（只用 买入 / 卖出 / 拆股；红利等现金入账未计入实际收益）："
+            + "；".join(
+                f"{k or '空'} {v}" for k, v in sorted(rep["ledger_categories"].items())
+            ),
+        ]
     unable = [e for e in rep["episodes"] if e.get("unable")]
     if unable:
         lines += [
@@ -553,7 +607,8 @@ def main(
     if not lp.exists():
         print(f"[FAIL] 台账不存在：{lp}", file=sys.stderr)
         return 2
-    rows = parse_ledger(lp.read_text(encoding="utf-8-sig"))
+    cats: dict[str, int] = {}
+    rows = parse_ledger(lp.read_text(encoding="utf-8-sig"), cats)
     pp = Path(args.plans)
     plans = json.loads(pp.read_text(encoding="utf-8")) if pp.exists() else {}
     if regime is None and loader is None and not args.no_regime:
@@ -574,6 +629,7 @@ def main(
         end=args.end,
         period=tuple(args.period) if args.period else None,
     )
+    rep["ledger_categories"] = cats
     if not rep["summary"]["rule"]["n_episodes"]:
         print(
             "[FAIL] 0 个可推演回合（台账为空 / 窗口不对 / K 线全缺）——空结果不写产物",
