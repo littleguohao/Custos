@@ -268,3 +268,44 @@ def test_split_credit_keeps_episode_open_until_all_sold():
     assert tc.actual_result(eps[0], None)["ret"] == pytest.approx(
         (11990 - 10005) / 10005
     )
+
+
+def test_v0430_first_lot_basis_and_add_on(tmp_path):
+    """补仓不再计入出场差：首笔按规则 vs 首笔实际；加仓盈亏单列；B1 入场分组。"""
+    df = _bars(_crash())
+    b0, b1, sell = _d(df, 40), _d(df, 46), _d(df, 51)
+    lp = _ledger(
+        tmp_path,
+        [
+            (b0, "14:50", "600000", "浦发", "买入", 1000, 10.0, 10000, 0),
+            (b1, "14:50", "600000", "浦发", "买入", 1000, 8.5, 8500, 0),
+            (sell, "10:00", "600000", "浦发", "卖出", 2000, 8.0, 16000, 0),
+        ],
+    )
+    out = tmp_path / "o.json"
+    assert (
+        tc.main(
+            [
+                "--ledger",
+                str(lp),
+                "--plans",
+                str(tmp_path / "n.json"),
+                "--out",
+                str(out),
+            ],
+            loader=lambda c, d: df,
+            regime={b0: "做多"},
+        )
+        == 0
+    )
+    rep = json.loads(out.read_text(encoding="utf-8"))
+    e = rep["episodes"][0]
+    assert e["first_lot_ret"] == pytest.approx(-0.2) and e["first_lot_exit"] == sell
+    assert e["add_on_pnl"] == pytest.approx(16000 - 18500 - (8000 - 10000))
+    assert e["rule"]["delta_amount"] == pytest.approx(
+        (e["first_lot_ret"] - e["rule"]["ret"]) * 10000
+    )
+    s = rep["summary"]["rule"]
+    assert s["n_with_add_on"] == 1 and "by_entry" in s and s["best"]
+    md = (tmp_path / "o.md").read_text(encoding="utf-8")
+    assert "按入场类型" in md and "Δ 最好 10 笔" in md and "加仓 / 补仓部分盈亏" in md

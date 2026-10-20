@@ -139,6 +139,34 @@ def _avg_cost(ep: dict) -> float:
     return (sum(b["amount"] + b["fee"] for b in ep["buys"]) / q) if q else 0.0
 
 
+def first_lot_result(ep: dict, last_close: Optional[float]) -> dict[str, Any]:
+    """首笔买入那一手的实际结果（FIFO：卖出先消耗首笔）——与规则推演**同股数、同进场**，
+    只差出场（v0.430：此前拿整个回合（含后续补仓）对首笔进场的规则路径，加仓效果被记进出场差）。"""
+    b0 = ep["buys"][0]
+    q0 = b0["qty"]
+    cost0 = b0["amount"] + b0["fee"]
+    left, proceeds, exit_date = q0, 0.0, None
+    for sv in ep["sells"]:
+        if left <= 1e-9:
+            break
+        take = min(left, sv["qty"])
+        frac = take / sv["qty"] if sv["qty"] else 0.0
+        proceeds += take * sv["price"] - sv["fee"] * frac
+        left -= take
+        if left <= 1e-9:
+            exit_date = sv["date"]
+    if left > 1e-9:
+        if last_close is None:
+            return {"ret": None, "cost": cost0, "exit_date": None}
+        proceeds += left * last_close
+    return {
+        "ret": (proceeds - cost0) / cost0 if cost0 else None,
+        "cost": cost0,
+        "pnl": proceeds - cost0,
+        "exit_date": exit_date,
+    }
+
+
 def actual_result(ep: dict, last_close: Optional[float]) -> dict[str, Any]:
     buy_amt = sum(b["amount"] for b in ep["buys"])
     buy_fee = sum(b["fee"] for b in ep["buys"])
@@ -234,6 +262,7 @@ def classify(
     ep: dict,
     rr: dict,
     tol_pp: float,
+    a_exit: Any = "__episode__",
 ) -> Optional[str]:
     if actual_ret is None or rule_ret is None:
         return None
@@ -243,7 +272,8 @@ def classify(
     if d > 0:
         return "主动优于规则"
     rule_open = str(rr.get("reason", "")).startswith("open_end")
-    a_exit = ep["exit_date"]  # None = 实际仍持有
+    if a_exit == "__episode__":
+        a_exit = ep["exit_date"]  # None = 实际仍持有
     r_exit = None if rule_open else rr["exit_date"]
     if a_exit == r_exit:
         return "执行价差"
@@ -251,6 +281,26 @@ def classify(
     if later:
         return "止损拖延" if "stop" in str(rr.get("reason")) else "该清未清"
     return "过早卖出"
+
+
+def b1_entry(
+    df: Any, entry_date: str, regime: Optional[dict[str, str]]
+) -> Optional[bool]:
+    """买入日是否 B1 合规入场：0AMV 做多 且 买入日 J<13（``bt.j_low_gate`` 同口径）。
+    regime 不可用 ⇒ 只看 J；数据不足 ⇒ None。"""
+    from custos.research import backtest_factors as bt  # noqa: PLC0415
+
+    dates = [str(d)[:10] for d in df["date"]]
+    if entry_date not in dates:
+        return None
+    i = dates.index(entry_date)
+    if i < 30:
+        return None
+    j_ok = bool(bt.j_low_gate(df.iloc[: i + 1]))
+    if regime:
+        st = regime.get(entry_date)
+        return j_ok and st == "做多"
+    return j_ok
 
 
 def flags_of(ep: dict, regime: Optional[dict[str, str]]) -> list[str]:
@@ -352,6 +402,17 @@ def analyze(
             continue
         last_close = float(df["close"].iloc[-1])
         act = actual_result(e, last_close)
+        fl = first_lot_result(e, last_close)
+        row["b1_entry"] = b1_entry(df, e["entry_date"], regime)
+        row["first_lot_ret"] = fl["ret"]
+        row["first_lot_cost"] = fl["cost"]
+        row["first_lot_exit"] = fl["exit_date"]
+        # 加仓 / 补仓部分的盈亏 = 整个回合盈亏 − 首笔那手的盈亏（出场对照之外单列）
+        row["add_on_pnl"] = (
+            act["pnl"] - fl["pnl"]
+            if act.get("pnl") is not None and fl.get("pnl") is not None
+            else None
+        )
         row["actual_ret"] = act["ret"]
         row["basis"] = act["basis"]
         row["marked_open"] = act.get("marked_open")
@@ -363,8 +424,13 @@ def analyze(
                 row[name] = {"unable": "无买入计划止损"}
                 continue
             rr = replay_rule(df, e["entry_date"], params, cost_bps, stop_override=stop)
-            rret = _on_cost(rr, e["buys"][0]["price"], avg)
-            cat = classify(act["ret"], rret, e, rr, tol_pp)
+            b0 = e["buys"][0]
+            c0 = (b0["amount"] + b0["fee"]) / b0["qty"] if b0["qty"] else 0.0
+            rret = _on_cost(
+                rr, b0["price"], c0
+            )  # 规则 = 首笔那手按规则出场（同股数同进场）
+            fr = fl["ret"]
+            cat = classify(fr, rret, e, rr, tol_pp, a_exit=fl["exit_date"])
             row[name] = {
                 **{
                     k: rr.get(k)
@@ -373,17 +439,17 @@ def analyze(
                 },
                 **({"stop_price": stop} if stop is not None else {}),
                 "ret": rret,
-                "delta_pp": (act["ret"] - rret) * 100
-                if act["ret"] is not None and rret is not None
+                "delta_pp": (fr - rret) * 100
+                if fr is not None and rret is not None
                 else None,
-                "delta_amount": (act["ret"] - rret) * act["basis"]
-                if act["ret"] is not None and rret is not None
+                "delta_amount": (fr - rret) * fl["cost"]
+                if fr is not None and rret is not None
                 else None,
                 "category": cat,
             }
         out_eps.append(row)
     return {
-        "schema": "trade_counterfactual/v1",
+        "schema": "trade_counterfactual/v2",  # v2 = 首笔仓位口径 + 加仓盈亏单列 + B1 入场分组
         "tool": "trade_counterfactual",
         "params": {
             "rule": prr.LIVE_PARAMS,
@@ -450,9 +516,53 @@ def summarize(eps: list[dict], basis: str) -> dict[str, Any]:
         "n_episodes": len(ok),
         "n_closed": len(closed),
         "actual_closed": _stats([e["actual_ret"] for e in closed]),
+        "first_lot_closed": _stats(
+            [e["first_lot_ret"] for e in closed if e.get("first_lot_ret") is not None]
+        ),
         "rule_closed": _stats([e[basis]["ret"] for e in closed]),
         "total_delta_amount": sum(e[basis]["delta_amount"] for e in ok),
+        "total_add_on_pnl": sum(e.get("add_on_pnl") or 0.0 for e in ok),
+        "n_with_add_on": sum(1 for e in ok if e["n_buys"] > 1),
         "total_basis": sum(e["basis"] for e in ok),
+        "total_first_lot_cost": sum(e.get("first_lot_cost") or 0.0 for e in ok),
+        "by_entry": {
+            lab: {
+                "n": len(g),
+                "first_lot": _stats(
+                    [
+                        e["first_lot_ret"]
+                        for e in g
+                        if e.get("first_lot_ret") is not None
+                    ]
+                ),
+                "rule": _stats([e[basis]["ret"] for e in g]),
+                "delta_amount": sum(e[basis]["delta_amount"] for e in g),
+                "n_active_better": sum(
+                    1 for e in g if e[basis]["category"] == "主动优于规则"
+                ),
+            }
+            for lab, g in (
+                ("B1 合规入场", [e for e in closed if e.get("b1_entry") is True]),
+                ("非 B1 入场", [e for e in closed if e.get("b1_entry") is False]),
+                ("无法判定", [e for e in closed if e.get("b1_entry") is None]),
+            )
+            if g
+        },
+        "best": sorted(
+            (
+                {
+                    "episode": f"{e['code']} {e['name']}@{e['entry_date']}",
+                    "delta_pp": e[basis]["delta_pp"],
+                    "delta_amount": e[basis]["delta_amount"],
+                    "rule_exit": e[basis].get("exit_date"),
+                    "rule_reason": e[basis].get("reason"),
+                    "actual_exit": e.get("first_lot_exit"),
+                    "b1_entry": e.get("b1_entry"),
+                }
+                for e in ok
+            ),
+            key=lambda x: -x["delta_amount"],
+        )[:10],
         "categories": {c: cats[c] for c in CATEGORIES if c in cats},
         "flags": flag_cnt,
         "worst": sorted(
@@ -464,7 +574,7 @@ def summarize(eps: list[dict], basis: str) -> dict[str, Any]:
                     "delta_amount": e[basis]["delta_amount"],
                     "rule_exit": e[basis].get("exit_date"),
                     "rule_reason": e[basis].get("reason"),
-                    "actual_exit": e["exit_date"],
+                    "actual_exit": e.get("first_lot_exit"),
                 }
                 for e in ok
             ),
@@ -482,14 +592,19 @@ def render_md(rep: dict[str, Any]) -> str:
         "# 实盘操作反事实复盘（同一笔买入，严格按现行规则操作）",
         "",
         f"> 回合 {s['n_episodes']}（已清仓 {s['n_closed']}）；规则 = 现行出场（−10% 收盘止损 + 分批止盈 + BBI 两连破），"
-        f"成本 {rep['params']['cost_bps']:g}bps；Δ = 实际 − 规则，负 = 操作更差。live 跟踪读数，不作改规则依据。",
+        f"成本 {rep['params']['cost_bps']:g}bps。**出场对照只比首笔买入那一手**（同股数、同进场，FIFO），"
+        "补仓 / 加仓的盈亏单列；Δ = 首笔实际 − 首笔按规则，负 = 出场操作更差。live 跟踪读数，不作改规则依据。",
         "",
         "## 总览（已清仓回合）",
         "",
         "| 口径 | 笔数 | 胜率 | 盈亏比 | 平均收益 |",
         "|---|---:|---:|---:|---:|",
     ]
-    for lab, st in (("实际", s["actual_closed"]), ("严格按规则", s["rule_closed"])):
+    for lab, st in (
+        ("实际（整个回合，含加仓）", s["actual_closed"]),
+        ("实际（首笔那手）", s.get("first_lot_closed") or {}),
+        ("首笔严格按规则", s["rule_closed"]),
+    ):
         pr = st.get("payoff_ratio")
         lines.append(
             f"| {lab} | {st.get('n', 0)} | {pct(st.get('win_rate'))[1:] if st.get('win_rate') is not None else '—'} | "
@@ -497,7 +612,30 @@ def render_md(rep: dict[str, Any]) -> str:
         )
     lines += [
         "",
-        f"全部回合合计 Δ 金额：**{s['total_delta_amount']:+,.0f} 元**（成本基数 {s['total_basis']:,.0f} 元）",
+        f"出场差 Δ 合计：**{s['total_delta_amount']:+,.0f} 元**（首笔成本基数 {s.get('total_first_lot_cost', 0):,.0f} 元）；"
+        f"加仓 / 补仓部分盈亏（{s.get('n_with_add_on', 0)} 个回合有加仓）：**{s.get('total_add_on_pnl', 0):+,.0f} 元**"
+        f"（回合总成本 {s['total_basis']:,.0f} 元）",
+        "",
+        "## 按入场类型（已清仓）——规则是 B1 出场规则，对非 B1 入场未必适用",
+        "",
+        "| 入场类型 | 笔数 | 首笔实际 胜率 / 盈亏比 / 均收益 | 首笔按规则 胜率 / 盈亏比 / 均收益 | Δ 金额 | 主动优于规则 笔数 |",
+        "|---|---:|---|---|---:|---:|",
+    ]
+
+    def _s(st: dict) -> str:
+        pr = st.get("payoff_ratio")
+        wr = st.get("win_rate")
+        return (
+            f"{'—' if wr is None else f'{wr * 100:.1f}%'} / {'—' if pr is None else f'{pr:.2f}'} / "
+            f"{pct(st.get('avg_ret'))}"
+        )
+
+    for lab, g in (s.get("by_entry") or {}).items():
+        lines.append(
+            f"| {lab} | {g['n']} | {_s(g['first_lot'])} | {_s(g['rule'])} | {g['delta_amount']:+,.0f} | "
+            f"{g['n_active_better']} |"
+        )
+    lines += [
         "",
         "## 操作问题（按 Δ 金额）",
         "",
@@ -527,6 +665,26 @@ def render_md(rep: dict[str, Any]) -> str:
             f"| {w['episode']} | {w['category']} | {w['delta_pp']:+.2f}pp | {w['delta_amount']:+,.0f} | "
             f"{w['rule_exit'] or '持有中'}（{w['rule_reason']}） | {w['actual_exit'] or '持有中'} |"
         )
+    lines += [
+        "",
+        "## Δ 最好 10 笔（「主动优于规则」从哪来：分散还是集中）",
+        "",
+        "| 回合 | Δ | Δ 金额 | 规则离场 | 实际离场 | B1 入场 |",
+        "|---|---:|---:|---|---|---|",
+    ]
+    for w in s.get("best") or []:
+        b1 = {True: "是", False: "否"}.get(w.get("b1_entry"), "—")
+        lines.append(
+            f"| {w['episode']} | {w['delta_pp']:+.2f}pp | {w['delta_amount']:+,.0f} | "
+            f"{w['rule_exit'] or '持有中'}（{w['rule_reason']}） | {w['actual_exit'] or '持有中'} | {b1} |"
+        )
+    pos = [g for c, g in s["categories"].items() if c == "主动优于规则"]
+    if pos and pos[0]["delta_amount"] > 0:
+        top10 = sum(max(0.0, w["delta_amount"]) for w in (s.get("best") or []))
+        lines += [
+            "",
+            f"前 10 笔贡献「主动优于规则」合计的 {top10 / pos[0]['delta_amount']:.0%}。",
+        ]
     p = rep["summary"]["plan"]
     lines += [
         "",
