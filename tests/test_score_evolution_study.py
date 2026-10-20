@@ -34,6 +34,13 @@ def _reading(objective, margin=0.02, n=500):
         "cell_signature": "fake12345678",
         "sel_margin": margin,  # v0.416 frozen-read 池读选中集
         "n_selected": n,
+        "sel_dist": {
+            "n": n,
+            "win_rate": 0.4,
+            "payoff_ratio": 1.5,
+            "ge_3x_avg_loss": 0.1,
+        },  # v0.429
+        "ret_over_dd": 1.0,
     }
 
 
@@ -155,6 +162,8 @@ class TestEndToEnd:
             "cell_signature",
             "sel_margin",  # v0.416 选中集读数（cell 行同键）
             "n_selected",
+            "sel_dist",  # v0.429
+            "ret_over_dd",
         }
         # 等权/单腿对照臂从格子结果按名取出（恒在保底集，零额外预算）
         assert rep["arms"]["equal_weight"]["weights"] == [1.0, 1.0]

@@ -225,3 +225,35 @@ def _paired(tr: list[dict], ref: list[dict]) -> dict[str, Any]:
             [(a, b) for a, b in pairs if _stopped(b) and not _stopped(a)]
         ),
     }
+
+
+COMPACT_Q = (5, 25, 50, 75, 95)
+
+
+def compact(trades: list[dict]) -> dict[str, Any]:
+    """紧凑画像（v0.429，挂在每个读数行上）：胜率 / 盈亏比 / 赢亏均值 / 收益分位 / 高盈亏比占比 /
+    前 5% 赢单毛利占比。键固定、体量小（每格 / 每臂一份）；空集 ⇒ ``{"n": 0}``。"""
+    tr = _realized(trades)
+    if not tr:
+        return {"n": 0}
+    rets = np.array([float(t["ret"]) for t in tr])
+    b = _wl(rets)
+    al = b["avg_loss"]
+    return {
+        **{
+            k: b[k]
+            for k in (
+                "n",
+                "win_rate",
+                "payoff_ratio",
+                "avg_win",
+                "avg_loss",
+                "expectancy",
+            )
+        },
+        "q": {f"p{q}": _r(float(np.percentile(rets, q))) for q in COMPACT_Q},
+        "ge_3x_avg_loss": _r(float((rets >= 3 * abs(al)).mean()), 4) if al else None,
+        "top5pct_profit_share": _concentration(rets).get(
+            "top5pct_winners_profit_share"
+        ),
+    }

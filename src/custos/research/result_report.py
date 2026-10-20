@@ -591,7 +591,132 @@ def _style_sections(dr: str, label: str) -> list[dict[str, Any]]:
     ]
 
 
+def _dist_row(label: str, dist: Any, rdd: Any, extra: list[str]) -> list[str]:
+    d = dist if isinstance(dist, dict) else {}
+    q = d.get("q") or {}
+    return [
+        label,
+        *extra,
+        fmt(d.get("n"), "int"),
+        fmt(d.get("win_rate"), "pct"),
+        fmt(d.get("payoff_ratio")),
+        fmt(d.get("avg_win"), "pct"),
+        fmt(d.get("avg_loss"), "pct"),
+        fmt(q.get("p5"), "pct"),
+        fmt(q.get("p50"), "pct"),
+        fmt(q.get("p95"), "pct"),
+        fmt(d.get("ge_3x_avg_loss"), "pct"),
+        fmt(d.get("top5pct_profit_share"), "pct"),
+        fmt(rdd),
+    ]
+
+
+_DIST_COLS = [
+    "笔数",
+    "胜率",
+    "盈亏比",
+    "均盈",
+    "均亏",
+    "p5",
+    "中位",
+    "p95",
+    "≥3×均亏占比",
+    "前5%赢单毛利占比",
+    "收益回撤比",
+]
+
+
+def _r36_frozen(d: dict[str, Any]) -> list[str]:
+    """候选 vs 等权 vs 零假设臂：选中集分布画像 + rdd（v0.429；判决仍只看 Δ / 过门 / 判定线）。"""
+    f = d["fields"]
+    seeds = f.get("candidate.per_seed") or []
+    s0 = seeds[0] if seeds else {}
+    eq = f.get("candidate.equal_margin_median")
+    L: list[str] = []
+    if s0.get("top_sel_dist") or s0.get("equal_sel_dist"):
+        L += ["候选（adx_gt_60 冻结权重）与等权对照，平分种子 0：", ""]
+        L += _md_table(
+            ["组", *_DIST_COLS],
+            [
+                _dist_row(
+                    "候选", s0.get("top_sel_dist"), s0.get("top_ret_over_dd"), []
+                ),
+                _dist_row(
+                    "等权", s0.get("equal_sel_dist"), s0.get("equal_ret_over_dd"), []
+                ),
+            ],
+        ) + [""]
+    arms = [a for a in (f.get("arms") or []) if isinstance(a, dict)]
+    if not arms:
+        return L
+    counts: dict[str, int] = {}
+    for a in arms:
+        counts[str(a.get("status"))] = counts.get(str(a.get("status")), 0) + 1
+    L += pie("零假设臂状态", counts) + [""]
+
+    def delta(a: dict) -> Optional[float]:
+        sm = a.get("sel_margin")
+        return (
+            sm - eq
+            if isinstance(sm, (int, float)) and isinstance(eq, (int, float))
+            else None
+        )
+
+    ranked = sorted(arms, key=lambda a: (delta(a) is None, -(delta(a) or 0.0)))
+    rows = [
+        _dist_row(
+            f"臂 {a.get('arm')}",
+            a.get("sel_dist"),
+            a.get("ret_over_dd"),
+            [fmt(a.get("status")), fmt(delta(a), "pp")],
+        )
+        for a in ranked
+    ]
+    cand = f.get("candidate.delta_median")
+    L += [
+        f"零假设臂（按 Δ 降序；候选 Δ 中位 = {fmt(cand, 'pp')}；Δ = 臂选中集 margin − 等权中位）：",
+        "",
+    ]
+    L += _md_table(["臂", "状态", "Δ", *_DIST_COLS], rows) + [""]
+    ds: list[tuple[str, float]] = [
+        (f"臂{a.get('arm')}", v) for a in ranked if (v := delta(a)) is not None
+    ][:20]
+    if ds:
+        L += xychart(
+            "Δ 前 20 臂 vs 候选（pp）",
+            [x for x, _ in ds] + ["候选"],
+            [("Δ", [float(v) * 100 for _, v in ds] + [float(cand or 0) * 100])],
+            "Δ pp",
+        )
+    return L
+
+
 REPORTS: dict[str, dict[str, Any]] = {
+    "r36_frozen": {
+        "title": "R36 冻结配置读数 · 结果报告",
+        "note": "选中集 = 每日按分数取前 20（不过组合并发）；分布画像为描述性副读数，**判决只看 Δ、过门率、判定线**，"
+        "rdd 门不过的臂不因分布好看而回池。",
+        "sections": [
+            {
+                "type": "kv",
+                "title": "主读数",
+                "paths": [
+                    ("candidate.delta_median", "pp"),
+                    ("candidate.delta_portfolio_median", "pp"),
+                    ("candidate.gate_rate", "pct"),
+                    "candidate.n_selected_median",
+                    "candidate.n_taken_median",
+                    "window",
+                    "line",
+                ],
+            },
+            {
+                "type": "custom",
+                "title": "候选 / 等权 / 零假设臂：分布画像",
+                "fn": _r36_frozen,
+            },
+        ],
+    },
     "r43_detail": {
         "title": "R43 区间段风格 / 板块 · 多维结果报告",
         "note": "价差 = 段内「该维度高五分位 − 低五分位」个股超额收益的段均值；t = 跨段 t；同号比例 = 价差与均值同号的段占比。",

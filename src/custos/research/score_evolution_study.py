@@ -545,6 +545,8 @@ def _reading_of(sg: Any, row: dict, ref: Optional[dict] = None) -> dict:
         # v0.418：透传每日 top-N 选中集读数（v0.417 漏传 ⇒ frozen-read 零假设池全空）
         "sel_margin": row.get("sel_margin"),
         "n_selected": row.get("n_selected"),
+        "sel_dist": row.get("sel_dist"),  # v0.429
+        "ret_over_dd": row.get("ret_over_dd"),  # v0.429：臂 gate_fail 时看差多少
     }
 
 
@@ -669,6 +671,8 @@ def _make_cell_runner(args: Any, codes_file: str, cells_dir: Path) -> CellRunner
                 "cell_signature": _row_signature(row),
                 "sel_margin": row.get("sel_margin"),
                 "n_selected": row.get("n_selected"),
+                "sel_dist": row.get("sel_dist"),
+                "ret_over_dd": row.get("ret_over_dd"),
             }
         return _reading_of(sg, row, ref)
 
@@ -2961,9 +2965,12 @@ def _selected_set_keys(
     R36 v2 frozen-read 主读数（v0.416）。附加键，不改既有读数键。"""
     from custos.research import strategy_grid as sg  # noqa: PLC0415
 
+    from custos.research import trade_dist as td  # noqa: PLC0415
+
     sel = bt.select_daily_topn(cands, top_n, tie_seed)
     s = bt.summarize_realized(sel)
     return {
+        "sel_dist": td.compact(sel),  # v0.429 选中集紧凑分布画像（描述性）
         "sel_margin": sg._margin(
             {"win": s.get("win_rate"), "payoff": s.get("payoff_ratio")}
         )
@@ -3025,6 +3032,17 @@ def _run_frozen_read(
                     "top_gate": bool(rt and rt.get("objective") is not None),
                     "top_n_taken": (rt or {}).get("n_taken"),
                     "top_n_selected": (rt or {}).get("n_selected"),
+                    "top_ret_over_dd": (rt or {}).get("ret_over_dd"),
+                    "equal_ret_over_dd": (re_ or {}).get("ret_over_dd"),
+                    # v0.429：只在种子 0 留画像（体量；平分种子间分布差异由 Δ 分布反映）
+                    **(
+                        {
+                            "top_sel_dist": (rt or {}).get("sel_dist"),
+                            "equal_sel_dist": (re_ or {}).get("sel_dist"),
+                        }
+                        if sd == seeds[0]
+                        else {}
+                    ),
                 }
             )
     finally:
@@ -3071,6 +3089,8 @@ def _run_frozen_read(
                 else ("gate_fail" if not gate_ok else "no_selected_reading"),
                 "margin": (rd or {}).get("margin"),
                 "sel_margin": sm,
+                "ret_over_dd": (rd or {}).get("ret_over_dd"),
+                "sel_dist": (rd or {}).get("sel_dist"),
             }
         )
 

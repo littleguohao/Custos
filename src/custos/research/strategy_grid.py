@@ -621,6 +621,7 @@ def load_cell_selected_row(
         "reading_basis": "selected_unavailable",
         "sel_margin": None,
         "n_selected": None,
+        "sel_dist": None,
     }
     if (
         pf.get("mode") != "topn"
@@ -674,8 +675,11 @@ def _daily_selected_keys(
     try:
         s = bt.summarize_realized(sel) if sel else {}
     except (KeyError, TypeError):
-        return {"sel_margin": None, "n_selected": None}
+        return {"sel_margin": None, "n_selected": None, "sel_dist": None}
+    from custos.research import trade_dist as td  # noqa: PLC0415
+
     return {
+        "sel_dist": td.compact(sel),  # v0.429 选中集紧凑分布画像（描述性）
         "sel_margin": _margin(
             {"win": s.get("win_rate"), "payoff": s.get("payoff_ratio")}
         )

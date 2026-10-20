@@ -103,3 +103,54 @@ def test_repo_reports_are_pure_functions_of_digests():
         assert rp.read_text(encoding="utf-8") == rr.render(d), (
             f"{rp.name} 与摘要不一致（手改？重跑 result_report）"
         )
+
+
+def test_r36_frozen_report_with_dist():
+    dist = {
+        "n": 9000,
+        "win_rate": 0.42,
+        "payoff_ratio": 1.7,
+        "avg_win": 0.08,
+        "avg_loss": -0.045,
+        "q": {"p5": -0.09, "p50": -0.01, "p95": 0.2},
+        "ge_3x_avg_loss": 0.12,
+        "top5pct_profit_share": 0.31,
+    }
+    d = {
+        "kind": "r36_frozen",
+        "unit": "R36",
+        "tag": "t",
+        "path": "results/R36/t.json",
+        "fields": {
+            "verdict": "no_batch",
+            "candidate.delta_median": 0.05,
+            "candidate.equal_margin_median": -0.0157,
+            "candidate.per_seed": [
+                {
+                    "top_sel_dist": dist,
+                    "equal_sel_dist": dist,
+                    "top_ret_over_dd": 1.2,
+                    "equal_ret_over_dd": 0.8,
+                }
+            ],
+            "arms": [
+                {
+                    "arm": 0,
+                    "status": "ok",
+                    "sel_margin": 0.03,
+                    "ret_over_dd": 1.1,
+                    "sel_dist": dist,
+                },
+                {
+                    "arm": 1,
+                    "status": "gate_fail",
+                    "sel_margin": 0.05,
+                    "ret_over_dd": 0.3,
+                    "sel_dist": dist,
+                },
+            ],
+        },
+    }
+    md = rr.render(d)
+    assert "≥3×均亏占比" in md and "| 候选 |" in md and "pie title 零假设臂状态" in md
+    assert md.index("| 臂 1 |") < md.index("| 臂 0 |")  # 按 Δ 降序
