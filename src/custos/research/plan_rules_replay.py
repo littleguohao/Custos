@@ -1108,20 +1108,12 @@ def _scan_c3(
     }
 
 
-def run_width_scan(
+def _scan_prepare(
     args: Any,
-    *,
-    warm_fn: Optional[Callable[[str, str], dict[str, dict]]] = None,
-    replay_fn: Optional[Callable[[list[dict], dict[str, Any]], list[dict]]] = None,
-) -> dict[str, Any]:
-    """R44 扫描模式：8 档宽度 × 挖掘 A/B 两窗 + 参照档 pct10 → 选档表 + C2~C4。
-
-    **只读挖掘段**：判定段不 warm、不读，批次门不触发、window_usage 不登记
-    （钉测在案）。段末隔离带 clip + 段前预热 300 根同 v2 纪律。注入
-    warm_fn/replay_fn = 合成运行（测试）。
-    """
-    injected = warm_fn is not None or replay_fn is not None  # 入口快照（同 run_study）
-    _ = injected  # 扫描模式本就不写台账/不查批——快照只为语义对称
+    warm_fn: Optional[Callable[[str, str], dict[str, dict]]],
+) -> tuple[list, dict[str, Any], list[dict], dict[str, str]]:
+    """扫描模式共用准备（R44 / R47，v0.434 抽出，逐位不变）：宇宙 / 0AMV / 逐段 warm → 段末隔离带 clip →
+    锚点附着（x=0 建子集）。返回 (mining_segs, segments, groups, regime)。"""
     mining_segs = [("mining_a", *lw.SEG_MINING_A), ("mining_b", *lw.SEG_MINING_B)]
     regime: dict[str, str] = {}
     if warm_fn is None:
@@ -1182,6 +1174,24 @@ def run_width_scan(
     groups = [segments[name] for name, _s, _e in mining_segs]
     if not any(g["subset"] for g in groups):
         raise RuntimeError("空结果护栏：剔除后两挖掘段 0 信号——不落盘")
+    return mining_segs, segments, groups, regime
+
+
+def run_width_scan(
+    args: Any,
+    *,
+    warm_fn: Optional[Callable[[str, str], dict[str, dict]]] = None,
+    replay_fn: Optional[Callable[[list[dict], dict[str, Any]], list[dict]]] = None,
+) -> dict[str, Any]:
+    """R44 扫描模式：8 档宽度 × 挖掘 A/B 两窗 + 参照档 pct10 → 选档表 + C2~C4。
+
+    **只读挖掘段**：判定段不 warm、不读，批次门不触发、window_usage 不登记
+    （钉测在案）。段末隔离带 clip + 段前预热 300 根同 v2 纪律。注入
+    warm_fn/replay_fn = 合成运行（测试）。
+    """
+    injected = warm_fn is not None or replay_fn is not None  # 入口快照（同 run_study）
+    _ = injected  # 扫描模式本就不写台账/不查批——快照只为语义对称
+    mining_segs, segments, groups, regime = _scan_prepare(args, warm_fn)
 
     # ── 逐窗 × 逐档重放（参照档 = LIVE_PARAMS pct10，自参照门恒真）──
     win_names = [name for name, _s, _e in mining_segs]
@@ -1459,6 +1469,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "产出选档表 + C2~C4",
     )
     ap.add_argument(
+        "--scan-protect",
+        action="store_true",
+        help="R47 浮盈保护扫描（v0.434）：保本触发 × 移动止损 4×4 叠加现行出场，只读挖掘 A∪B（不读判定段、不过批次门）",
+    )
+    ap.add_argument(
         "--trade-dist",
         action="store_true",
         help="扫描模式附加各档交易分布画像（描述性副读数，v0.421，不进判据）："
@@ -1504,7 +1519,21 @@ def main(
         ap.error("--stop-anchor signal_low 需要 --stop-buffer-pct（x，%）")
     if args.stop_buffer_pct is not None and args.stop_anchor != "signal_low":
         ap.error("--stop-buffer-pct 只在 --stop-anchor signal_low 下有意义")
-    if getattr(args, "trade_dist", False) and not args.scan_widths:
+    if args.scan_protect and (args.scan_widths or args.stop_anchor == "signal_low"):
+        ap.error("--scan-protect 与 --scan-widths / --stop-anchor signal_low 互斥")
+    if args.scan_protect and any(
+        v is not None
+        for v in (
+            args.mining_start,
+            args.mining_end,
+            args.judgment_start,
+            args.judgment_end,
+        )
+    ):
+        ap.error("--scan-protect 窗口写死=挖掘 A∪B（不读判定段），与窗口四参互斥")
+    if getattr(args, "trade_dist", False) and not (
+        args.scan_widths or args.scan_protect
+    ):
         ap.error("--trade-dist 只用于 --scan-widths（只读挖掘段的描述性副读数）")
     if args.scan_widths and args.stop_anchor == "signal_low":
         ap.error("--scan-widths 自带 8 档网格，与 --stop-anchor signal_low 互斥")
@@ -1536,7 +1565,12 @@ def main(
             from custos.research import judgment_batch as jb  # noqa: PLC0415
 
             return jb.print_config_hash_and_exit(args, "plan_rules_replay")
-        if args.scan_widths:
+        if args.scan_protect:
+            from custos.research import protect_scan as ps  # noqa: PLC0415
+
+            rep = ps.run_protect_scan(args, warm_fn=warm_fn, replay_fn=replay_fn)
+            out_name = f"_plan_protect_scan__{args.tag}.json"
+        elif args.scan_widths:
             rep = run_width_scan(args, warm_fn=warm_fn, replay_fn=replay_fn)
             out_name = f"_plan_width_scan__{args.tag}.json"
         else:

@@ -270,3 +270,9 @@ def test_repo_blocks_match_results():
     for p in sorted((RESEARCH_DIR / "results").rglob("*.json")):
         rel = p.relative_to(RESEARCH_DIR).as_posix()
         assert rel in seen, f"{rel} 未被任何回填块引用"
+
+
+def test_r47_scan(tmp_path):
+    import test_protect_scan as tps
+
+    _assert_complete("r47_scan", _dump(tmp_path, "r47", tps._run(0)))

@@ -122,3 +122,8 @@ git commit -m "batch b1 reads" && git push
 
 回填：R36 `r36_frozen`、R39 `r39`、R40 `r40`、R43 `r43_judgment`、R44 `r44_judgment`、R45 `r45`、R46 `r46`（各自 tag 用 `*_j`）。
 崩溃 / 中断 = 该候选已消耗（claim 已写），**不要重跑**，报给我；需重读只能由 owner 开新批。
+
+## 第二批预告（不在第一批，第一批判定段读完后再跑）
+
+- R47 浮盈保护扫描（只读挖掘 A∪B）：`uv run python -m custos.research plan_rules_replay --scan-protect --trade-dist --tag r47_scan`，
+  然后 `result_digest r47_scan <产物>/_plan_protect_scan__r47_scan.json --tag r47_scan --write --backfill`（报告自动生成）。

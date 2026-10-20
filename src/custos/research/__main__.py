@@ -180,6 +180,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "clamp(S·m) 矩阵化重打分（与 technical_score 逐位一致）；C1~C4（双挖掘段选格 / 邻格平滑 / "
         "簇级置换同预算零假设）；--batch-id 同次读判定段走 judgment_line；副读数 64 个家族开/关子格",
     ),
+    "protect_scan": (
+        "study",
+        "R47 浮盈保护扫描库（v0.434）：保本 × 移动止损 4×4 叠加现行出场 + 右尾护栏 + 随机参数臂；"
+        "入口 `plan_rules_replay --scan-protect`",
+    ),
     "trade_counterfactual": (
         "diagnostic",
         "实盘操作反事实复盘（v0.424，live 跟踪）：同一笔买入严格按现行出场规则 / 买入计划止损推演 vs 实际，"
