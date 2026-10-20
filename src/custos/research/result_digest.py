@@ -328,6 +328,40 @@ SPECS: dict[str, tuple[str, list[str]]] = {
             "cells.*.vs_complement?",
         ],
     ),
+    # v0.427 明细 kind：多维读数全量入库，供 result_report 出可视化报告（表格 + mermaid 图）
+    "r43_detail": (
+        "R43",
+        [
+            "n_qualified_segments",
+            "segment_drops",
+            "criteria",
+            "style.*.n_qualified_segs",
+            "style.*.dims.*.verdict",
+            "style.*.dims.*.c4_by_window",
+            "style.*.dims.*.windows",
+            "sector.*.indices.*.group?",
+            "sector.*.indices.*.verdict?",
+            "sector.*.indices.*.windows?",
+            *_PROV,
+        ],
+    ),
+    "r39_detail": (
+        "R39",
+        [
+            "verdict",
+            "windows",
+            "n_signals",
+            "profiles",
+            "bucketings",
+            "configs",
+            "top",
+            "uniform_best",
+            "criteria.C1",
+            "criteria.C2",
+            "criteria.C4",
+            *_PROV,
+        ],
+    ),
     "r44_judgment": (
         "R44",
         [
@@ -509,6 +543,8 @@ DOC_OVERRIDE: dict[str, str] = {
     "r39_dist": "results/R39_trade_dist.md",
     "r40_dist": "results/R40_trade_dist.md",
     "label_dist": "results/R27_label_trade_dist.md",
+    "r43_detail": "results/R43_detail.md",
+    "r39_detail": "results/R39_detail.md",
     "r45_dist": "results/R45_trade_dist.md",
 }
 
