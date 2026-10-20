@@ -114,6 +114,7 @@ SPECS: dict[str, tuple[str, list[str]]] = {
             "candidate.equal_margin_median",
             "config.reading_basis",
             "pool",
+            "arms?",  # v0.425：臂状态（ok / gate_fail / no_selected_reading / no_best）——池为何不满
             "line?",
             *_PROV,
         ],

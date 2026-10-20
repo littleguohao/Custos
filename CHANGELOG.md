@@ -427,6 +427,7 @@
 | 2026-10-19 | v0.422 | **R46 `-j` 并行**（主网格分块 + 零假设臂按臂序消费，fork/spawn 与串行逐位一致）；**--trade-dist 扩到 R39/R40/R45**（top/uniform 逐窗画像、逐桶、配对）；R45 必报扩展恒报（组合层/出场原因/不可卖笔数/段空头日数）；digest 复查补 R45 必报、R39 uniform_best、R40 reason 分布，新 kind r39/r40/r45_dist；R40 补功效节（不新增规则） | owner 2026-10-19 | 钉测 +3 |
 | 2026-10-19 | v0.423 | **新工具 `label_trade_dist`**：重读 R27 格子逐笔，为 1800 标注一览补分布画像（分位/分箱、高盈亏比占比、利润集中度、出场原因、逐年，命中 vs j_low 基底 / 未命中补集）；holdout 入场剔除计数；digest kind `label_dist`。修 v0.421 漏登记 `trade_dist` 进 TOOLS（test_research_entry 红，test_affected 未选中） | owner 2026-10-19 | 钉测 +2 |
 | 2026-10-19 | v0.424 | **实盘操作反事实复盘**：新工具 `trade_counterfactual`（台账切回合，保持实际买入，按现行出场规则 / 买入计划止损用引擎重放推演，Δ=实际−规则，归因止损拖延/该清未清/过早卖出/执行价差/主动优于规则 + 亏损补仓等标记）；可手动触发，周报/月报默认附录（子进程调用不 import 研究，fail-soft）；产物不入库 | owner 2026-10-19 | 钉测 +5 |
+| 2026-10-20 | v0.425 | **挖掘段复核×3**：R39 v2 预演判毕 untested（top=uniform-best P3_slow，Δ≡0；B 窗桶 0 n=32）不入批；R43 判毕 falsified（245 段，风格 74 维 / 板块 1542 格 falsified，0 candidate）不入批，TODO #93 闭环；R36 preB2 修复生效但池 10<40 结构上限 provisional，#105 转 owner；digest r36_frozen 补 arms 字段 | 生产机 a4d154b | 复核 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

@@ -15,14 +15,13 @@
 |---|---|---|---|---|---|
 | 88 | 首次月度交易反思（2026-09 月），跑顺「月报 → TRADE_LESSONS」流程；之后按月执行，节奏见 MASTER_WORKFLOW §七 | P2 | 生产机 | 读 2026-09 月报 JSON（无则先补跑 `monthly_review`），按模板写 E3 并核对 L1~L7 | owner 2026-10-12；[TRADE_LESSONS](TRADE_LESSONS.md) |
 | 104 | R10 margin 按已实现口径重算：生产机原批次结果文件跑 `m2_stop_sweep --report-only`（v0.383 起汇总行自动剔 open_end），回填 R10 重跑行；「可用 margin 只在叠 0AMV」若不再成立按纪律就地标 🔄 | P2 | 生产机 | report-only 重算并贴表 | R10 头部审计注记 |
-| 105 | R36 adx_gt_60 入批前重建（审计 2：原 C4 复核池口径不对等，撤销结论无效，必须重建）：工具已落地（v0.394 `--frozen-read`，平分种子 0~19 取 Δ 中位数 + r36_p3_c4review 50 臂冻结重读池）；生产机先跑挖掘 B 前置核对，过线才入第一批 | P1 | 生产机 | 跑 R36 v2 节命令 ① 并贴报告 | R36 v2 重测节 |
+| 105 | R36 adx_gt_60 入批前重建：前置核对已跑（r36_v2_preB2，v0.418 修复后池 10 臂）；池 10 < FROZEN_MIN_POOL 40 ⇒ 判定段只能 provisional，且候选 Δ 在池中第 4（3/10 臂更高） | P1 | owner | 定：①照入批（接受 provisional 上限）②补随机臂到 ≥40 再入批 ③撤出第一批；生产机先用新 tag 重出摘要看 arms 状态 | R36 v2 重测节回填区复核 |
 | 106 | R36 已判路线复核：①配比路重开 ⇒ R46（预注册定稿 + 工具 v0.404），生产机 #92 后跑挖掘段；②Phase 4 p2_sole 随机剔除臂对齐后（v0.386）重算 C4 | P3 | 生产机 | ① R46 挖掘段跑数；② 重跑 r36_p4 | R36 头部审计注记、R46 |
 | 111 | 格子进程内化（性能，最大一块）：score_evolution/strategy_grid 每格一个 backtest_factors 子进程、每格重载全宇宙（m2 实测 s3000 加载 45~53s/格）；改为进程内共享已加载 bars + 信号缓存逐格重打分（同 v0-lattice collect/score 拆分）。须金样逐位钉测、内存账重估 | P3 | 挂起 | R46 已改进程内实现、不再依赖；剩余受益者 = strategy_grid / R36 冻结读数 50 臂 / evolution_loop，等出现大规模格子跑数需求再做 | 性能排查 v0.401~0.403 |
 | 112 | 加载侧提速：_load_bars_local 逐股串行读 vipdoc + 前复权；#92 实测加载占比 **26~56%**（>20% 阈值成立，14 条恒定 86~97s）⇒ 可加 `--load-workers` 线程并行 | P3 | coder | 实现 --load-workers（实测依据见 research README runbook 节 #92 回填） | 性能排查 |
 | 107 | R1/R2 组合层 baseline 对照按 `--tie-seed` 0~19 重跑报区间（baseline 恒 0 分，原读数是代码序截断的单次抽签） | P3 | 生产机 | 出命令后重跑 | R1/R2 头部审计注记 |
 | 108 | R37 r37_b1 已实现口径复核（判定窗 +0.0034 贴零，open_end 污染量级可能更大；exit_campaign 产物无逐笔需重跑读数） | P3 | 生产机 | 重跑 r37_b1 读数段 | R37 头部审计注记 |
 | 109 | R40 v2 重跑：按 R40「v2 重跑修订」节在挖掘 A∪B 选型（代码口径 v0.382~0.387），过 C1~C4 再入判定段批次 | P2 | 生产机 | 等 #91/#92 后发车 | R40 v2 重跑修订节 |
-| 93 | R43 工具实现 `regime_style_study`（区间段切分 / 停牌过滤 / 38 维 as-of 特征 / 五分位价差 / C1~C4 伪区间段零假设 / 板块层），带零假设两连测与回归哨兵 | P2 | 生产机 | 工具 v0.368 已落地；功效①段数已回填（#91，两窗两方向合格段 ≫8）；挖掘段跑数中（batch1 chA ④）；σ_spread/MDE 待产物回填② | owner 2026-10-14；[R43](governance/research/R43_regime_sector_style.md) |
 | 60 | plan 信号并入 SIGNAL_ORDER 与否。判据（两条同时成立）：①实现一致性——影子台账非 default 事件 ≥5 个交易日无异常；②规则有效性——R41 已判 falsified（v0.351）路径关闭，只剩 `plan_shadow_review` 累计 K=20 个独立事件（段头计、≥5 只持仓）均值 Δret₅ ≥ 0（凑不满 K ⇒ ②不成立 ⇒ 不并轨）。default 来源永不出 plan 信号；并轨=独立提交、只改 SIGNAL_ORDER | P2 | 观察中 | 影子事件持续累计，攒满或 60 交易日到期后 owner 定夺 | [R41](governance/research/R41_position_plan_rules_replay.md)；owner 2026-10-09 判据；v0.310/0.311/0.314/0.351 |
 | 81 | R39 因子×出场：ADX(14) 判毕 untested（无条件化增量），下一个因子对象（J 深度 / V0 总分）或换方向 | P2 | 挂起 | 暂停（owner 2026-10-14）：等判定段第一批（含 R39 ADX 重测）读出后再定下一对象 | [R39](governance/research/R39_factor_exit_interaction.md)；owner 2026-09-23 五维度②（①过滤器路线已证伪 v0.292） |
 | 87 | R35 打分系统存在性终局拍板（A 维持 V0 粗过滤 / B 只留有独立证据的腿 / C 撤分改门） | P2 | 挂起 | 等判定段第一批（含 R36 adx_gt_60）判完再拍板终局（owner 2026-10-14）；证据面：R34/R36 P2 维持未检验（#113 选 B），打分增量以 R46 读数为准 | [R35](governance/research/R35_score_system_existence_review.md) |
@@ -134,6 +133,7 @@
 | 113 | R34/R36 P2 选中子集重判——owner 选 B：维持「未检验」，打分增量交 R46 | 2026-10-16 | commit 2449c64（R34/R36 头部注记） |
 | 91 | 2000~2009 数据核查（挖掘 A 起点 + gbbq/tdxzs3/xdxr 可读性） | 2026-10-17 | data_coverage_probe（v0.364）：SEG_A_START=2000-01-01（台账首日 1993-01-04）；三类数据源均可读；读数 → README 窗口节回填（v0.414） |
 | 92 | v2 切换后基线重测 + 耗时实测 | 2026-10-17 | 14 格全跑完（v0.412 修 --allow-tail-clip 误触）；读数回填 README runbook 节；加载占比 26~56% 实测 → #112 |
+| 93 | R43 工具实现 regime_style_study | 2026-10-20 | 工具 v0.368；挖掘段 r43_v1 判毕 falsified（v0.425），0 candidate 不入批 |
 
 ## 维护约定
 
