@@ -96,7 +96,7 @@ uv run python -m custos.research family_lattice_study --mining-a-start <SEG_A_ST
 | R43（不入批） | ❌ 挖掘段 falsified（2026-10-20）——不跑判定段 |
 | R44（不入批） | ❌ 挖掘段 falsified（2026-10-19，r44_scan）——不入批，不跑判定段 |
 | R45 | `bear_regime_study --r45 --tag r45_v2_j` |
-| R46 | `family_lattice_study --mining-a-start <SEG_A_START> --out artifacts/logs/family_lattice/r46_j.json` |
+| R46（不入批） | ⏹ owner 2026-10-21 撤回——不跑判定段 |
 
 回填：每个候选的 `<tool>:<hash>` 写进对应单元回填区（块外，文本即可）。`--tag/--out-dir/--jobs/count` 不进哈希，可改；其余参数（含 `--timeout`）一个都不能动。
 
