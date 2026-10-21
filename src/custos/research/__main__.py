@@ -180,10 +180,15 @@ TOOLS: dict[str, tuple[str, str]] = {
         "clamp(S·m) 矩阵化重打分（与 technical_score 逐位一致）；C1~C4（双挖掘段选格 / 邻格平滑 / "
         "簇级置换同预算零假设）；--batch-id 同次读判定段走 judgment_line；副读数 64 个家族开/关子格",
     ),
+    "tail_explore_study": (
+        "study",
+        "R49 B1 高盈亏比交易逆向画像（v0.443，探索）：R48 同交易集，R43 37 维 + R20 因子面板 + s_shape 分项 + 超卖回看铺成格子，"
+        "挖掘 A 发现 → B 复现，整面板 max 的簇级置换定标尺；附流动性底线（amt20 ≥ 1/2/3/5 亿）描述块",
+    ),
     "tail_feature_study": (
         "study",
         "R48 B1 大单入场特征（v0.439）：0AMV 做多 + J<13 × 现行出场交易集，7 个 as-of 特征（小盘/深回撤/涨停活跃/"
-        "基本面优/技术分≥60/三面共振/四面共振腿数）逐个检验大单命中率 lift，簇级置换 max-of-7，只读挖掘段",
+        "基本面优/技术分≥60/三面共振/四面共振腿数 + v0.443 超卖 4 项）逐个检验大单命中率 lift，簇级置换 max-of-11，只读挖掘段",
     ),
     "trade_counterfactual": (
         "diagnostic",

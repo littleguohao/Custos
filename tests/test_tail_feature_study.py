@@ -1,4 +1,4 @@
-"""R48 tail_feature_study（v0.439）：特征派生、统计口径、端到端、零假设校准两连测 + 逐笔置换哨兵。"""
+"""R48 tail_feature_study（v0.439 / v0.443 超卖 4 特征）：特征派生、统计口径、端到端、零假设校准两连测 + 逐笔置换哨兵。"""
 
 import hashlib
 import math
@@ -28,9 +28,11 @@ def _u(*key) -> float:
 def _world(n_codes=40, burst=4, gap_in=3, gap_out=25):
     """多票、成簇信号：每簇 burst 个信号相隔 gap_in 根（同簇），簇间 gap_out 根。"""
     spec = {}
-    for (s, e), (d0, d1) in (
-        (SPANS["mining_a"], ("2012-01-02", "2016-12-30")),
-        (SPANS["mining_b"], ("2022-01-03", "2026-09-04")),
+    for wi, ((s, e), (d0, d1)) in enumerate(
+        (
+            (SPANS["mining_a"], ("2012-01-02", "2016-12-30")),
+            (SPANS["mining_b"], ("2022-01-03", "2026-09-04")),
+        )
     ):
         days = [d.strftime("%Y-%m-%d") for d in pd.bdate_range(d0, d1)]
         n = len(days)
@@ -47,7 +49,7 @@ def _world(n_codes=40, burst=4, gap_in=3, gap_out=25):
         for k in range(n_codes):
             sigs, scores = [], {}
             i = 300 + (k * 7) % gap_out
-            b = 0
+            b = 100000 * wi  # 两窗簇 id 不重号（否则同号簇跨窗共享特征/质量 = 伪相关）
             while i < n - 2:
                 for j in range(burst):
                     ii = i + j * gap_in
@@ -92,7 +94,29 @@ def _feature_fn(spec):
     return fn
 
 
-def _replay(spec, seed, edge=False, clustered=False):
+def _osc_fn(spec):
+    bmap = {}
+    for packs in spec.values():
+        for code, pk in packs.items():
+            for sg in pk["signals"]:
+                bmap[(code, sg["date"])] = sg["_burst"]
+
+    def fn(code, df, i):
+        b = bmap.get((code, str(df["date"].iloc[i])[:10]), 0)
+        u = _u("rsi", code, b)
+        return {
+            "rsi_now": 15 + 40 * u,
+            "rsi_min_5": 12 + 40 * u,
+            "rsi_min_10": 10 + 40 * u,
+            "rsi_min_20": 8 + 40 * u,
+            "weekly_j_low": _u("wj", code, b) < 0.4,
+            "rsi_bottom_div": _u("dv", code, b) < 0.2,
+        }
+
+    return fn
+
+
+def _replay(spec, seed, edge=False, clustered=False, edge_feat="lu"):
     def rp(subset, params):
         import test_plan_rules_replay as tp
 
@@ -104,8 +128,10 @@ def _replay(spec, seed, edge=False, clustered=False):
             hb = _u("retb", *key, seed)  # clustered：簇级高/低质量（与特征独立）
             p_big = 0.06
             if clustered:
-                p_big = 0.14 if hb < 0.4 else 0.007
-            if edge and _u("lu", r["code"], b) < 0.3:
+                p_big = 0.85 if hb < 0.07 else 0.005  # 大单几乎整簇出现（簇级相关）
+            if edge and edge_feat == "lu" and _u("lu", r["code"], b) < 0.3:
+                p_big = 0.16
+            if edge and edge_feat == "rsi10" and 10 + 40 * _u("rsi", r["code"], b) < 25:
                 p_big = 0.16
             ret = 0.25 if h < p_big else (-0.12 if h > 0.7 else 0.01)
             out.append(tp._trade_of(r, ret))
@@ -141,14 +167,16 @@ def _small_c1(monkeypatch):
     monkeypatch.setattr(tf, "YEAR_MIN_HI", 10)
 
 
-def _run(seed, edge=False, clustered=False, **kw):
+def _run(seed, edge=False, clustered=False, edge_feat="lu", keep=False, **kw):
     spec = _world()
     return tf.run_study(
         _args(seed=seed, **kw),
         warm_fn=lambda s, e: spec[(s, e)],
-        replay_fn=_replay(spec, seed, edge, clustered),
+        replay_fn=_replay(spec, seed, edge, clustered, edge_feat),
         feature_fn=_feature_fn(spec),
         sector_fn=lambda c, d: _u("sec", c, d[:7]) < 0.5,
+        osc_fn=_osc_fn(spec),
+        keep_windows=keep,
     )
 
 
@@ -211,7 +239,11 @@ def test_end_to_end_and_edge_feature():
 
 
 def _unit_c4(rep):
-    """单元级 C4：任一特征 confirmed_pass 记为 pass（校准口径 = 7 特征里挑最好的误报率）。"""
+    """单元级 C4：任一特征 confirmed_pass 记为 pass（校准口径 = 11 特征里挑最好的误报率）。
+
+    v0.443：max-of-11 下 5 种子 × 25 臂的 q95 太粗（每种子名义误报 ~8%，5 种子至少一次的概率 ~1/3），
+    校准改 20 种子 × 50 臂（CAL_SEEDS / CAL_KW）。实测（种子 300~319）：纯噪声 0/20、成簇噪声 1/20、
+    逐笔置换哨兵 9/20。"""
     st = [v["criteria"]["C4"]["state"] for v in rep["features"].values()]
     return {
         "criteria": {
@@ -224,9 +256,15 @@ def _unit_c4(rep):
     }
 
 
+CAL_SEEDS = tuple(range(300, 320))
+CAL_KW = {"n_random": 50, "c4_min_pool": 40}
+
+
 class TestTailFeatureCalibration:
     def test_noise(self):
-        hn.assert_noise_calibration("tail_feature", lambda s: _unit_c4(_run(100 + s)))
+        hn.assert_noise_calibration(
+            "tail_feature", lambda s: _unit_c4(_run(s, **CAL_KW)), seeds=CAL_SEEDS
+        )
 
     def test_edge_detected(self):
         hn.assert_edge_detected(
@@ -244,7 +282,9 @@ class TestTailFeatureCalibration:
 
     def test_clustered_noise(self):
         hn.assert_noise_calibration(
-            "tail_feature[成簇]", lambda s: _unit_c4(_run(200 + s, clustered=True))
+            "tail_feature[成簇]",
+            lambda s: _unit_c4(_run(s, clustered=True, **CAL_KW)),
+            seeds=CAL_SEEDS,
         )
 
 
@@ -261,5 +301,85 @@ class TestSentinelTailIidPermutation:
         with pytest.raises(AssertionError, match="零假设校准失败"):
             hn.assert_noise_calibration(
                 "tail_feature[逐笔置换哨兵]",
-                lambda s: _unit_c4(_run(200 + s, clustered=True)),
+                lambda s: _unit_c4(_run(s, clustered=True, **CAL_KW)),
+                seeds=CAL_SEEDS,
             )
+
+
+def test_rsi_deep_const_matches_live():
+    from custos.core.factors import rsi_state
+
+    assert tf.RSI_DEEP == rsi_state.DEEP_OVERSOLD
+    assert len(tf.FEATURES) == 11
+
+
+def test_derive_oversold():
+    d = tf.derive(
+        {},
+        None,
+        None,
+        {
+            "rsi_now": 30.0,
+            "rsi_min_10": 22.0,
+            "rsi_min_5": 26.0,
+            "rsi_min_20": 20.0,
+            "weekly_j_low": True,
+            "rsi_bottom_div": False,
+        },
+    )
+    assert (
+        d["rsi_deep"] == 0
+        and d["rsi_deep_recent10"] == 1
+        and d["deep_recent_only"] == 1
+    )
+    assert d["rsi_deep_recent5"] == 0 and d["rsi_deep_recent20"] == 1
+    assert d["weekly_j_low"] == 1 and d["rsi_bottom_div"] == 0
+    e = tf.derive({}, None, None, {})
+    assert all(
+        math.isnan(e[k])
+        for k in ("rsi_deep", "rsi_deep_recent10", "weekly_j_low", "rsi_bottom_div")
+    )
+
+
+def test_default_osc_fn_real_indicators():
+    """生产 osc_fn 跑真实指标：急跌进深水 → 反弹 5 根后 RSI 已回 25 上方，但近 10 日最低仍 < 25。"""
+    days = pd.bdate_range("2020-01-01", periods=240)
+    px = [10 * 1.003**k for k in range(220)]
+    for _ in range(12):
+        px.append(px[-1] * 0.95)
+    for _ in range(8):
+        px.append(px[-1] * 1.035)
+    df = pd.DataFrame(
+        {
+            "date": days.strftime("%Y-%m-%d"),
+            "open": px,
+            "high": [p * 1.01 for p in px],
+            "low": [p * 0.99 for p in px],
+            "close": px,
+            "volume": 1e6,
+            "amount": 1e7,
+        }
+    )
+    o = tf.default_osc_fn()("000001", df, len(df) - 1)
+    assert o["rsi_min_10"] < 25 <= o["rsi_now"]
+    assert o["weekly_j_low"] in (True, False) and o["rsi_bottom_div"] in (
+        True,
+        False,
+        None,
+    )
+    d = tf.derive({}, None, None, o)
+    assert d["deep_recent_only"] == 1
+
+
+def test_oversold_edge_detected_and_descriptive():
+    rep = _run(5, edge=True, edge_feat="rsi10")
+    f = rep["features"]["rsi_deep_recent10"]
+    assert (
+        f["criteria"]["C2"]["ok"] and f["criteria"]["C4"]["state"] == "confirmed_pass"
+    )
+    d = rep["descriptive"]["mining_a"]
+    assert (
+        set(d) == set(tf.DESC) and d["vol60"]["n_all"] == 0
+    )  # 合成帧无 vol60 ⇒ 全缺失如实报
+    w = f["windows"]["mining_a"]
+    assert {"win_rate_hi", "mean_ret_hi", "payoff_hi", "margin_hi", "dist_hi"} <= set(w)

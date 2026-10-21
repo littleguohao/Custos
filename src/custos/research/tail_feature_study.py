@@ -15,9 +15,15 @@
   成分快照（``sector_members.json``，前视偏差注记）× 板块指数 as-of 相位（``compute_sector_phase`` 截至信号日、
   末 ``SECTOR_TAIL`` 根近似）。
 
+跑数前修订（v0.443，owner 2026-10-21；R20 赢家画像「超卖更深」的 4 个特征，max-of-7 → max-of-11）：
+- ``rsi_deep``：信号日 RSI14 < 25（``rsi_state.DEEP_OVERSOLD``）；
+- ``rsi_deep_recent10``：信号日及之前 10 个交易日内 RSI14 最低值 < 25（只判 N=10；N=5/20 描述性必报）；
+- ``weekly_j_low``：周线 J < 13（``weekly_j.weekly_j_state``）；``rsi_bottom_div``：RSI 底背离（``rsi_state.rsi_divergence``）。
+四者都在 live 同口径的 as-of 帧（信号日前 ``OHLCV_LOAD_BARS`` 根）上算。
+
 判据（逐特征，跑数前写死）：C1 两窗高档 n ≥ 2000 且缺失率 ≤ 50%；C2 两窗 lift_big > 1.2；C3 ①两窗 lift_big/lift_loss > 1
 ②五分位单调（Spearman ≥ 0.8）/ 二值逐年 lift_big > 1 的年份 ≥ 2/3；C4 簇级置换（特征向量按簇整体换位，逐窗）
-max-of-7 的 min(两窗 lift_big)，候选 > ``kit.q95``。
+max-of-11 的 min(两窗 lift_big)，候选 > ``kit.q95``。
 """
 
 from __future__ import annotations
@@ -45,9 +51,29 @@ N_RANDOM = 200
 C4_MIN_POOL = 50
 SECTOR_TAIL = 400
 QUINTILE = {"mcap_small": "mcap_float", "deep_dd": "dist_high250"}  # 检验最低档
-BINARY = ("limitup_active", "fund_good", "tech_high", "resonance3", "legs_aligned")
+BINARY = (
+    "limitup_active",
+    "fund_good",
+    "tech_high",
+    "resonance3",
+    "legs_aligned",
+    "rsi_deep",
+    "rsi_deep_recent10",
+    "weekly_j_low",
+    "rsi_bottom_div",
+)
+RSI_DEEP = 25.0  # = rsi_state.DEEP_OVERSOLD（钉测对齐）
+OSC_N = 10  # 判据档（写死）
+OSC_DESC_N = (5, 20)  # 描述性必报档
+# 描述性必报（不进判据 / 不进 max-of-k）：回看档 + 深水拆解 + 波动率对照
+DESC = (
+    "rsi_deep_recent5",
+    "rsi_deep_recent20",
+    "deep_now",
+    "deep_recent_only",
+    "vol60",
+)
 FEATURES = (*QUINTILE, *BINARY)
-RAW_COLS = ("mcap_float", "dist_high250", "limitup60", "pe_ttm", "cfo_to_np", "roe_ttm")
 
 # ---------------------------------------------------------------------------
 # 特征
@@ -60,11 +86,23 @@ def _nan_and(*xs: float) -> float:
     return 1.0 if all(x > 0 for x in xs) else 0.0
 
 
+def _lt(x: Any, thr: float) -> float:
+    return float("nan") if x is None or x != x else float(x < thr)
+
+
 def derive(
-    raw: dict[str, float], score: Optional[float], sector_fav: Optional[bool]
+    raw: dict[str, float],
+    score: Optional[float],
+    sector_fav: Optional[bool],
+    osc: Optional[dict[str, Any]] = None,
 ) -> dict[str, float]:
-    """原始 as-of 值 → 7 特征值（二值 1/0，缺失 NaN；五分位特征保留原值，分档在窗内做）。"""
+    """原始 as-of 值 → 11 特征 + 描述性 5 项（二值 1/0，缺失 NaN；五分位类保留原值，分档在窗内做）。"""
     nan = float("nan")
+    o = osc or {}
+    now = _lt(o.get("rsi_now"), RSI_DEEP)
+    rec = {n: _lt(o.get(f"rsi_min_{n}"), RSI_DEEP) for n in (OSC_N, *OSC_DESC_N)}
+    wj = o.get("weekly_j_low")
+    dv = o.get("rsi_bottom_div")
     pe, cfo, roe = (
         raw.get("pe_ttm", nan),
         raw.get("cfo_to_np", nan),
@@ -90,7 +128,50 @@ def derive(
         if fund_good != fund_good or tech != tech
         else float(fund_good and tech),
         "legs_aligned": legs,
+        "rsi_deep": now,
+        "rsi_deep_recent10": rec[OSC_N],
+        "weekly_j_low": nan if wj is None else float(bool(wj)),
+        "rsi_bottom_div": nan if dv is None else float(bool(dv)),
+        "rsi_deep_recent5": rec[5],
+        "rsi_deep_recent20": rec[20],
+        "deep_now": now,
+        "deep_recent_only": nan
+        if now != now or rec[OSC_N] != rec[OSC_N]
+        else float(rec[OSC_N] == 1 and now == 0),
+        "vol60": raw.get("vol60", nan),
     }
+
+
+def default_osc_fn() -> Callable[[str, Any, int], dict[str, Any]]:
+    """超卖 4 特征的 as-of 原始量（live 同口径：信号日前 ``OHLCV_LOAD_BARS`` 根帧上算）。"""
+    import pandas as pd  # noqa: PLC0415
+
+    from custos.core.factors import rsi_state, weekly_j  # noqa: PLC0415
+    from custos.core.indicators import rsi  # noqa: PLC0415
+    from custos.pipeline.screening import enrich_candidates as ec  # noqa: PLC0415
+
+    def fn(code: str, df_full: Any, i: int) -> dict[str, Any]:
+        pre = df_full.iloc[: i + 1].tail(ec.OHLCV_LOAD_BARS).reset_index(drop=True)
+        if not pd.api.types.is_datetime64_any_dtype(pre["date"]):
+            pre = pre.assign(date=pd.to_datetime(pre["date"]))
+        out: dict[str, Any] = {}
+        if len(pre) >= rsi_state.RSI_MIN_BARS:
+            r = rsi(pre["close"], rsi_state.RSI_MID)
+            out["rsi_now"] = float(r.iloc[-1])
+            for n in (OSC_N, *OSC_DESC_N):
+                seg = r.iloc[-(n + 1) :].dropna()
+                out[f"rsi_min_{n}"] = float(seg.min()) if len(seg) else None
+            dv = rsi_state.rsi_divergence(pre, rsi_series=r)
+            out["rsi_bottom_div"] = (
+                bool(dv.get("bullish")) if dv.get("available") else None
+            )
+        wj = weekly_j.weekly_j_state(pre)
+        out["weekly_j_low"] = (
+            bool(wj.get("weekly_j_low")) if wj.get("weekly_j_available") else None
+        )
+        return out
+
+    return fn
 
 
 def default_feature_fn() -> Callable[[str, Any], Any]:
@@ -190,8 +271,43 @@ def _spearman_desc(rates: list[float]) -> Optional[float]:
     return float(np.corrcoef(a, b)[0, 1])
 
 
+def hi_mask(vals: np.ndarray, kind: str) -> np.ndarray:
+    """高档掩码（与 feature_stats 同口径；缺失 ⇒ False）。"""
+    ok = ~np.isnan(vals)
+    out = np.zeros(len(vals), dtype=bool)
+    if not ok.any():
+        return out
+    if kind == "quintile":
+        cuts = np.nanpercentile(vals[ok], [20, 40, 60, 80])
+        out[ok] = np.searchsorted(cuts, vals[ok], side="right") == 0
+    else:
+        out[ok] = vals[ok] > 0.5
+    return out
+
+
+def _ret_block(r: np.ndarray, hi: np.ndarray) -> dict[str, Any]:
+    if not hi.any():
+        return {}
+    x = r[hi]
+    w, lo = x[x > 0], x[x <= 0]
+    payoff = (
+        float(w.mean() / -lo.mean()) if len(w) and len(lo) and lo.mean() < 0 else None
+    )
+    return {
+        "win_rate_hi": float((x > 0).mean()),
+        "mean_ret_hi": float(x.mean()),
+        "payoff_hi": payoff,
+        "margin_hi": float(x.mean() - r.mean()),
+    }
+
+
 def feature_stats(
-    vals: np.ndarray, big: np.ndarray, loss: np.ndarray, year: np.ndarray, kind: str
+    vals: np.ndarray,
+    big: np.ndarray,
+    loss: np.ndarray,
+    year: np.ndarray,
+    kind: str,
+    ret: Optional[np.ndarray] = None,
 ) -> dict[str, Any]:
     ok = ~np.isnan(vals)
     n_all = int(ok.sum())
@@ -234,6 +350,8 @@ def feature_stats(
             else float("nan"),
         }
     )
+    if ret is not None:
+        out.update(_ret_block(ret[ok], hi))
     if kind != "quintile":
         yrs = []
         for yy in np.unique(y):
@@ -260,6 +378,25 @@ def _all_stats(
             win["loss"],
             win["year"],
             "quintile" if f in QUINTILE else "binary",
+            win["ret"] if perm is None else None,
+        )
+    return out
+
+
+def descriptive(win: dict[str, Any], feats: dict[str, Any], w: str) -> dict[str, Any]:
+    """描述性必报（不进判据）：回看 N=5/20、深水拆解、vol60 五分位对照、各特征高档 trade_dist 画像。"""
+    from custos.research import trade_dist as td  # noqa: PLC0415
+
+    out: dict[str, Any] = {}
+    for f in DESC:
+        kind = "quintile" if f == "vol60" else "binary"
+        out[f] = feature_stats(
+            win["feat"][f], win["big"], win["loss"], win["year"], kind, win["ret"]
+        )
+    for f in FEATURES:
+        hi = hi_mask(win["feat"][f], "quintile" if f in QUINTILE else "binary")
+        feats[f]["windows"][w]["dist_hi"] = td.compact(
+            [t for t, h in zip(win["trades"], hi) if h]
         )
     return out
 
@@ -302,7 +439,11 @@ def cluster_perm(items: list[dict], rng: random.Random) -> np.ndarray:
 
 
 def build_window(
-    group: dict[str, Any], trades: list[dict], feature_fn: Callable, sector_fn: Callable
+    group: dict[str, Any],
+    trades: list[dict],
+    feature_fn: Callable,
+    sector_fn: Callable,
+    osc_fn: Optional[Callable] = None,
 ) -> dict[str, Any]:
     from custos.research import backtest_factors as bt  # noqa: PLC0415
 
@@ -310,7 +451,9 @@ def build_window(
     frames: dict[str, dict[str, dict[str, float]]] = {}
     items: list[dict[str, Any]] = []
     rets: list[float] = []
-    feats: dict[str, list[float]] = {f: [] for f in FEATURES}
+    feats: dict[str, list[float]] = {f: [] for f in (*FEATURES, *DESC)}
+    raws: list[dict[str, Any]] = []
+    kept: list[dict] = []
     for t in trades:
         if bt.is_unrealized_reason(t.get("reason")) or not isinstance(
             t.get("ret"), (int, float)
@@ -325,7 +468,9 @@ def build_window(
             frames[code] = (
                 {
                     str(row["date"])[:10]: {
-                        c: float(row[c]) for c in RAW_COLS if c in row
+                        c: float(row[c])
+                        for c in fr.columns
+                        if c != "date" and isinstance(row[c], (int, float, np.number))
                     }
                     for _, row in fr.iterrows()
                 }
@@ -333,9 +478,25 @@ def build_window(
                 else {}
             )
         raw = frames[code].get(d, {})
-        fv = derive(raw, rec.get("score"), sector_fn(code, d))
-        for f in FEATURES:
+        sec = sector_fn(code, d)
+        osc = (
+            osc_fn(code, group["per_code"][code]["df"], rec.get("i", 0))
+            if osc_fn
+            else None
+        )
+        fv = derive(raw, rec.get("score"), sec, osc)
+        for f in feats:
             feats[f].append(fv[f])
+        raws.append(
+            {
+                "raw": raw,
+                "osc": osc or {},
+                "score": rec.get("score"),
+                "sector_fav": sec,
+                "rec": rec,
+            }
+        )
+        kept.append(t)
         rets.append(float(t["ret"]))
         items.append(
             {"code": code, "i": rec.get("i", 0), "date": d, "_seg": group.get("name")}
@@ -346,7 +507,11 @@ def build_window(
         "big": r >= BIG_WIN,
         "loss": r <= BIG_LOSS,
         "year": np.array([int(it["date"][:4]) for it in items]),
-        "feat": {f: np.array(feats[f], dtype=float) for f in FEATURES},
+        "feat": {f: np.array(feats[f], dtype=float) for f in feats},
+        "ret": r,
+        "raw": raws,
+        "trades": kept,
+        "df_of": {c: group["per_code"][c]["df"] for c in frames},
         "trades_n": len(items),
     }
 
@@ -379,6 +544,8 @@ def run_study(
     replay_fn: Optional[Callable] = None,
     feature_fn: Optional[Callable] = None,
     sector_fn: Optional[Callable] = None,
+    osc_fn: Optional[Callable] = None,
+    keep_windows: bool = False,
 ) -> dict[str, Any]:
     from custos.research import criteria_kit as kit  # noqa: PLC0415
     from custos.research import plan_rules_replay as prr  # noqa: PLC0415
@@ -387,13 +554,14 @@ def run_study(
     mining_segs, segments, groups, regime = prr._scan_prepare(args, warm_fn)
     feature_fn = feature_fn or default_feature_fn()
     sector_fn = sector_fn or default_sector_fn()
+    osc_fn = osc_fn or default_osc_fn()
     wins: dict[str, dict[str, Any]] = {}
     for (name, _s, _e), g in zip(mining_segs, groups):
         g = {**g, "name": name}
         trades, _ = prr._replay_width(
             [g], prr._no_stop, prr.LIVE_PARAMS, regime, args.cost_bps, replay_fn
         )
-        wins[name] = build_window(g, trades, feature_fn, sector_fn)
+        wins[name] = build_window(g, trades, feature_fn, sector_fn, osc_fn)
     if not all(w["trades_n"] for w in wins.values()):
         raise RuntimeError("空结果护栏：某挖掘窗 0 笔已实现交易——不落盘")
     real = {w: _all_stats(win) for w, win in wins.items()}
@@ -425,7 +593,8 @@ def run_study(
             "criteria": crit,
             "windows": {w: real[w][f] for w in real},
         }
-    return {
+    desc = {w: descriptive(win, feats, w) for w, win in wins.items()}
+    rep: dict[str, Any] = {
         "schema": "tail_feature_study/v1",
         "unit": "R48",
         "tag": args.tag,
@@ -440,6 +609,7 @@ def run_study(
             for w, win in wins.items()
         },
         "features": feats,
+        "descriptive": desc,
         "c4_pool": {
             "q95": kit.q95(pool),
             "pool": pool,
@@ -453,15 +623,18 @@ def run_study(
         "provenance": pv.build(
             args,
             unit="R48",
-            criteria_version="v0.439",
+            criteria_version="v0.443",
             pre_reg_doc=RESEARCH_DIR / "R48_tail_entry_features.md",
         ),
     }
+    if keep_windows:
+        rep["_wins"] = wins  # R49 探索复用（不落盘）
+    return rep
 
 
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        description="R48 B1 大单入场特征（7 特征逐个检验，只读挖掘段）"
+        description="R48 B1 大单入场特征（11 特征逐个检验，只读挖掘段）"
     )
     ap.add_argument("--codes", default="")
     ap.add_argument("--codes-file", default="")
