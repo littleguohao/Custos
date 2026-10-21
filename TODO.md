@@ -16,7 +16,7 @@
 | 88 | 首次月度交易反思（2026-09 月），跑顺「月报 → TRADE_LESSONS」流程；之后按月执行，节奏见 MASTER_WORKFLOW §七 | P2 | 生产机 | 读 2026-09 月报 JSON（无则先补跑 `monthly_review`），按模板写 E3 并核对 L1~L7 | owner 2026-10-12；[TRADE_LESSONS](TRADE_LESSONS.md) |
 | 104 | R10 margin 按已实现口径重算：生产机原批次结果文件跑 `m2_stop_sweep --report-only`（v0.383 起汇总行自动剔 open_end），回填 R10 重跑行；「可用 margin 只在叠 0AMV」若不再成立按纪律就地标 🔄 | P2 | 生产机 | report-only 重算并贴表 | R10 头部审计注记 |
 | 105 | R36 adx_gt_60 入批前重建：r36_v2_preB2 池 10/50（40 臂 rdd 门不过，真实读数，补跑格子补不出）；池 < FROZEN_MIN_POOL 40 ⇒ 判定段最高 provisional，候选在池中第 4，且入批会抬高同批 m | P1 | owner | 定：①照入批 ②原选格窗新造 ~150 臂补池 ③撤出第一批（建议③） | R36 v2 重测节回填区复核 |
-| 106 | R36 已判路线复核：①R46 挖掘段 r46_v1 机械 candidate，g*=全 0 格（V0 前 20 不如随机），待 owner 确认冻结入第一批；②Phase 4 p2_sole 随机剔除臂对齐后（v0.386）重算 C4 | P2 | owner | ①确认 R46 g* 照预注册入批；② 重跑 r36_p4 | R46 回填区复核 2026-10-21 |
+| 106 | R36 已判路线复核：①R46 已撤回（owner 2026-10-21，配比路不继续）；②Phase 4 p2_sole 随机剔除臂对齐后（v0.386）重算 C4 | P3 | 生产机 | ② 重跑 r36_p4（低优先，选股侧思路重定后再看是否还需要） | R46 结论段、R36 头部审计注记 |
 | 111 | 格子进程内化（性能，最大一块）：score_evolution/strategy_grid 每格一个 backtest_factors 子进程、每格重载全宇宙（m2 实测 s3000 加载 45~53s/格）；改为进程内共享已加载 bars + 信号缓存逐格重打分（同 v0-lattice collect/score 拆分）。须金样逐位钉测、内存账重估 | P3 | 挂起 | R46 已改进程内实现、不再依赖；剩余受益者 = strategy_grid / R36 冻结读数 50 臂 / evolution_loop，等出现大规模格子跑数需求再做 | 性能排查 v0.401~0.403 |
 | 112 | 加载侧提速：_load_bars_local 逐股串行读 vipdoc + 前复权；#92 实测加载占比 **26~56%**（>20% 阈值成立，14 条恒定 86~97s）⇒ 可加 `--load-workers` 线程并行 | P3 | coder | 实现 --load-workers（实测依据见 research README runbook 节 #92 回填） | 性能排查 |
 | 107 | R1/R2 组合层 baseline 对照按 `--tie-seed` 0~19 重跑报区间（baseline 恒 0 分，原读数是代码序截断的单次抽签） | P3 | 生产机 | 出命令后重跑 | R1/R2 头部审计注记 |
