@@ -180,6 +180,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "clamp(S·m) 矩阵化重打分（与 technical_score 逐位一致）；C1~C4（双挖掘段选格 / 邻格平滑 / "
         "簇级置换同预算零假设）；--batch-id 同次读判定段走 judgment_line；副读数 64 个家族开/关子格",
     ),
+    "tail_feature_study": (
+        "study",
+        "R48 B1 大单入场特征（v0.439）：0AMV 做多 + J<13 × 现行出场交易集，7 个 as-of 特征（小盘/深回撤/涨停活跃/"
+        "基本面优/技术分≥60/三面共振/四面共振腿数）逐个检验大单命中率 lift，簇级置换 max-of-7，只读挖掘段",
+    ),
     "trade_counterfactual": (
         "diagnostic",
         "实盘操作反事实复盘（v0.424，live 跟踪）：同一笔买入严格按现行出场规则 / 买入计划止损推演 vs 实际，"

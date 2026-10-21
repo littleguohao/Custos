@@ -127,3 +127,5 @@ git commit -m "batch b1 reads" && git push
 
 - R47 浮盈保护扫描（只读挖掘 A∪B）：`uv run python -m custos.research plan_rules_replay --scan-protect --trade-dist --tag r47_scan`，
   然后 `result_digest r47_scan <产物>/_plan_protect_scan__r47_scan.json --tag r47_scan --write --backfill`（报告自动生成）。
+- R48 大单入场特征（只读挖掘 A∪B）：`uv run python -m custos.research tail_feature_study --tag r48_v1`，
+  然后 `result_digest r48 artifacts/logs/tail_feature/_tail_feature__r48_v1.json --tag r48_v1 --write --backfill`。

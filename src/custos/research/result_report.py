@@ -763,6 +763,58 @@ REPORTS: dict[str, dict[str, Any]] = {
             },
         ],
     },
+    "r48": {
+        "title": "R48 B1 大单入场特征 · 结果报告",
+        "note": "大单 = 单笔 ≥ +20%，大亏 = ≤ −10%；lift = 高档命中率 / 全体命中率；尾部比 = lift_big / lift_loss（>1 = 右尾提升快于大亏放大）。",
+        "sections": [
+            {
+                "type": "pivot",
+                "title": "7 个特征 · 判决",
+                "rows": "features.*",
+                "row_title": "特征",
+                "cols": [
+                    ("verdict", "判决"),
+                    ("criteria.C1.ok", "C1"),
+                    ("criteria.C2.ok", "C2"),
+                    ("criteria.C3.ok", "C3"),
+                    ("criteria.C4.state", "C4"),
+                    ("criteria.C2.min_lift_big", "两窗最小 lift", "num"),
+                ],
+            },
+            {
+                "type": "pivot",
+                "title": "逐窗读数",
+                "rows": "features.*.windows.*",
+                "row_title": "特征 · 窗",
+                "cols": [
+                    ("n_hi", "高档笔数", "int"),
+                    ("missing_rate", "缺失率", "pct"),
+                    ("p_big_hi", "高档大单率", "pct"),
+                    ("p_big_all", "全体大单率", "pct"),
+                    ("lift_big", "lift 大单", "num"),
+                    ("lift_loss", "lift 大亏", "num"),
+                    ("tail_ratio", "尾部比", "num"),
+                    ("spearman", "五分位单调", "num"),
+                    ("year_frac_gt1", "逐年 >1 占比", "pct"),
+                ],
+            },
+            {
+                "type": "bar",
+                "title": "各特征逐窗 lift 大单",
+                "rows": "features.*",
+                "y_label": "lift",
+                "series": [
+                    ("windows.mining_a.lift_big", "挖掘A", 1.0),
+                    ("windows.mining_b.lift_big", "挖掘B", 1.0),
+                ],
+            },
+            {
+                "type": "kv",
+                "title": "零假设与样本",
+                "paths": ["c4_pool.q95", "c4_pool.evaluated", "n_trades", "base_rates"],
+            },
+        ],
+    },
     "r47_scan": {
         "title": "R47 浮盈保护（保本 × 移动止损）· 结果报告",
         "note": "格名 beX_trY = 保本触发 X% × 移动止损回撤 Y%；be0_tr0 = 现行出场；大单 = 单笔 ≥ +20%；"

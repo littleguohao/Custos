@@ -394,6 +394,22 @@ SPECS: dict[str, tuple[str, list[str]]] = {
             *_PROV,
         ],
     ),
+    "r48": (
+        "R48",
+        [
+            "verdict",
+            "candidates",
+            "windows",
+            "n_trades",
+            "base_rates",
+            "features.*.verdict",
+            "features.*.criteria",
+            "features.*.windows",
+            "c4_pool.q95",
+            "c4_pool.evaluated",
+            *_PROV,
+        ],
+    ),
     "r44_judgment": (
         "R44",
         [

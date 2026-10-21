@@ -29,7 +29,7 @@
 | 86 | R36 后续维度剩余三项：③条件化/regime（0AMV 作因子条件变量）④盈亏比排序（服务仓位）⑤horizon 与出场轴对齐；另「结构因子基准臂」待打分侧重开时议 | P3 | 挂起 | 判据新建成本高，排在 #81 之后 | owner 2026-09-23 五维度③④⑤；原 #81/#80① |
 | 59 | scorer 双形态剩余：pvcorr / low_vol / momentum / reversal_quality± 可接 `_SCORER_PRECOMPUTE`（每键需逐位等价钉测）；mcap 与黑盒 detector 不接 | P3 | 挂起 | 随回测批次顺带做 | v0.73 审查（③批量写 ④分页并发已否决，理由见 `fetch_pit_financials.py` docstring）；v0.236（s_shape 系已落地） |
 | 114 | R47 挖掘段扫描：工具已落地 v0.434（`plan_rules_replay --scan-protect`）；第一批判定段读完后跑，命令见 runbook「第二批预告」 | P2 | 生产机 | 第一批读完后跑 r47_scan + 摘要入库 | [R47](governance/research/R47_profit_protection_breakeven_trail.md) |
-| 115 | R48 工具 `tail_feature_study`：B1 基底 + LIVE_PARAMS 交易集 × 7 个 as-of 特征（复用 R43 特征矩阵 + live 基本面 / 技术分判定），大单 / 大亏 lift、单调性、簇级置换 max-of-7，校准两连测 + 哨兵 + digest/report | P2 | coder | 按 R48 工程落点实现（定稿 2026-10-21） | [R48](governance/research/R48_tail_entry_features.md) |
+| 115 | R48 挖掘段跑数：工具已落地 v0.439（`tail_feature_study`）；与 R47 同排第二批，命令见 runbook「第二批预告」 | P2 | 生产机 | 第一批读完后跑 r48_v1 + 摘要入库 | [R48](governance/research/R48_tail_entry_features.md) |
 
 ## 已闭环索引
 
