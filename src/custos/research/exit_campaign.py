@@ -899,6 +899,7 @@ def warm_v0_signals(
     start: str,
     end: str,
     warmup_bars: int = 0,
+    load_workers: int = 1,
 ) -> dict[str, dict]:
     """V0 重放信号预热：逐股加载 → j_low+0AMV 信号扫描 → as-of V0 技术分。
 
@@ -908,19 +909,20 @@ def warm_v0_signals(
     ``warmup_bars``（v0.359，owner review #3）：>0 时加载侧保留 start 前
     N 根作指标预热（预热只读价格，定案豁免——指标不在段起点冷启动），
     **信号仍只收 date ≥ start**（v2 段起点前的预热 bar 不出信号）。
+    ``load_workers``（v0.441，TODO #112）：>1 时逐股「加载+扫描+打分」整体
+    线程并行（每票独立、备忘挂在 df 对象自身），产物按提交序装配与串行
+    逐位一致；默认 1=原行为。
     """
     from custos.research import backtest_factors as bt  # noqa: PLC0415
     from custos.research import score_return_study as srs  # noqa: PLC0415
     import time as _time  # noqa: PLC0415
 
     _t0 = _time.time()  # TODO #92 warm 耗时埋点（[TIME] warm 行，return 前打印）
-    per_code: dict[str, dict] = {}
-    for i, code in enumerate(codes, 1):
-        if i % 200 == 0:
-            print(f"[warmup] {start}~{end} {i}/{len(codes)}", file=sys.stderr)
+
+    def _one(code: str) -> Optional[dict]:
         df = bt._load_one_bars(code, count, start, end, warmup_bars=warmup_bars)
         if df is None or not len(df):
-            continue
+            return None
         sigs: list[dict] = []
         bt.evaluate_trades(
             {code: df},
@@ -934,7 +936,7 @@ def warm_v0_signals(
         if warmup_bars > 0:
             sigs = [s for s in sigs if str(s.get("date") or "")[:10] >= start]
         if not sigs:
-            continue
+            return None
         scores: dict[str, float] = {}
         for s in sigs:
             try:
@@ -944,7 +946,18 @@ def warm_v0_signals(
             except Exception:  # noqa: BLE001 — 单信号评分失败丢该信号
                 continue
             scores[s["date"]] = score
-        per_code[code] = {"df": df, "signals": sigs, "scores": scores}
+        return {"df": df, "signals": sigs, "scores": scores}
+
+    per_code: dict[str, dict] = {}
+    if load_workers and load_workers > 1 and len(codes) > 1:
+        per_code = bt.run_codes_parallel(codes, _one, load_workers)
+    else:
+        for i, code in enumerate(codes, 1):
+            if i % 200 == 0:
+                print(f"[warmup] {start}~{end} {i}/{len(codes)}", file=sys.stderr)
+            r = _one(code)
+            if r is not None:
+                per_code[code] = r
     print(  # TODO #92 新增行（既有 [warmup] 进度行逐字不动）
         f"[TIME] warm {start}~{end} {_time.time() - _t0:.0f}s"
         f"（{len(per_code)}/{len(codes)} 票有信号）",

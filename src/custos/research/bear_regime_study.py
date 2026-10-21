@@ -202,6 +202,7 @@ def warm_gates(
     start: str,
     end: str,
     warmup_bars: int = 0,
+    load_workers: int = 1,
 ) -> dict[str, dict]:
     """R40 预热：逐股加载一次 → 逐门扫信号（门在内层 ⇒ df 只加载一次）→
     as-of V0 分（与门无关，按 (code, date) 去重）。
@@ -211,19 +212,19 @@ def warm_gates(
     即使 0 信号也保留（随机臂母体=全宇宙空头日 bar，不是门信号集）。
     ``warmup_bars``（v0.359，owner review #3）：>0 时加载侧保留 start 前
     N 根作指标预热（定案豁免），**各门信号仍只收 date ≥ start**。
+    ``load_workers``（v0.441，TODO #112）：>1 时逐股「加载+逐门扫描+打分」
+    整体线程并行（每票独立），产物按提交序装配与串行逐位一致；默认 1=原行为。
     """
     from custos.research import backtest_factors as bt  # noqa: PLC0415
     from custos.research import score_return_study as srs  # noqa: PLC0415
     import time as _time  # noqa: PLC0415
 
     _t0 = _time.time()  # TODO #92 warm 耗时埋点（[TIME] warm 行，return 前打印）
-    per_code: dict[str, dict] = {}
-    for i, code in enumerate(codes, 1):
-        if i % 200 == 0:
-            print(f"[warmup] {start}~{end} {i}/{len(codes)}", file=sys.stderr)
+
+    def _one(code: str) -> Optional[dict]:
         df = bt._load_one_bars(code, count, start, end, warmup_bars=warmup_bars)
         if df is None or not len(df):
-            continue
+            return None
         gate_signals: dict[str, list] = {}
         scores: dict[str, float] = {}
         for g in gates:
@@ -251,7 +252,18 @@ def warm_gates(
                 except Exception:  # noqa: BLE001 — 单信号评分失败丢该信号  # pylint: disable=broad-exception-caught
                     continue
                 scores[s["date"]] = score
-        per_code[code] = {"df": df, "gate_signals": gate_signals, "scores": scores}
+        return {"df": df, "gate_signals": gate_signals, "scores": scores}
+
+    per_code: dict[str, dict] = {}
+    if load_workers and load_workers > 1 and len(codes) > 1:
+        per_code = bt.run_codes_parallel(codes, _one, load_workers)
+    else:
+        for i, code in enumerate(codes, 1):
+            if i % 200 == 0:
+                print(f"[warmup] {start}~{end} {i}/{len(codes)}", file=sys.stderr)
+            r = _one(code)
+            if r is not None:
+                per_code[code] = r
     # 分子=任一门有信号的票（per_code 含 df 加载成功但 0 信号的票，母体口径）
     n_sig = sum(1 for p in per_code.values() if p["gate_signals"])
     print(  # TODO #92 新增行（既有 [warmup] 进度行逐字不动）
@@ -720,6 +732,7 @@ def _resolve_warm(
                 end=end,
                 # v2 段前预热 300 根（v0.359，owner review #3）；legacy 0 根
                 warmup_bars=300 if _is_v2 else 0,
+                load_workers=int(getattr(args, "load_workers", 1) or 1),
             )
 
     return regime_bear, index_df, warm_fn
@@ -1541,6 +1554,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--gates", default="all", help="逗号分隔门名（默认 all=全量 46 门 ENTRY_GATES）"
     )
     ap.add_argument("--n-random", type=int, default=DEFAULT_N_RANDOM, help="随机臂数")
+    ap.add_argument(
+        "--load-workers",
+        type=int,
+        default=1,
+        help="warm 加载并行路数（v0.441，TODO #112：逐股 加载+扫描+打分 线程并行，"
+        "产物与串行逐位一致；默认 1=原行为）",
+    )
     ap.add_argument(
         "--r45",
         action="store_true",

@@ -5288,6 +5288,23 @@ def _load_one_bars(
     return df
 
 
+def run_codes_parallel(
+    codes: list[str], fn: Callable[[str], Any], workers: int
+) -> dict[str, Any]:
+    """逐码线程并行执行 ``fn``，按 ``codes`` 顺序装配 ``{code: 非 None 结果}``
+    （v0.441，TODO #112）。``ThreadPoolExecutor.map`` 按提交序产出 ⇒ 输出 dict
+    与串行循环**逐位一致**（同序同值；WARN 行先后顺序不在产物语义内）。
+    fn 抛异常时由 map 在取结果处重抛——与串行循环同语义。"""
+    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
+
+    out: dict[str, Any] = {}
+    with ThreadPoolExecutor(max_workers=int(workers)) as ex:
+        for code, res in zip(codes, ex.map(fn, codes)):
+            if res is not None:
+                out[code] = res
+    return out
+
+
 def _load_bars_local(
     codes: list[str],
     count: int,
@@ -5296,6 +5313,7 @@ def _load_bars_local(
     allow_tail_clip: bool = False,
     warmup_bars: int = 0,
     allow_holdout: bool = False,
+    load_workers: int = 1,
 ) -> dict[str, pd.DataFrame]:
     """CLI 用：经 local_tdx 读取本地日线（需通达信数据；单测走注入不经此）。
     start/end(YYYY-MM-DD)在 count 之前应用(此前 tdx 路径静默忽略 --start/--end,
@@ -5306,7 +5324,10 @@ def _load_bars_local(
     2026-09-05 一律 ValueError（批级先判一次，`_load_one_bars` 逐股同守）。
     **end=None 默认截到 2026-09-04**（v0.361，owner review）；``allow_holdout``
     为显式豁免（plan_shadow_review / evolution_loop 尾随执行在案）。
-    ``warmup_bars`` 透传 `_load_one_bars`（v0.359；默认 0=原行为）。"""
+    ``warmup_bars`` 透传 `_load_one_bars`（v0.359；默认 0=原行为）。
+    ``load_workers``（v0.441，TODO #112）：>1 时逐股加载（vipdoc 读 + 前复权）
+    改线程并行——#92 实测加载占总耗时 26~56%；输出与串行逐位一致
+    （``run_codes_parallel`` 按提交序装配），默认 1=原行为。"""
     from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
     from custos.research import load_window as _lw  # noqa: PLC0415
 
@@ -5316,14 +5337,21 @@ def _load_bars_local(
     if _fh:
         raise ValueError(f"数据加载前向 holdout 硬拒绝（load_window 单源下沉）：{_fh}")
 
-    local_tdx_data.reset_qfq_failure_stats()  # 计数限定本轮加载，见下方汇总
-    out: dict[str, pd.DataFrame] = {}
-    for c in codes:
+    def _one(c: str) -> Optional[pd.DataFrame]:
         df = _load_one_bars(
             c, count, start, end, warmup_bars=warmup_bars, allow_holdout=allow_holdout
         )
-        if df is not None and len(df):
-            out[c] = df
+        return df if (df is not None and len(df)) else None
+
+    local_tdx_data.reset_qfq_failure_stats()  # 计数限定本轮加载，见下方汇总
+    if load_workers and load_workers > 1 and len(codes) > 1:
+        out = run_codes_parallel(codes, _one, load_workers)
+    else:
+        out = {}
+        for c in codes:
+            r = _one(c)
+            if r is not None:
+                out[c] = r
     # 滚动尾部截断护栏（2026-09-05 RSI 家族跨窗跑废 6 格的教训）：count 是
     # 「最新交易日向前 N 根」的滚动窗口，--start 早于尾部起点时窗口被静默截断
     # （跨窗只剩个尾巴，低频因子整窗 0 信号）。批式加载（整宇宙一次）在这里
@@ -5557,6 +5585,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "不再按代码号；换种子多抽估平分噪声）",
     )
     ap.add_argument(
+        "--load-workers",
+        type=int,
+        default=1,
+        help="加载并行路数（v0.441，TODO #112：>1 时逐股 vipdoc 读+前复权改线程并行，"
+        "产物与串行逐位一致；#92 实测加载占总耗时 26~56%%。默认 1=原行为）",
+    )
+    ap.add_argument(
         "--top-n",
         type=int,
         default=0,
@@ -5752,6 +5787,7 @@ def _make_loader(
         start=args.start or None,
         end=args.end or None,
         allow_tail_clip=bool(getattr(args, "allow_tail_clip", False)),
+        load_workers=int(getattr(args, "load_workers", 1) or 1),
     )
     return horizons, load
 

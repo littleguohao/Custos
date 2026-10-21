@@ -693,7 +693,7 @@ class TestProductionRecordUse:
         monkeypatch.setattr(
             brs,
             "warm_gates",
-            lambda codes, regime, index_df, *, gates, count, cost_bps, start, end, warmup_bars=0: (
+            lambda codes, regime, index_df, *, gates, count, cost_bps, start, end, warmup_bars=0, load_workers=1: (
                 spec[(start, end)]
             ),
         )
@@ -812,7 +812,7 @@ class TestProductionRecordUse:
         monkeypatch.setattr(
             brs,
             "warm_gates",
-            lambda codes, regime, index_df, *, gates, count, cost_bps, start, end, warmup_bars=0: (
+            lambda codes, regime, index_df, *, gates, count, cost_bps, start, end, warmup_bars=0, load_workers=1: (
                 spec[(start, end)]
             ),
         )

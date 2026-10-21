@@ -205,6 +205,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "研究结果可视化报告（v0.427）：入库摘要 JSON → 多维读数表 + mermaid 柱状 / 饼图（R43 逐维逐窗价差与板块分组、"
         "R39 出场档对比与分桶映射矩阵），报告是摘要的纯函数、守卫测试逐字比对",
     ),
+    "tie_seed_summary": (
+        "diagnostic",
+        "R1/R2 组合层对照 tie-seed 多种子汇总（v0.441，TODO #107）：逐笔产物按组合同参对 "
+        "tie_seed 0..N-1 重放 simulate_portfolio_topn，报 CAGR/回撤/收益回撤分布区间 + 逐种子配对对照",
+    ),
     "result_digest": (
         "diagnostic",
         "跑数结果摘要（回填协议 v0.413）：按预注册字段清单从产物 JSON 机械提取读数，写入库的 "

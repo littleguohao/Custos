@@ -584,7 +584,7 @@ class TestProductionRecordUse:
         monkeypatch.setattr(
             ec,
             "warm_v0_signals",
-            lambda codes, regime, index_df, *, count, cost_bps, start, end, warmup_bars=0: (
+            lambda codes, regime, index_df, *, count, cost_bps, start, end, warmup_bars=0, load_workers=1: (
                 spec[(start, end)]
             ),
         )
@@ -713,7 +713,7 @@ class TestProductionRecordUse:
         monkeypatch.setattr(
             ec,
             "warm_v0_signals",
-            lambda codes, regime, index_df, *, count, cost_bps, start, end, warmup_bars=0: (
+            lambda codes, regime, index_df, *, count, cost_bps, start, end, warmup_bars=0, load_workers=1: (
                 spec[(start, end)]
             ),
         )

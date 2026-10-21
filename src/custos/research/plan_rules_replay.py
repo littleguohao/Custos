@@ -499,6 +499,7 @@ def run_study(
                 end=end,
                 # v2 段前预热 300 根（v0.359，owner review #3）；legacy 0 根
                 warmup_bars=300 if layout == "v2" else 0,
+                load_workers=int(getattr(args, "load_workers", 1) or 1),
             )
 
     # ── 逐段 warm →（v2）段末隔离带 clip → attach 配对剔除 ──
@@ -1151,6 +1152,7 @@ def _scan_prepare(
                 start=start,
                 end=end,
                 warmup_bars=300,  # 段前预热 300 根（v0.359，v2 纪律）
+                load_workers=int(getattr(args, "load_workers", 1) or 1),
             )
 
     # ── 逐段 warm → 段末隔离带 clip → 锚点附着（x=0 建子集；低档化在重放时）──
@@ -1446,6 +1448,13 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--n-random", type=int, default=DEFAULT_N_RANDOM)
     ap.add_argument("--c4-min-pool", type=int, default=C4_MIN_POOL)
     ap.add_argument("--seed", type=int, default=20261009)
+    ap.add_argument(
+        "--load-workers",
+        type=int,
+        default=1,
+        help="warm 加载并行路数（v0.441，TODO #112：逐股 加载+扫描+打分 线程并行，"
+        "产物与串行逐位一致；默认 1=原行为）",
+    )
     ap.add_argument("--tag", required=True)
     ap.add_argument("--out-dir", default=str(LOGS))
     # ---- R44（v0.379，TODO #100）：止损锚点 + 只读挖掘段的宽度扫描 ----

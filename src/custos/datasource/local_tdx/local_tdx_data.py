@@ -17,6 +17,7 @@ import json
 import math
 import os
 import sys
+import threading
 import time
 import warnings
 from pathlib import Path
@@ -45,6 +46,12 @@ _client_created_at: Optional[float] = None
 # 连接最长复用 10 分钟：通达信服务器会踢掉空闲连接，而 18:00 链要跑几百只票，
 # 中途连接失效时旧实现会把剩下全部拖挂（且报的是看不懂的 "'>' NoneType"）。
 CLIENT_MAX_AGE_SEC = 600.0
+
+# 在线协议客户端是**单条 TCP 连接**，多线程并发收发会串包——批量并行加载
+# （`_load_bars_local(load_workers>1)` / warm 并行，v0.441，TODO #112）下所有
+# 经 `_get_client` 的调用必须串行化。vipdoc 本地读（mootdx Reader 每次调用新建
+# 解析器、无共享状态）与权息缓存文件读不需要这把锁。
+_CLIENT_LOCK = threading.Lock()
 
 # --- 前复权失败计数（DATA_SOURCE_PRINCIPLE ③ / 原 TODO #16）---
 # 全链统一前复权后，单票 qfq 失败只打一条 stderr WARN，跑 3000~5500 只票时
@@ -481,15 +488,16 @@ def get_online_bars(
             file=sys.stderr,
         )
         return pd.DataFrame()
-    client = _get_client()
-    raw = _strip_suffix(code)
-    try:
-        kwargs = {"symbol": raw, "frequency": frequency, "offset": offset}
-        if adjust:
-            kwargs["adjust"] = adjust
-        df = client.bars(**kwargs)
-    except Exception as e:
-        raise LocalTdxError(f"online bars({raw}) failed: {e}")
+    with _CLIENT_LOCK:  # 单条 TCP 连接，并发收发会串包（v0.441，TODO #112）
+        client = _get_client()
+        raw = _strip_suffix(code)
+        try:
+            kwargs = {"symbol": raw, "frequency": frequency, "offset": offset}
+            if adjust:
+                kwargs["adjust"] = adjust
+            df = client.bars(**kwargs)
+        except Exception as e:
+            raise LocalTdxError(f"online bars({raw}) failed: {e}")
     if df is None or df.empty:
         return pd.DataFrame()
     df = df.copy()
@@ -515,14 +523,15 @@ def get_online_index(
             file=sys.stderr,
         )
         return pd.DataFrame()
-    client = _get_client()
-    raw = _strip_suffix(code)
-    try:
-        df = client.index(
-            frequency=frequency, market=market, symbol=raw, start=0, offset=offset
-        )
-    except Exception as e:
-        raise LocalTdxError(f"online index({raw}) failed: {e}")
+    with _CLIENT_LOCK:  # 单条 TCP 连接，并发收发会串包（v0.441，TODO #112）
+        client = _get_client()
+        raw = _strip_suffix(code)
+        try:
+            df = client.index(
+                frequency=frequency, market=market, symbol=raw, start=0, offset=offset
+            )
+        except Exception as e:
+            raise LocalTdxError(f"online index({raw}) failed: {e}")
     if df is None or df.empty:
         return pd.DataFrame()
     df = df.copy()

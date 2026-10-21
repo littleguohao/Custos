@@ -555,6 +555,7 @@ def _production_warm_fn(
             # v2 段前预热 300 根（v0.359，owner review #3——指标不冷启动，
             # 信号仍 ≥段起点）；legacy 0 根（R40 兼容逐位不变）
             warmup_bars=300 if len(mining_segs) >= 2 else 0,
+            load_workers=int(getattr(args, "load_workers", 1) or 1),
         )
 
     return warm_fn, regime
@@ -1337,6 +1338,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="top 映射 / uniform-best 逐窗交易分布画像 + 逐桶画像（描述性副读数，v0.422，不进判据）",
     )
     ap.add_argument("--seed", type=int, default=20261008, help="全局种子（C3/C4 派生）")
+    ap.add_argument(
+        "--load-workers",
+        type=int,
+        default=1,
+        help="warm 加载并行路数（v0.441，TODO #112：逐股 加载+扫描+打分 线程并行，"
+        "产物与串行逐位一致；默认 1=原行为）",
+    )
     ap.add_argument(
         "--out-dir",
         default="artifacts/logs/factor_exit",

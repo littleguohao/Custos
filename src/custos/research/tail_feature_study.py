@@ -479,6 +479,13 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--n-random", type=int, default=N_RANDOM, help="簇级置换臂数")
     ap.add_argument("--c4-min-pool", type=int, default=C4_MIN_POOL)
     ap.add_argument("--seed", type=int, default=20261021)
+    ap.add_argument(
+        "--load-workers",
+        type=int,
+        default=1,
+        help="warm 加载并行路数（v0.441，TODO #112：逐股 加载+扫描+打分 线程并行，"
+        "产物与串行逐位一致；默认 1=原行为）",
+    )
     ap.add_argument("--tag", default="r48_v1")
     ap.add_argument("--out-dir", default=str(LOGS / "tail_feature"))
     return ap
