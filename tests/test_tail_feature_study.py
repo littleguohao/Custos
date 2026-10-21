@@ -382,4 +382,22 @@ def test_oversold_edge_detected_and_descriptive():
         set(d) == set(tf.DESC) and d["vol60"]["n_all"] == 0
     )  # 合成帧无 vol60 ⇒ 全缺失如实报
     w = f["windows"]["mining_a"]
-    assert {"win_rate_hi", "mean_ret_hi", "payoff_hi", "margin_hi", "dist_hi"} <= set(w)
+    assert {
+        "win_rate_hi",
+        "mean_ret_hi",
+        "payoff_hi",
+        "margin_hi",
+        "mean_ret_diff",
+        "dist_hi",
+    } <= set(w)
+
+
+def test_ret_block_margin_is_breakeven_margin():
+    """margin_hi = 胜率 − 1/(1+盈亏比)（项目口径）；均收益差单列 mean_ret_diff。"""
+    r = np.array([0.10, 0.10, -0.05, -0.05, 0.0, 0.02])
+    hi = np.array([True, True, True, True, False, False])
+    b = tf._ret_block(r, hi)
+    # 高档：胜率 0.5，盈亏比 0.10/0.05 = 2 ⇒ 盈亏平衡胜率 1/3 ⇒ margin = 1/6
+    assert b["payoff_hi"] == pytest.approx(2.0)
+    assert b["margin_hi"] == pytest.approx(0.5 - 1 / 3)
+    assert b["mean_ret_diff"] == pytest.approx(0.025 - r.mean())

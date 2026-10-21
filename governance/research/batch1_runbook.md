@@ -125,10 +125,10 @@ git commit -m "batch b1 reads" && git push
 
 ## 第二批预告（不在第一批，第一批判定段读完后再跑）
 
-- R47 浮盈保护扫描（只读挖掘 A∪B）：`uv run python -m custos.research plan_rules_replay --scan-protect --trade-dist --tag r47_scan`，
+- R47 浮盈保护扫描（只读挖掘 A∪B）：`uv run python -m custos.research plan_rules_replay --scan-protect --trade-dist --load-workers 4 --tag r47_scan`，
   然后 `result_digest r47_scan <产物>/_plan_protect_scan__r47_scan.json --tag r47_scan --write --backfill`（报告自动生成）。
-- R48 大单入场特征（只读挖掘 A∪B）：`uv run python -m custos.research tail_feature_study --tag r48_v1`，
-  然后 `result_digest r48 artifacts/logs/tail_feature/_tail_feature__r48_v1.json --tag r48_v1 --write --backfill`。
-- R49 逆向画像（探索，只读挖掘 A∪B；内部重放 R48 同一交易集，但不落 r48 产物——R48 仍按上一条单独跑）：
-  `uv run python -m custos.research tail_explore_study --tag r49_v1 --load-workers 4`，然后
+- R48 + R49 一条命令（只读挖掘 A∪B；v0.444：R49 内部完整跑一遍 R48 含 200 臂池，同次落 R48 产物，读数与单独跑一致——**不要再单独跑 R48**，否则全宇宙加载 + 重放重复一次）：
+  `uv run python -m custos.research tail_explore_study --load-workers 4 --tag r49_v1 --r48-tag r48_v1`，然后两条摘要：
+  `result_digest r48 artifacts/logs/tail_feature/_tail_feature__r48_v1.json --tag r48_v1 --write --backfill`；
   `result_digest r49 artifacts/logs/tail_feature/_tail_explore__r49_v1.json --tag r49_v1 --write --backfill`。
+  （只要 R48 时：`tail_feature_study --load-workers 4 --tag r48_v1`。）

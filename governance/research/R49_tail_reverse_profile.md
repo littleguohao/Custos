@@ -71,6 +71,6 @@ owner 2026-10-21：机构式多因子流程在实践中有效，B1 / B2 / 现行
 ### 工程落点（TODO #118 ✅ v0.443）
 
 - `tail_explore_study`：复用 `tail_feature_study.run_study(keep_windows=True)` 的窗口产物，面板构建 / 置换只重排结局行（矩阵化），
-  `--no-panel` 可跳过 R20 面板与 `s_shape`（省一半耗时）；零假设校准两连测 + 成簇零假设 + 逐笔置换哨兵；`result_digest` kind `r49` + 报告版式。
+  `--no-panel` 可跳过 R20 面板与 `s_shape`（省一半耗时）；v0.444 起同次落 R48 完整产物（`--r48-tag`，与单独跑同参同种子读数一致，钉测），第二批 R48 不再单独跑；零假设校准两连测 + 成簇零假设 + 逐笔置换哨兵；`result_digest` kind `r49` + 报告版式。
 
 ### 回填区（逐 Phase 填）

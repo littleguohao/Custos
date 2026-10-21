@@ -140,3 +140,53 @@ class TestSentinelExploreIid:
                 lambda s: _unit(_run(s, clustered=True, n_random=50)),
                 seeds=CAL_SEEDS,
             )
+
+
+def test_main_writes_both_products(tmp_path):
+    """一条命令出两面：R49 同次落 R48 产物，且 R48 读数与单独跑 tail_feature_study 逐字段一致。"""
+    import json
+
+    spec = base._world()
+    inj = dict(
+        warm_fn=lambda s, e: spec[(s, e)],
+        replay_fn=base._replay(spec, 9),
+        feature_fn=base._feature_fn(spec),
+        sector_fn=lambda c, d: base._u("sec", c, d[:7]) < 0.5,
+        osc_fn=base._osc_fn(spec),
+    )
+    common = [
+        "--n-random",
+        "20",
+        "--c4-min-pool",
+        "20",
+        "--seed",
+        "9",
+        "--out-dir",
+        str(tmp_path),
+    ]
+    assert (
+        te.main(
+            [
+                *common,
+                "--min-n",
+                "50",
+                "--no-panel",
+                "--tag",
+                "x49",
+                "--r48-tag",
+                "x48",
+            ],
+            **inj,
+        )
+        == 0
+    )
+    both = json.loads(
+        (tmp_path / "_tail_feature__x48.json").read_text(encoding="utf-8")
+    )
+    assert (tmp_path / "_tail_explore__x49.json").exists()
+    assert tf.main([*common, "--tag", "solo"], **inj) == 0
+    solo = json.loads(
+        (tmp_path / "_tail_feature__solo.json").read_text(encoding="utf-8")
+    )
+    for k in ("features", "c4_pool", "descriptive", "n_trades", "verdict"):
+        assert both[k] == solo[k], k

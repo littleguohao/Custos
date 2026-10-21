@@ -16,6 +16,8 @@
 4. 零假设：簇级置换（R48 ``cluster_perm``，两窗各自）N 臂，每臂统计量 = 复现格的 max 线索统计量（无复现记 0）；
    复现格统计量 > ``kit.q95`` ⇒ ``lead_robust``，否则 ``lead_replicated``。
 
+同次落 R48 完整产物（``_tail_feature__<r48_tag>.json``，与单独跑 ``tail_feature_study`` 同参同种子 ⇒ 读数一致）。
+
 另附流动性底线描述块（owner 2026-10-21：机构流程的「均成交额 ≥ X」是否是缺失的过滤条件）：``amt20`` ≥ 1/2/3/5 亿
 子集的大单率 / 大亏率 / 均收益 / 胜率 / 盈亏比，两窗。
 """
@@ -386,6 +388,8 @@ def run_study(
             **{k: pool_blk[k] for k in ("evaluated", "gate_pass_rate", "target_pool")},
         },
         "r48_side": {"verdict": base["verdict"], "candidates": base["candidates"]},
+        # 同次 R48 完整产物（main 落成 _tail_feature__<r48_tag>.json，一条命令出两面——v0.444）
+        "_r48_report": base,
         "window_usage": base["window_usage"],
         "provenance": pv.build(
             args,
@@ -434,6 +438,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="warm 加载并行路数（同 tail_feature_study）",
     )
     ap.add_argument("--tag", default="r49_v1")
+    ap.add_argument(
+        "--r48-tag",
+        default="r48_v1",
+        help="同次 R48 产物的 tag（v0.444：R49 内部完整跑一遍 R48 含 200 臂池，顺手落盘，免得 R48 再单独全宇宙重跑一次）",
+    )
     ap.add_argument("--out-dir", default=str(LOGS / "tail_feature"))
     return ap
 
@@ -454,6 +463,16 @@ def main(argv: Optional[list[str]] = None, **inj: Any) -> int:
     except RuntimeError as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)
         return 2
+    r48 = rep.pop("_r48_report")
+    r48["tag"] = args.r48_tag
+    r48["produced_by"] = f"tail_explore_study --tag {args.tag}"
+    out48 = Path(args.out_dir) / f"_tail_feature__{args.r48_tag}.json"
+    out48.parent.mkdir(parents=True, exist_ok=True)
+    out48.write_text(
+        json.dumps(r48, ensure_ascii=False, indent=2, default=str, allow_nan=True),
+        encoding="utf-8",
+    )
+    print(f"[OK] 同次 R48 产物 {out48}")
     out = Path(args.out_dir) / f"_tail_explore__{args.tag}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(

@@ -286,6 +286,8 @@ def hi_mask(vals: np.ndarray, kind: str) -> np.ndarray:
 
 
 def _ret_block(r: np.ndarray, hi: np.ndarray) -> dict[str, Any]:
+    from custos.research import m2_stop_sweep as m2  # noqa: PLC0415
+
     if not hi.any():
         return {}
     x = r[hi]
@@ -297,7 +299,10 @@ def _ret_block(r: np.ndarray, hi: np.ndarray) -> dict[str, Any]:
         "win_rate_hi": float((x > 0).mean()),
         "mean_ret_hi": float(x.mean()),
         "payoff_hi": payoff,
-        "margin_hi": float(x.mean() - r.mean()),
+        # margin = 胜率 − 盈亏平衡胜率 1/(1+盈亏比)（m2 `_margin` 同口径，项目内 margin 的唯一含义）
+        "margin_hi": m2._margin({"win": float((x > 0).mean()), "payoff": payoff}),
+        # 高档均收益 − 全体均收益（描述性，非 margin；v0.444 前曾误名 margin_hi）
+        "mean_ret_diff": float(x.mean() - r.mean()),
     }
 
 

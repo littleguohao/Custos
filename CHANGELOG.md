@@ -446,6 +446,7 @@
 | 2026-10-21 | v0.441 | **`--load-workers` 加载线程并行（TODO #112）+ `tie_seed_summary`（TODO #107 命令）**：`_load_bars_local`/`warm_v0_signals`/`warm_gates` 并行化（默认 1=原行为，产物逐位一致钉测），五入口接线、在线客户端加锁、簿记键登记——第二批 R47/R48 直接受益；tie_seed_summary 按组合同参对 tie_seed 0~19 重放报区间 + 逐种子配对对照，跑数命令写死在模块 docstring | owner 2026-10-21 | 钉测 +13 |
 | 2026-10-21 | v0.442 | **scorer 双形态剩余 5 键（TODO #59）**：alpha_pvcorr / low_vol / momentum / reversal_quality± 接 `_SCORER_PRECOMPUTE`——pre 只带逐位可复现全序列（astype/pct_change 逐点运算），rolling corr/std 刻意不向量化（在线算法不保逐位），定长小窗仍每 bar 现算（O(w)，总 O(n)）；score 改三参（默认 None=原行为）；身份键与 SCORERS 直通同一函数对象（钉测锁死） | owner 2026-10-21 | 钉测 +49 |
 | 2026-10-21 | v0.443 | **R48 跑数前修订**：+4 超卖特征（RSI 深水 / 近 10 日深水 / 周线 J 低 / RSI 底背离，max-of-11），深水拆解与 N=5/20、vol60 对照、高档盈亏比画像描述性必报；**新立 R49 逆向画像**（探索）+ 工具 `tail_explore_study`（A 发现 → B 复现 + 整面板簇级置换，附流动性底线表）；校准夹具修两窗簇重号伪相关 | owner 2026-10-21 | 钉测 +10 |
+| 2026-10-21 | v0.444 | review 修正（owner）：R48 `margin_hi` 改为项目口径（胜率 − 1/(1+盈亏比)），原「高档均收益 − 全体均收益」更名 `mean_ret_diff`；R49 同次落 R48 完整产物（`--r48-tag`，与单独跑读数一致钉测），第二批 R48 不再单独全宇宙重跑；runbook R47/R48/R49 命令统一 `--load-workers 4` | owner 2026-10-21 | 钉测 +2 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
