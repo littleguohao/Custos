@@ -444,6 +444,7 @@
 | 2026-10-21 | v0.439 | **R48 工具 `tail_feature_study`**：复用 `_scan_prepare` + LIVE_PARAMS 交易集，7 特征（R43 as-of 特征矩阵 + PIT 品质档重述 + V0 分 + 板块相位 as-of），逐窗 lift_big / lift_loss / 五分位单调 / 逐年，簇级置换 max-of-7；零假设两连测 + 成簇零假设 + 逐笔置换哨兵；digest `r48` + 报告版式；定稿修订 3 条 | owner 2026-10-21 | 钉测 +7 |
 | 2026-10-21 | v0.440 | **R35 终局 A**（owner 拍板）：V0 定性粗过滤、live 不改，打分侧研究收口；TODO #87、#81 闭环（R39 停 untested）；R42 头部补判毕状态；新增 #116 开发机挖掘段数据快照、#117 组合层方向（第二批后立项） | owner 2026-10-21 | 治理 |
 | 2026-10-21 | v0.441 | **`--load-workers` 加载线程并行（TODO #112）+ `tie_seed_summary`（TODO #107 命令）**：`_load_bars_local`/`warm_v0_signals`/`warm_gates` 并行化（默认 1=原行为，产物逐位一致钉测），五入口接线、在线客户端加锁、簿记键登记——第二批 R47/R48 直接受益；tie_seed_summary 按组合同参对 tie_seed 0~19 重放报区间 + 逐种子配对对照，跑数命令写死在模块 docstring | owner 2026-10-21 | 钉测 +13 |
+| 2026-10-21 | v0.442 | **scorer 双形态剩余 5 键（TODO #59）**：alpha_pvcorr / low_vol / momentum / reversal_quality± 接 `_SCORER_PRECOMPUTE`——pre 只带逐位可复现全序列（astype/pct_change 逐点运算），rolling corr/std 刻意不向量化（在线算法不保逐位），定长小窗仍每 bar 现算（O(w)，总 O(n)）；score 改三参（默认 None=原行为）；身份键与 SCORERS 直通同一函数对象（钉测锁死） | owner 2026-10-21 | 钉测 +49 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

@@ -23,7 +23,7 @@ owner 08-06 统一后已过时，2026-08-07 订正。那条 TODO 也已闭环。
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 import pandas as pd
 
 from custos.core.indicators import amplitude_pct as amplitude_pct_of  # 振幅唯一实现
@@ -50,16 +50,32 @@ FACTOR: dict[str, Any] = {
 }
 
 
-def score(df: pd.DataFrame, code: str) -> dict | None:
+def score(
+    df: pd.DataFrame, code: str, precomputed: Optional[dict] = None
+) -> dict | None:
     """反转K质量分(0-4)：缩量(量比≤50%)+量底(20日底10%)+小实体(收盘±2%)+小振幅(≤7%) 各计1分。
-    用作**选择器**：在宽门槛(如 j_low)候选里按"反转成色"排序取 top-N —— 兼得 j_low 的供给 + reversal_k 的质量。"""
+    用作**选择器**：在宽门槛(如 j_low)候选里按"反转成色"排序取 top-N —— 兼得 j_low 的供给 + reversal_k 的质量。
+
+    ``precomputed``：evaluate_trades 逐股预计算的全序列（键 close/high/low/vol =
+    各列 float np 数组），传入时按 ``len(df)`` 截前缀视图后走**同一段**判定体
+    （尾部 ≤20 根窗口统计全是定长小窗，与前缀长度无关）——astype(float) 是逐点
+    变换，截断视图上的负索引与前缀切片同义，两路逐位相同。⚠️ 只对「从第 0 根
+    开始的前缀切片」有效；不传（默认）走原现算路径。
+    """
     if len(df) < 21:
         return None
     try:
-        close = df["close"].astype(float).values
-        high = df["high"].astype(float).values
-        low = df["low"].astype(float).values
-        vol = df["volume"].astype(float).to_numpy()
+        if precomputed is not None:
+            n = len(df)
+            close = precomputed["close"][:n]
+            high = precomputed["high"][:n]
+            low = precomputed["low"][:n]
+            vol = precomputed["vol"][:n]
+        else:
+            close = df["close"].astype(float).values
+            high = df["high"].astype(float).values
+            low = df["low"].astype(float).values
+            vol = df["volume"].astype(float).to_numpy()
         vma5 = vol[-6:-1].mean() if len(vol) >= 6 else vol[:-1].mean()
         v20 = vol[-20:]
         pts = 0

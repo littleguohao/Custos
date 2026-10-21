@@ -12,7 +12,7 @@ owner 拍板）**：钉死宇宙 300 只三窗口 × top-5 择优对照——仅
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 import pandas as pd
 
 FACTOR: dict[str, Any] = {
@@ -29,10 +29,22 @@ FACTOR: dict[str, Any] = {
 }
 
 
-def score(df: pd.DataFrame, code: str) -> dict | None:
+def score(
+    df: pd.DataFrame, code: str, precomputed: Optional[dict] = None
+) -> dict | None:
     """动量因子(12-1类)：score=[t-skip-lb, t-skip]区间收益(跳过最近20日避开短期反转)。中期强势择优。
-    历史不足时自适应缩短回看窗口(≥40根即产出)。"""
-    c = df["close"].astype(float).values
+    历史不足时自适应缩短回看窗口(≥40根即产出)。
+
+    ``precomputed``：evaluate_trades 逐股预计算的全序列（键 c = close 的 float
+    np 数组），传入时按 ``len(df)`` 截前缀视图后走**同一段**点查询——astype(float)
+    是逐点变换，mom 只读 ``c[-1-skip]`` / ``c[-1-skip-lb]`` 两个点，两路逐位相同。
+    ⚠️ 只对「从第 0 根开始的前缀切片」有效（lb 随 ``len(df)`` 自适应，截前缀
+    后 n 与前缀切片一致）；不传（默认）走原现算路径。
+    """
+    if precomputed is not None:
+        c = precomputed["c"][: len(df)]
+    else:
+        c = df["close"].astype(float).values
     n = len(c)
     if n < 40:
         return None

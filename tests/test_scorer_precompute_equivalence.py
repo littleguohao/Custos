@@ -343,3 +343,149 @@ def test_scorer_whitelist_audit():
     assert bt._sc_b1_pullback in bt._SLICE_FREE_SCORERS
     assert bt._sc_rsi_state not in bt._SLICE_FREE_SCORERS
     assert bt._sc_kdj_j not in bt._SLICE_FREE_SCORERS  # 无 df=None+n 入口，本次不动
+
+
+# ================= TODO #59②：5 个研究侧 selector scorer 双形态等价 =================
+# alpha_pvcorr / low_vol / momentum / reversal_quality / reversal_quality_inv 接
+# _SCORER_PRECOMPUTE：pre 只携带逐点/逐位可复现的全序列（float 数组 / pct_change
+# 序列），scorer 按 len(slice) 截前缀后走**同一段**判定体——截断视图上的值与前缀
+# 切片逐位相同 ⇒ 结构性逐位一致（rolling corr/std 是另一套在线算法，不保证逐位，
+# 刻意不向量化，末 ≤20 根窗口统计仍每 bar 现算，总复杂度 O(n)）。本文件再逐 bar 钉一遍。
+# reversal_quality_inv 是 4.0 − 正向分，与 reversal_quality 共用同一份 pre（透传）。
+
+_SELECTOR5_PRE = {
+    "alpha_pvcorr": bt._precompute_alpha_pvcorr_series,
+    "low_vol": bt._precompute_low_vol_series,
+    "momentum": bt._precompute_momentum_series,
+    "reversal_quality": bt._precompute_reversal_quality_series,
+    # inv 与正向共用同一份 OHLCV pre（scorer 内透传给正向 score 再取 4−分）
+    "reversal_quality_inv": bt._precompute_reversal_quality_series,
+}
+
+# 每因子：4 形态×120 + 长序列 300 + min_bars 守卫边界；
+# momentum 另加 120/121/122 = lb=min(100, n-21) 截断边界两侧。
+_SELECTOR5_SHAPES = {
+    "alpha_pvcorr": [
+        ("random_walk", 120),
+        ("strong_trend", 120),
+        ("oscillating", 120),
+        ("nan_prefix", 120),
+        ("random_walk", 9),  # <10：守卫 → None（两路一致）
+        ("random_walk", 10),  # 刚好 10 根边界
+        ("random_walk", 11),
+        ("random_walk", 300),  # 长序列
+    ],
+    "low_vol": [
+        ("random_walk", 120),
+        ("strong_trend", 120),
+        ("oscillating", 120),
+        ("nan_prefix", 120),
+        ("random_walk", 20),  # <21：守卫 → None（两路一致）
+        ("random_walk", 21),  # 刚好 21 根边界
+        ("random_walk", 22),
+        ("random_walk", 300),
+    ],
+    "momentum": [
+        ("random_walk", 120),
+        ("strong_trend", 120),
+        ("oscillating", 120),
+        ("nan_prefix", 120),
+        ("random_walk", 39),  # <40：守卫 → None（两路一致）
+        ("random_walk", 40),  # 刚好 40 根边界
+        ("random_walk", 41),
+        ("random_walk", 121),  # lb=min(100, n-21)：n-21=100 恰好不截断边界
+        ("random_walk", 122),  # n-21>100：lb 截断到 100 分支
+        ("random_walk", 300),
+    ],
+    "reversal_quality": [
+        ("random_walk", 120),
+        ("strong_trend", 120),
+        ("oscillating", 120),
+        ("nan_prefix", 120),
+        ("random_walk", 20),  # <21：守卫 → None（两路一致）
+        ("random_walk", 21),  # 刚好 21 根边界
+        ("random_walk", 22),
+        ("random_walk", 300),
+    ],
+    "reversal_quality_inv": [
+        ("random_walk", 120),
+        ("strong_trend", 120),
+        ("oscillating", 120),
+        ("nan_prefix", 120),
+        ("random_walk", 20),
+        ("random_walk", 21),
+        ("random_walk", 22),
+        ("random_walk", 300),
+    ],
+}
+
+_SELECTOR5_CASES = [
+    (name, kind, n) for name, shapes in _SELECTOR5_SHAPES.items() for kind, n in shapes
+]
+
+
+@pytest.mark.parametrize("scorer_name,kind,n", _SELECTOR5_CASES)
+def test_selector5_scorer_dual_form_per_bar_equal(scorer_name, kind, n):
+    """① 逐 bar 等价：5 个 selector 带/不带 precomputed，返回完全相等（含 None/NaN 分支）。"""
+    df = _shaped_bars(kind, n)
+    pre = _SELECTOR5_PRE[scorer_name](df)
+    assert pre is not None, "预计算在正常数据上不该退 None"
+    sc = bt.SCORERS[scorer_name]
+    for i in _sample_bars(n):
+        sl = df.iloc[: i + 1]
+        a = sc(sl, "600000")
+        b = sc(sl, "600000", pre)
+        assert _dict_eq(a, b), (
+            f"{scorer_name} {kind} n={n} 在 i={i} 两路不一致:\n{a}\n{b}"
+        )
+
+
+def test_selector5_registry_identity():
+    """①c 身份接线：_SCORER_PRECOMPUTE 的键必须与 SCORERS 注册同一函数对象
+    （注册表直通取到的与文件顶部别名是同一对象，身份查表才命中）。"""
+    aliases = {
+        "alpha_pvcorr": bt._sc_alpha_pvcorr,
+        "low_vol": bt._sc_low_vol,
+        "momentum": bt._sc_momentum,
+        "reversal_quality": bt._sc_reversal_quality,
+        "reversal_quality_inv": bt._sc_reversal_quality_inv,
+    }
+    for name, pre_fn in _SELECTOR5_PRE.items():
+        assert bt.SCORERS[name] is aliases[name], f"{name} 注册表直通对象变了"
+        assert bt._SCORER_PRECOMPUTE.get(bt.SCORERS[name]) is pre_fn, (
+            f"{name} 未按身份命中 _SCORER_PRECOMPUTE"
+        )
+
+
+@pytest.mark.parametrize("scorer_name", list(_SELECTOR5_PRE))
+def test_evaluate_trades_bitwise_equal_selector5(monkeypatch, scorer_name):
+    """② 逐笔等价：注册表正常 vs 清空注册表（强制旧路径），trades 列表完全一致。"""
+    bars = {
+        "600000": _shaped_bars("random_walk", 160, seed=7),
+        "000001": _shaped_bars("strong_trend", 160, seed=11),
+        "300750": _shaped_bars("oscillating", 160, seed=13),
+    }
+    kw = {"scorer": bt.SCORERS[scorer_name], "collect_all": True, "min_bars": 30}
+    t_on = bt.evaluate_trades(bars, **kw)
+    monkeypatch.setattr(bt, "_SCORER_PRECOMPUTE", {})  # 查不到 ⇒ 传 None ⇒ 旧路径
+    t_off = bt.evaluate_trades(bars, **kw)
+    assert t_on == t_off, f"scorer={scorer_name} 逐笔输出不一致"
+
+
+def test_selector5_equivalence_not_vacuous():
+    """③ 防"空==空"假绿：5 个 scorer 在合成数据上都真的产出记录（非全 None），
+    且 evaluate_trades 真的出交易。"""
+    df = _shaped_bars("random_walk", 160, seed=42)
+    for name, pre_fn in _SELECTOR5_PRE.items():
+        pre = pre_fn(df)
+        recs = sum(
+            bt.SCORERS[name](df.iloc[: i + 1], "600000", pre) is not None
+            for i in range(40, len(df))
+        )
+        assert recs > 0, f"{name} 一条记录都没产出，等价测试形同空转"
+    bars = {"000001": _shaped_bars("random_walk", 160, seed=42)}
+    for name in _SELECTOR5_PRE:
+        t = bt.evaluate_trades(
+            bars, scorer=bt.SCORERS[name], collect_all=True, min_bars=30
+        )
+        assert len(t) > 0, f"{name} 一笔交易都没出，逐笔等价形同空转"

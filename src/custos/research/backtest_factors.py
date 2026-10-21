@@ -42,8 +42,16 @@ if hasattr(sys.stderr, "reconfigure"):
 # 9 个自包含 scorer 已抽到 factors/ 各自成模块（2026-08-06）。
 # v0.218（TODO #67 B1）：纯研究侧 selector 的 SCORERS 注册改注册表直通
 # （见下方 SCORERS 注册段）——因子模块的 score() 是唯一实现，别名只留
-# _sc_kdj_j（它还是 _SCORER_PRECOMPUTE 的身份键，见 :1384 附近）。
+# _sc_kdj_j 与 TODO #59② 的 5 个 selector（它们是 _SCORER_PRECOMPUTE 的
+# 身份键，见 :1504 附近；与 SCORERS 注册表直通取到的是**同一函数对象**）。
 from custos.core.factors.kdj_j import score as _sc_kdj_j  # noqa: E402
+from custos.core.factors.alpha_pvcorr import score as _sc_alpha_pvcorr  # noqa: E402
+from custos.core.factors.low_vol import score as _sc_low_vol  # noqa: E402
+from custos.core.factors.momentum import score as _sc_momentum  # noqa: E402
+from custos.core.factors.reversal_quality import score as _sc_reversal_quality  # noqa: E402
+from custos.core.factors.reversal_quality_inv import (  # noqa: E402
+    score as _sc_reversal_quality_inv,
+)
 
 
 from custos.core.indicators import (
@@ -1501,6 +1509,103 @@ def _precompute_kdj_j_series(
         return None
 
 
+def _precompute_alpha_pvcorr_series(df: pd.DataFrame) -> Optional[dict[str, Any]]:
+    """逐股**一次性**预计算 alpha_pvcorr 用的价量全序列（evaluate_trades 的 O(n²)→O(n) 优化）。
+
+    等价性依据：astype(float) 是逐点变换 ⇒ 全序列与前缀切片上的值逐位相同；
+    scorer 侧按 ``len(slice)`` 截前缀后走**同一段** ``_ts_corr``（末 10 根 Pearson），
+    输入逐位相同 ⇒ 结果逐位相同。rolling 相关是另一套在线算法，**不保证**与切片
+    现算逐位一致，故不向量化 corr——末 10 根相关仍每 bar 现算（O(10)，与前缀长度
+    无关，总复杂度 O(n)）。等价性由 tests/test_scorer_precompute_equivalence.py
+    逐 bar 钉住。
+
+    ⚠️ 只对「从第 0 根开始的前缀切片」有效（evaluate_trades 的切片恒如此）；
+    ``evaluate(gate_window>0)`` 的切片起点 lo>0，**不得**传这个。
+    返回 None（异常）时 scorer 走原逐切片路径，行为与旧版逐位一致。
+
+    键：op/v（等长 float pd.Series，RangeIndex；scorer 按 ``len(slice)`` 截前缀）。
+    """
+    try:
+        return {
+            "op": df["open"].astype(float).reset_index(drop=True),
+            "v": df["volume"].astype(float).reset_index(drop=True),
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _precompute_low_vol_series(df: pd.DataFrame) -> Optional[dict[str, Any]]:
+    """逐股**一次性**预计算 low_vol 用的收益率全序列（evaluate_trades 的 O(n²)→O(n) 优化）。
+
+    等价性依据：pct_change 是逐位运算（pandas 3 无前向填充），位置 i 的值只依赖
+    位置 i/i-1 ⇒ 前缀末 20 点与全序列同位段是**同一串浮点运算**，std 输入逐位相同
+    ⇒ 结果逐位相同。rolling std 是另一套在线算法，**不保证**逐位一致，故不向量化
+    ——末 20 点 std 仍每 bar 现算（O(20)，与前缀长度无关，总复杂度 O(n)）。
+    等价性由 tests/test_scorer_precompute_equivalence.py 逐 bar 钉住。
+
+    ⚠️ 只对「从第 0 根开始的前缀切片」有效（evaluate_trades 的切片恒如此）；
+    ``evaluate(gate_window>0)`` 的切片起点 lo>0，**不得**传这个。
+    返回 None（异常）时 scorer 走原逐切片路径，行为与旧版逐位一致。
+
+    键：rets（等长 float pd.Series = close.pct_change()，RangeIndex；scorer 按
+    ``len(slice)`` 取末 20 点）。
+    """
+    try:
+        return {"rets": df["close"].astype(float).pct_change().reset_index(drop=True)}
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _precompute_momentum_series(df: pd.DataFrame) -> Optional[dict[str, Any]]:
+    """逐股**一次性**预计算 momentum 用的收盘全序列（evaluate_trades 的 O(n²)→O(n) 优化）。
+
+    等价性依据：astype(float) 是逐点变换 ⇒ 全序列与前缀切片上的值逐位相同；
+    scorer 侧按 ``len(slice)`` 截前缀视图后走**同一段**点查询（``c[-1-skip]`` /
+    ``c[-1-skip-lb]``，lb 随截断后的 n 自适应，与前缀切片上的 n 一致），输入逐位
+    相同 ⇒ 结果逐位相同。等价性由 tests/test_scorer_precompute_equivalence.py
+    逐 bar 钉住。
+
+    ⚠️ 只对「从第 0 根开始的前缀切片」有效（evaluate_trades 的切片恒如此）；
+    ``evaluate(gate_window>0)`` 的切片起点 lo>0，**不得**传这个。
+    返回 None（异常）时 scorer 走原逐切片路径，行为与旧版逐位一致。
+
+    键：c（等长 float np 数组 = close；scorer 按 ``len(slice)`` 截前缀视图）。
+    """
+    try:
+        return {"c": df["close"].astype(float).values}
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _precompute_reversal_quality_series(df: pd.DataFrame) -> Optional[dict[str, Any]]:
+    """逐股**一次性**预计算 reversal_quality（与 _inv）用的 OHLCV 全序列
+    （evaluate_trades 的 O(n²)→O(n) 优化）。
+
+    等价性依据：astype(float) 是逐点变换 ⇒ 全序列与前缀切片上的值逐位相同；
+    scorer 侧按 ``len(slice)`` 截前缀视图后走**同一段**判定体（尾部 ≤20 根定长
+    小窗统计：vol[-6:-1] 均值、vol[-20:] 分位、末两点涨跌幅、当日振幅——都与前缀
+    长度无关），截断视图上的负索引与前缀切片同义 ⇒ 两路逐位相同。
+    reversal_quality_inv 是 ``4.0 − 正向分``，**共用**这一份 pre（透传正向 score
+    后再做同一浮点减法 ⇒ 也逐位相同）。
+    等价性由 tests/test_scorer_precompute_equivalence.py 逐 bar 钉住。
+
+    ⚠️ 只对「从第 0 根开始的前缀切片」有效（evaluate_trades 的切片恒如此）；
+    ``evaluate(gate_window>0)`` 的切片起点 lo>0，**不得**传这个。
+    返回 None（异常）时 scorer 走原逐切片路径，行为与旧版逐位一致。
+
+    键：close/high/low/vol（等长 float np 数组；scorer 按 ``len(slice)`` 截前缀视图）。
+    """
+    try:
+        return {
+            "close": df["close"].astype(float).values,
+            "high": df["high"].astype(float).values,
+            "low": df["low"].astype(float).values,
+            "vol": df["volume"].astype(float).to_numpy(),
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
 # scorer → 逐股预计算函数 注册表：evaluate_trades 按 scorer **身份**查表，
 # 查得到就逐股算一次全序列喂给 scorer 第三参；查不到 ⇒ 传 None ⇒ scorer 走旧路径
 # （其余 scorer 零改动零风险）。等价性钉测：tests/test_scorer_precompute_equivalence.py。
@@ -1509,6 +1614,13 @@ _SCORER_PRECOMPUTE: dict[
 ] = {
     _sc_b1_pullback: _precompute_b1_pullback_series,
     _sc_kdj_j: _precompute_kdj_j_series,
+    # TODO #59②：5 个研究侧 selector（与 SCORERS 注册表直通同一函数对象，身份键命中）
+    _sc_alpha_pvcorr: _precompute_alpha_pvcorr_series,
+    _sc_low_vol: _precompute_low_vol_series,
+    _sc_momentum: _precompute_momentum_series,
+    _sc_reversal_quality: _precompute_reversal_quality_series,
+    # inv = 4.0 − 正向分，透传同一份 OHLCV pre
+    _sc_reversal_quality_inv: _precompute_reversal_quality_series,
 }
 
 

@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 import pandas as pd
 
 FACTOR: dict[str, Any] = {
@@ -28,11 +28,25 @@ FACTOR: dict[str, Any] = {
 }
 
 
-def score(df: pd.DataFrame, code: str) -> dict | None:
-    """低波动因子(low-vol anomaly)：score=-近20日收益率标准差(越稳越高分)。选波动小的B1候选。"""
+def score(
+    df: pd.DataFrame, code: str, precomputed: Optional[dict] = None
+) -> dict | None:
+    """低波动因子(low-vol anomaly)：score=-近20日收益率标准差(越稳越高分)。选波动小的B1候选。
+
+    ``precomputed``：evaluate_trades 逐股预计算的全序列（键 rets = close 的
+    ``pct_change()`` 全序列，float pd.Series，RangeIndex），传入时按 ``len(df)``
+    取末 20 点——pct_change 是逐位运算（pandas 3 无前向填充），前缀末 20 点与
+    全序列同位段是**同一串浮点运算**，std 输入逐位相同 ⇒ 结果逐位相同
+    （rolling std 是另一套在线算法，不保证逐位，故**不**向量化）。
+    ⚠️ 只对「从第 0 根开始的前缀切片」有效；不传（默认）走原现算路径。
+    """
     if len(df) < 21:
         return None
-    rets = df["close"].astype(float).pct_change().iloc[-20:]
+    if precomputed is not None:
+        n = len(df)
+        rets = precomputed["rets"].iloc[n - 20 : n]
+    else:
+        rets = df["close"].astype(float).pct_change().iloc[-20:]
     vol = float(rets.std())
     if vol != vol:
         return None

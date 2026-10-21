@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 import pandas as pd
 
 from custos.core.factors.reversal_quality import score as _rq_score
@@ -32,10 +32,18 @@ FACTOR: dict[str, Any] = {
 }
 
 
-def score(df: pd.DataFrame, code: str) -> dict | None:
+def score(
+    df: pd.DataFrame, code: str, precomputed: Optional[dict] = None
+) -> dict | None:
     """反转质量**反向**选择器：归因显示 reversal_quality 是稳健负预测(越"教科书"越差),
-    故取 4-分 反向——选"最不教科书"的丑陋 J<13 回踩。⚠️ 仅在同偏样本 train/test 一致,需真样本外验证。"""
-    r = _rq_score(df, code)
+    故取 4-分 反向——选"最不教科书"的丑陋 J<13 回踩。⚠️ 仅在同偏样本 train/test 一致,需真样本外验证。
+
+    ``precomputed``：与 reversal_quality 共用同一份逐股预计算（键 close/high/low/vol），
+    透传给 ``reversal_quality.score``——正向分两路逐位相同，``4.0 - score`` 同一
+    浮点运算 ⇒ 反向分也逐位相同。⚠️ 只对「从第 0 根开始的前缀切片」有效；
+    不传（默认）走原现算路径。
+    """
+    r = _rq_score(df, code, precomputed=precomputed)
     if r is None:
         return None
     r["score"] = 4.0 - r["score"]

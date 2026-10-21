@@ -26,7 +26,6 @@
 | 76 | #67 接口收敛的最后保险：1800 候选表标注列影子对照，非 BJ 宇宙逐位一致攒满 10 个交易日即闭环（进度 3/10，09-24 为止） | P3 | 生产机 | 继续跑 `scripts/dev/shadow_1800_compare.sh` 并记进度 | [设计稿](governance/strategy/_factors/interface_unification_plan.md)；v0.239 / v0.295 |
 | 80 | LLM 转岗：从「提数值表达式」改为「读失败模式、提机制假设」（证据：表达式提案不比随机好，Phase 1 诊断是机制级洞察）。原落地形态 R37 Phase 3 已随 R37 收口失效，需重定落点 | P3 | 挂起 | 落点定为 R43（owner 2026-10-14）：风格规律出来后由 LLM 读失败区间段提机制假设、不碰数值 | owner 方法论 review 2026-09-23 ③（①②④ 已闭环 v0.267/0.286/0.296） |
 | 86 | R36 后续维度剩余三项：③条件化/regime（0AMV 作因子条件变量）④盈亏比排序（服务仓位）⑤horizon 与出场轴对齐；另「结构因子基准臂」待打分侧重开时议 | P3 | 挂起 | 判据新建成本高，排在 #81 之后 | owner 2026-09-23 五维度③④⑤；原 #81/#80① |
-| 59 | scorer 双形态剩余：pvcorr / low_vol / momentum / reversal_quality± 可接 `_SCORER_PRECOMPUTE`（每键需逐位等价钉测）；mcap 与黑盒 detector 不接 | P3 | 挂起 | 随回测批次顺带做 | v0.73 审查（③批量写 ④分页并发已否决，理由见 `fetch_pit_financials.py` docstring）；v0.236（s_shape 系已落地） |
 | 114 | R47 挖掘段扫描：工具已落地 v0.434（`plan_rules_replay --scan-protect`）；第一批判定段读完后跑，命令见 runbook「第二批预告」 | P2 | 生产机 | 第一批读完后跑 r47_scan + 摘要入库 | [R47](governance/research/R47_profit_protection_breakeven_trail.md) |
 | 115 | R48 挖掘段跑数：工具已落地 v0.439（`tail_feature_study`）；与 R47 同排第二批，命令见 runbook「第二批预告」 | P2 | 生产机 | 第一批读完后跑 r48_v1 + 摘要入库 | [R48](governance/research/R48_tail_entry_features.md) |
 
@@ -132,6 +131,7 @@
 | 110 | R46 工具 family_lattice_study（729 格矩阵化 + 簇级置换零假设 + 判定段攒批） | 2026-10-16 | v0.404 |
 | 113 | R34/R36 P2 选中子集重判——owner 选 B：维持「未检验」，打分增量交 R46 | 2026-10-16 | commit 2449c64（R34/R36 头部注记） |
 | 112 | 加载侧提速 `--load-workers` | 2026-10-21 | v0.441（五入口接线，产物逐位一致钉测） |
+| 59 | scorer 双形态剩余 5 键接 `_SCORER_PRECOMPUTE` | 2026-10-21 | v0.442（逐 bar 逐位等价钉测；mcap 与黑盒 detector 按原议不接） |
 | 91 | 2000~2009 数据核查（挖掘 A 起点 + gbbq/tdxzs3/xdxr 可读性） | 2026-10-17 | data_coverage_probe（v0.364）：SEG_A_START=2000-01-01（台账首日 1993-01-04）；三类数据源均可读；读数 → README 窗口节回填（v0.414） |
 | 92 | v2 切换后基线重测 + 耗时实测 | 2026-10-17 | 14 格全跑完（v0.412 修 --allow-tail-clip 误触）；读数回填 README runbook 节；加载占比 26~56% 实测 → #112 |
 | 93 | R43 工具实现 regime_style_study | 2026-10-20 | 工具 v0.368；挖掘段 r43_v1 判毕 falsified（v0.425），0 candidate 不入批 |
