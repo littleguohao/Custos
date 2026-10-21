@@ -90,7 +90,7 @@ uv run python -m custos.research family_lattice_study --mining-a-start <SEG_A_ST
 
 | 单元 | 读判定段命令（v2 缺省布局 = 不给窗口四参） |
 |---|---|
-| R36 | ① 的命令，读数窗改 `--judgment-start 2017-01-01 --judgment-end 2021-12-31`，`--tag r36_v2_j` |
+| R36（不入批） | ⏹ owner 2026-10-21 撤出——不跑判定段 |
 | R39（不入批） | ❌ 挖掘段预演 untested（2026-10-20）——不跑判定段 |
 | R40 | `bear_regime_study --tag r40_v2_j --gates all` |
 | R43（不入批） | ❌ 挖掘段 falsified（2026-10-20）——不跑判定段 |

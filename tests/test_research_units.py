@@ -48,8 +48,9 @@ def test_units_exist():
     # 2026-10-15：+R45（空头区间 J<13 × 30% 仓位 × 出场网格，预注册落档）
     # 2026-10-16：+R46（V0 家族级配比，R36 配比路重开，预注册草案）
     # 2026-10-20：+R47（B1 出场浮盈保护：保本 × 移动止损，预注册草案）
-    assert len(UNITS) == 46, (
-        f"预期 46 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
+    # 2026-10-21：+R48（B1 大单入场特征，右尾识别，预注册草案）
+    assert len(UNITS) == 47, (
+        f"预期 47 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
     )
 
 

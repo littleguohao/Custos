@@ -15,7 +15,6 @@
 |---|---|---|---|---|---|
 | 88 | 首次月度交易反思（2026-09 月），跑顺「月报 → TRADE_LESSONS」流程；之后按月执行，节奏见 MASTER_WORKFLOW §七 | P2 | 生产机 | 读 2026-09 月报 JSON（无则先补跑 `monthly_review`），按模板写 E3 并核对 L1~L7 | owner 2026-10-12；[TRADE_LESSONS](TRADE_LESSONS.md) |
 | 104 | R10 margin 按已实现口径重算：生产机原批次结果文件跑 `m2_stop_sweep --report-only`（v0.383 起汇总行自动剔 open_end），回填 R10 重跑行；「可用 margin 只在叠 0AMV」若不再成立按纪律就地标 🔄 | P2 | 生产机 | report-only 重算并贴表 | R10 头部审计注记 |
-| 105 | R36 adx_gt_60 入批前重建：r36_v2_preB2 池 10/50（40 臂 rdd 门不过，真实读数，补跑格子补不出）；池 < FROZEN_MIN_POOL 40 ⇒ 判定段最高 provisional，候选在池中第 4，且入批会抬高同批 m | P1 | owner | 定：①照入批 ②原选格窗新造 ~150 臂补池 ③撤出第一批（建议③） | R36 v2 重测节回填区复核 |
 | 106 | R36 已判路线复核：①R46 已撤回（owner 2026-10-21，配比路不继续）；②Phase 4 p2_sole 随机剔除臂对齐后（v0.386）重算 C4 | P3 | 生产机 | ② 重跑 r36_p4（低优先，选股侧思路重定后再看是否还需要） | R46 结论段、R36 头部审计注记 |
 | 111 | 格子进程内化（性能，最大一块）：score_evolution/strategy_grid 每格一个 backtest_factors 子进程、每格重载全宇宙（m2 实测 s3000 加载 45~53s/格）；改为进程内共享已加载 bars + 信号缓存逐格重打分（同 v0-lattice collect/score 拆分）。须金样逐位钉测、内存账重估 | P3 | 挂起 | R46 已改进程内实现、不再依赖；剩余受益者 = strategy_grid / R36 冻结读数 50 臂 / evolution_loop，等出现大规模格子跑数需求再做 | 性能排查 v0.401~0.403 |
 | 112 | 加载侧提速：_load_bars_local 逐股串行读 vipdoc + 前复权；#92 实测加载占比 **26~56%**（>20% 阈值成立，14 条恒定 86~97s）⇒ 可加 `--load-workers` 线程并行 | P3 | coder | 实现 --load-workers（实测依据见 research README runbook 节 #92 回填） | 性能排查 |
@@ -30,6 +29,7 @@
 | 86 | R36 后续维度剩余三项：③条件化/regime（0AMV 作因子条件变量）④盈亏比排序（服务仓位）⑤horizon 与出场轴对齐；另「结构因子基准臂」待打分侧重开时议 | P3 | 挂起 | 判据新建成本高，排在 #81 之后 | owner 2026-09-23 五维度③④⑤；原 #81/#80① |
 | 59 | scorer 双形态剩余：pvcorr / low_vol / momentum / reversal_quality± 可接 `_SCORER_PRECOMPUTE`（每键需逐位等价钉测）；mcap 与黑盒 detector 不接 | P3 | 挂起 | 随回测批次顺带做 | v0.73 审查（③批量写 ④分页并发已否决，理由见 `fetch_pit_financials.py` docstring）；v0.236（s_shape 系已落地） |
 | 114 | R47 挖掘段扫描：工具已落地 v0.434（`plan_rules_replay --scan-protect`）；第一批判定段读完后跑，命令见 runbook「第二批预告」 | P2 | 生产机 | 第一批读完后跑 r47_scan + 摘要入库 | [R47](governance/research/R47_profit_protection_breakeven_trail.md) |
+| 115 | R48 工具 `tail_feature_study`：B1 基底 + LIVE_PARAMS 交易集 × 6 个 as-of 特征（复用 R43 特征矩阵 + live 基本面 / 技术分判定），大单 / 大亏 lift、单调性、簇级置换 max-of-6，校准两连测 + 哨兵 + digest/report | P2 | coder | owner 确认 R48 草案后实现 | [R48](governance/research/R48_tail_entry_features.md) |
 
 ## 已闭环索引
 
@@ -135,6 +135,7 @@
 | 91 | 2000~2009 数据核查（挖掘 A 起点 + gbbq/tdxzs3/xdxr 可读性） | 2026-10-17 | data_coverage_probe（v0.364）：SEG_A_START=2000-01-01（台账首日 1993-01-04）；三类数据源均可读；读数 → README 窗口节回填（v0.414） |
 | 92 | v2 切换后基线重测 + 耗时实测 | 2026-10-17 | 14 格全跑完（v0.412 修 --allow-tail-clip 误触）；读数回填 README runbook 节；加载占比 26~56% 实测 → #112 |
 | 93 | R43 工具实现 regime_style_study | 2026-10-20 | 工具 v0.368；挖掘段 r43_v1 判毕 falsified（v0.425），0 candidate 不入批 |
+| 105 | R36 adx_gt_60 入批前重建 | 2026-10-21 | owner 撤出第一批（池 10<40 结构上限 provisional），旧口径 untested 维持（v0.437） |
 
 ## 维护约定
 
