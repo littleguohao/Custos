@@ -17,10 +17,9 @@
 | 104 | R10 margin 按已实现口径重算：生产机原批次结果文件跑 `m2_stop_sweep --report-only`（v0.383 起汇总行自动剔 open_end），回填 R10 重跑行；「可用 margin 只在叠 0AMV」若不再成立按纪律就地标 🔄 | P2 | 生产机 | report-only 重算并贴表 | R10 头部审计注记 |
 | 106 | R36 已判路线复核：①R46 已撤回（owner 2026-10-21，配比路不继续）；②Phase 4 p2_sole 随机剔除臂对齐后（v0.386）重算 C4 | P3 | 生产机 | ② 重跑 r36_p4（低优先，选股侧思路重定后再看是否还需要） | R46 结论段、R36 头部审计注记 |
 | 111 | 格子进程内化（性能，最大一块）：score_evolution/strategy_grid 每格一个 backtest_factors 子进程、每格重载全宇宙（m2 实测 s3000 加载 45~53s/格）；改为进程内共享已加载 bars + 信号缓存逐格重打分（同 v0-lattice collect/score 拆分）。须金样逐位钉测、内存账重估 | P3 | 挂起 | R46 已改进程内实现、不再依赖；剩余受益者 = strategy_grid / R36 冻结读数 50 臂 / evolution_loop，等出现大规模格子跑数需求再做 | 性能排查 v0.401~0.403 |
-| 112 | 加载侧提速：_load_bars_local 逐股串行读 vipdoc + 前复权；#92 实测加载占比 **26~56%**（>20% 阈值成立，14 条恒定 86~97s）⇒ 可加 `--load-workers` 线程并行 | P3 | coder | 实现 --load-workers（实测依据见 research README runbook 节 #92 回填） | 性能排查 |
 | 116 | 开发机挖掘段数据快照：生产机导出只含挖掘 A（2000~2016）∪ B（2022~2026-09-04）的日线 / 股本 / 权息 / PIT 财务 / 板块指数，开发机研究工具可直接读；判定段与 holdout 物理不出生产机 | P2 | coder | 设计导出脚本 + 快照加载器（段外日期一律拒读，钉测）；owner 2026-10-21 同意 | owner 2026-10-21 方向盘点 |
 | 117 | 组合层新方向（R49 待立）：选股无区分力 + 收益靠右尾 ⇒ 铺宽还是集中（top-N / 持仓数 / 单票仓位）× 0AMV 状态化仓位；R3「召回瓶颈未研究」的接续 | P2 | 挂起 | 第二批（R47/R48）读完后起草预注册 | owner 2026-10-21 方向盘点；[R3](governance/research/R3_selection_discriminability_recall.md) |
-| 107 | R1/R2 组合层 baseline 对照按 `--tie-seed` 0~19 重跑报区间（baseline 恒 0 分，原读数是代码序截断的单次抽签） | P3 | 生产机 | 出命令后重跑 | R1/R2 头部审计注记 |
+| 107 | R1/R2 组合层 baseline 对照按 `--tie-seed` 0~19 重跑报区间（baseline 恒 0 分，原读数是代码序截断的单次抽签） | P3 | 生产机 | 命令与汇总工具已落地（v0.441 `tie_seed_summary`，4 条跑数命令见其 docstring）；执行 4 条跑数 + 汇总，区间回填 R1/R2 审计注记 | R1/R2 头部审计注记 |
 | 108 | R37 r37_b1 已实现口径复核（判定窗 +0.0034 贴零，open_end 污染量级可能更大；exit_campaign 产物无逐笔需重跑读数） | P3 | 生产机 | 重跑 r37_b1 读数段 | R37 头部审计注记 |
 | 109 | R40 v2 重跑：按 R40「v2 重跑修订」节在挖掘 A∪B 选型（代码口径 v0.382~0.387），过 C1~C4 再入判定段批次 | P2 | 生产机 | 等 #91/#92 后发车 | R40 v2 重跑修订节 |
 | 60 | plan 信号并入 SIGNAL_ORDER 与否。判据（两条同时成立）：①实现一致性——影子台账非 default 事件 ≥5 个交易日无异常；②规则有效性——R41 已判 falsified（v0.351）路径关闭，只剩 `plan_shadow_review` 累计 K=20 个独立事件（段头计、≥5 只持仓）均值 Δret₅ ≥ 0（凑不满 K ⇒ ②不成立 ⇒ 不并轨）。default 来源永不出 plan 信号；并轨=独立提交、只改 SIGNAL_ORDER | P2 | 观察中 | 影子事件持续累计，攒满或 60 交易日到期后 owner 定夺 | [R41](governance/research/R41_position_plan_rules_replay.md)；owner 2026-10-09 判据；v0.310/0.311/0.314/0.351 |
@@ -132,6 +131,7 @@
 | 101 | 选股练习台账（research pick_practice add/report） | 2026-10-16 | v0.398 |
 | 110 | R46 工具 family_lattice_study（729 格矩阵化 + 簇级置换零假设 + 判定段攒批） | 2026-10-16 | v0.404 |
 | 113 | R34/R36 P2 选中子集重判——owner 选 B：维持「未检验」，打分增量交 R46 | 2026-10-16 | commit 2449c64（R34/R36 头部注记） |
+| 112 | 加载侧提速 `--load-workers` | 2026-10-21 | v0.441（五入口接线，产物逐位一致钉测） |
 | 91 | 2000~2009 数据核查（挖掘 A 起点 + gbbq/tdxzs3/xdxr 可读性） | 2026-10-17 | data_coverage_probe（v0.364）：SEG_A_START=2000-01-01（台账首日 1993-01-04）；三类数据源均可读；读数 → README 窗口节回填（v0.414） |
 | 92 | v2 切换后基线重测 + 耗时实测 | 2026-10-17 | 14 格全跑完（v0.412 修 --allow-tail-clip 误触）；读数回填 README runbook 节；加载占比 26~56% 实测 → #112 |
 | 93 | R43 工具实现 regime_style_study | 2026-10-20 | 工具 v0.368；挖掘段 r43_v1 判毕 falsified（v0.425），0 candidate 不入批 |
