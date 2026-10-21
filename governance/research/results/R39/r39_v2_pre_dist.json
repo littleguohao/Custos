@@ -1,0 +1,1112 @@
+{
+  "digest_version": 1,
+  "fields": {
+    "provenance.cmdline": "--tag r39_v2_pre_dist --trade-dist --mining-start 2000-01-01 --mining-end 2016-12-31 --judgment-start 2022-01-01 --judgment-end 2026-09-04",
+    "provenance.data_last_date": "2026-09-04",
+    "provenance.git_dirty": false,
+    "provenance.git_sha": "ce48de678f",
+    "provenance.n_codes": 5576,
+    "provenance.universe_rule": "ashare_full_asof",
+    "provenance.universe_sha256": "f0692547ad66f1b2",
+    "trade_dist.top_judgment.avg_loss": -0.056582,
+    "trade_dist.top_judgment.avg_win": 0.091974,
+    "trade_dist.top_judgment.big_win_share": {
+      "ge_2x_avg_loss": 0.1039,
+      "ge_3x_avg_loss": 0.068,
+      "ge_5x_avg_loss": 0.0306
+    },
+    "trade_dist.top_judgment.buckets": [
+      {
+        "bin": "≤-15%",
+        "n": 1606,
+        "share": 0.0039
+      },
+      {
+        "bin": "-15~-10%",
+        "n": 29097,
+        "share": 0.0703
+      },
+      {
+        "bin": "-10~-5%",
+        "n": 90167,
+        "share": 0.2179
+      },
+      {
+        "bin": "-5~0%",
+        "n": 120021,
+        "share": 0.2901
+      },
+      {
+        "bin": "0~5%",
+        "n": 94704,
+        "share": 0.2289
+      },
+      {
+        "bin": "5~10%",
+        "n": 30237,
+        "share": 0.0731
+      },
+      {
+        "bin": "10~20%",
+        "n": 25279,
+        "share": 0.0611
+      },
+      {
+        "bin": "20~30%",
+        "n": 11441,
+        "share": 0.0277
+      },
+      {
+        "bin": ">30%",
+        "n": 11198,
+        "share": 0.0271
+      }
+    ],
+    "trade_dist.top_judgment.by_bucket": {
+      "None": {
+        "avg_loss": -0.056582,
+        "avg_win": 0.091974,
+        "big_win_share": {
+          "ge_2x_avg_loss": 0.1039,
+          "ge_3x_avg_loss": 0.068,
+          "ge_5x_avg_loss": 0.0306
+        },
+        "by_reason": [
+          {
+            "avg_holding": 13.28,
+            "avg_ret": 0.017543,
+            "n": 277861,
+            "reason": "bbi_exit",
+            "share": 0.6716,
+            "win_rate": 0.5133
+          },
+          {
+            "avg_holding": 9.08,
+            "avg_ret": -0.096955,
+            "n": 97544,
+            "reason": "stop",
+            "share": 0.2358,
+            "win_rate": 0.0
+          },
+          {
+            "avg_holding": 15.8,
+            "avg_ret": 0.193469,
+            "n": 32574,
+            "reason": "trail_stop",
+            "share": 0.0787,
+            "win_rate": 0.8373
+          },
+          {
+            "avg_holding": 18.41,
+            "avg_ret": 0.221693,
+            "n": 3744,
+            "reason": "trail_stop_delayed",
+            "share": 0.009,
+            "win_rate": 0.7863
+          },
+          {
+            "avg_holding": 5.35,
+            "avg_ret": -0.140332,
+            "n": 1990,
+            "reason": "stop_delayed",
+            "share": 0.0048,
+            "win_rate": 0.001
+          },
+          {
+            "avg_holding": 21.89,
+            "avg_ret": -0.039181,
+            "n": 37,
+            "reason": "bbi_exit_delayed",
+            "share": 0.0001,
+            "win_rate": 0.2703
+          }
+        ],
+        "expectancy": 0.005483,
+        "holding": {
+          "avg_loss": 10.416093,
+          "avg_win": 15.402189
+        },
+        "margin": 0.036909,
+        "median_loss": -0.0503,
+        "median_win": 0.0418,
+        "n": 413750,
+        "payoff_ratio": 1.62552,
+        "profit_concentration": {
+          "expectancy_ex_top1pct_trades": -0.001571,
+          "top10pct_winners_profit_share": 0.4474,
+          "top1pct_winners_profit_share": 0.1029,
+          "top5pct_winners_profit_share": 0.2939
+        },
+        "quantiles": {
+          "p1": -0.1337,
+          "p10": -0.0957,
+          "p25": -0.0741,
+          "p5": -0.1059,
+          "p50": -0.0101,
+          "p75": 0.0288,
+          "p90": 0.1178,
+          "p95": 0.213055,
+          "p99": 0.4616
+        },
+        "win_rate": 0.417786
+      }
+    },
+    "trade_dist.top_judgment.by_reason": [
+      {
+        "avg_holding": 13.28,
+        "avg_ret": 0.017543,
+        "n": 277861,
+        "reason": "bbi_exit",
+        "share": 0.6716,
+        "win_rate": 0.5133
+      },
+      {
+        "avg_holding": 9.08,
+        "avg_ret": -0.096955,
+        "n": 97544,
+        "reason": "stop",
+        "share": 0.2358,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 15.8,
+        "avg_ret": 0.193469,
+        "n": 32574,
+        "reason": "trail_stop",
+        "share": 0.0787,
+        "win_rate": 0.8373
+      },
+      {
+        "avg_holding": 18.41,
+        "avg_ret": 0.221693,
+        "n": 3744,
+        "reason": "trail_stop_delayed",
+        "share": 0.009,
+        "win_rate": 0.7863
+      },
+      {
+        "avg_holding": 5.35,
+        "avg_ret": -0.140332,
+        "n": 1990,
+        "reason": "stop_delayed",
+        "share": 0.0048,
+        "win_rate": 0.001
+      },
+      {
+        "avg_holding": 21.89,
+        "avg_ret": -0.039181,
+        "n": 37,
+        "reason": "bbi_exit_delayed",
+        "share": 0.0001,
+        "win_rate": 0.2703
+      }
+    ],
+    "trade_dist.top_judgment.by_year": [
+      {
+        "expectancy": 0.018019,
+        "margin": 0.139165,
+        "n": 75157,
+        "payoff_ratio": 1.670463,
+        "win_rate": 0.513631,
+        "year": "2022"
+      },
+      {
+        "expectancy": -0.012536,
+        "margin": -0.119696,
+        "n": 151114,
+        "payoff_ratio": 1.101789,
+        "win_rate": 0.356089,
+        "year": "2023"
+      },
+      {
+        "expectancy": 0.057402,
+        "margin": 0.246517,
+        "n": 74050,
+        "payoff_ratio": 2.287402,
+        "win_rate": 0.550709,
+        "year": "2024"
+      },
+      {
+        "expectancy": 0.028626,
+        "margin": 0.224339,
+        "n": 27534,
+        "payoff_ratio": 2.251517,
+        "win_rate": 0.531888,
+        "year": "2025"
+      },
+      {
+        "expectancy": -0.025963,
+        "margin": -0.179411,
+        "n": 85895,
+        "payoff_ratio": 1.124457,
+        "win_rate": 0.291298,
+        "year": "2026"
+      }
+    ],
+    "trade_dist.top_judgment.expectancy": 0.005483,
+    "trade_dist.top_judgment.margin": 0.036909,
+    "trade_dist.top_judgment.n": 413750,
+    "trade_dist.top_judgment.paired_vs_ref": {
+      "delta_ret_mean": 0.0,
+      "delta_ret_quantiles": {
+        "p25": 0.0,
+        "p5": 0.0,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p95": 0.0
+      },
+      "flip_ref_loss_to_win": 0,
+      "flip_ref_win_to_loss": 0,
+      "n_matched": 413750,
+      "share_better": 0.0,
+      "share_identical": 1.0,
+      "share_worse": 0.0,
+      "stopped_here_not_ref": {
+        "n": 0
+      },
+      "stopped_ref_not_here": {
+        "n": 0
+      }
+    },
+    "trade_dist.top_judgment.payoff_ratio": 1.62552,
+    "trade_dist.top_judgment.profit_concentration": {
+      "expectancy_ex_top1pct_trades": -0.001571,
+      "top10pct_winners_profit_share": 0.4474,
+      "top1pct_winners_profit_share": 0.1029,
+      "top5pct_winners_profit_share": 0.2939
+    },
+    "trade_dist.top_judgment.quantiles": {
+      "p1": -0.1337,
+      "p10": -0.0957,
+      "p25": -0.0741,
+      "p5": -0.1059,
+      "p50": -0.0101,
+      "p75": 0.0288,
+      "p90": 0.1178,
+      "p95": 0.213055,
+      "p99": 0.4616
+    },
+    "trade_dist.top_judgment.win_rate": 0.417786,
+    "trade_dist.top_mining.avg_loss": -0.05713,
+    "trade_dist.top_mining.avg_win": 0.095957,
+    "trade_dist.top_mining.big_win_share": {
+      "ge_2x_avg_loss": 0.0924,
+      "ge_3x_avg_loss": 0.0602,
+      "ge_5x_avg_loss": 0.0293
+    },
+    "trade_dist.top_mining.buckets": [
+      {
+        "bin": "≤-15%",
+        "n": 2490,
+        "share": 0.0115
+      },
+      {
+        "bin": "-15~-10%",
+        "n": 17767,
+        "share": 0.082
+      },
+      {
+        "bin": "-10~-5%",
+        "n": 38991,
+        "share": 0.1799
+      },
+      {
+        "bin": "-5~0%",
+        "n": 64429,
+        "share": 0.2973
+      },
+      {
+        "bin": "0~5%",
+        "n": 55038,
+        "share": 0.2539
+      },
+      {
+        "bin": "5~10%",
+        "n": 15355,
+        "share": 0.0708
+      },
+      {
+        "bin": "10~20%",
+        "n": 11851,
+        "share": 0.0547
+      },
+      {
+        "bin": "20~30%",
+        "n": 4978,
+        "share": 0.023
+      },
+      {
+        "bin": ">30%",
+        "n": 5838,
+        "share": 0.0269
+      }
+    ],
+    "trade_dist.top_mining.by_bucket": {
+      "None": {
+        "avg_loss": -0.05713,
+        "avg_win": 0.095957,
+        "big_win_share": {
+          "ge_2x_avg_loss": 0.0924,
+          "ge_3x_avg_loss": 0.0602,
+          "ge_5x_avg_loss": 0.0293
+        },
+        "by_reason": [
+          {
+            "avg_holding": 13.36,
+            "avg_ret": 0.024021,
+            "n": 156412,
+            "reason": "bbi_exit",
+            "share": 0.7217,
+            "win_rate": 0.5375
+          },
+          {
+            "avg_holding": 7.8,
+            "avg_ret": -0.099515,
+            "n": 43732,
+            "reason": "stop",
+            "share": 0.2018,
+            "win_rate": 0.0
+          },
+          {
+            "avg_holding": 21.4,
+            "avg_ret": 0.265353,
+            "n": 9780,
+            "reason": "trail_stop",
+            "share": 0.0451,
+            "win_rate": 0.7693
+          },
+          {
+            "avg_holding": 4.92,
+            "avg_ret": -0.147082,
+            "n": 4528,
+            "reason": "stop_delayed",
+            "share": 0.0209,
+            "win_rate": 0.0004
+          },
+          {
+            "avg_holding": 23.37,
+            "avg_ret": 0.242023,
+            "n": 2208,
+            "reason": "trail_stop_delayed",
+            "share": 0.0102,
+            "win_rate": 0.6544
+          },
+          {
+            "avg_holding": 10.06,
+            "avg_ret": -0.058674,
+            "n": 77,
+            "reason": "bbi_exit_delayed",
+            "share": 0.0004,
+            "win_rate": 0.1429
+          }
+        ],
+        "expectancy": 0.008601,
+        "holding": {
+          "avg_loss": 9.114047,
+          "avg_win": 17.059263
+        },
+        "margin": 0.056183,
+        "median_loss": -0.0458,
+        "median_win": 0.0357,
+        "n": 216737,
+        "payoff_ratio": 1.679637,
+        "profit_concentration": {
+          "expectancy_ex_top1pct_trades": -0.002837,
+          "top10pct_winners_profit_share": 0.5362,
+          "top1pct_winners_profit_share": 0.1859,
+          "top5pct_winners_profit_share": 0.3934
+        },
+        "quantiles": {
+          "p1": -0.154064,
+          "p10": -0.0987,
+          "p25": -0.0607,
+          "p5": -0.1127,
+          "p50": -0.0079,
+          "p75": 0.0265,
+          "p90": 0.1049,
+          "p95": 0.1998,
+          "p99": 0.5353
+        },
+        "win_rate": 0.429368
+      }
+    },
+    "trade_dist.top_mining.by_reason": [
+      {
+        "avg_holding": 13.36,
+        "avg_ret": 0.024021,
+        "n": 156412,
+        "reason": "bbi_exit",
+        "share": 0.7217,
+        "win_rate": 0.5375
+      },
+      {
+        "avg_holding": 7.8,
+        "avg_ret": -0.099515,
+        "n": 43732,
+        "reason": "stop",
+        "share": 0.2018,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 21.4,
+        "avg_ret": 0.265353,
+        "n": 9780,
+        "reason": "trail_stop",
+        "share": 0.0451,
+        "win_rate": 0.7693
+      },
+      {
+        "avg_holding": 4.92,
+        "avg_ret": -0.147082,
+        "n": 4528,
+        "reason": "stop_delayed",
+        "share": 0.0209,
+        "win_rate": 0.0004
+      },
+      {
+        "avg_holding": 23.37,
+        "avg_ret": 0.242023,
+        "n": 2208,
+        "reason": "trail_stop_delayed",
+        "share": 0.0102,
+        "win_rate": 0.6544
+      },
+      {
+        "avg_holding": 10.06,
+        "avg_ret": -0.058674,
+        "n": 77,
+        "reason": "bbi_exit_delayed",
+        "share": 0.0004,
+        "win_rate": 0.1429
+      }
+    ],
+    "trade_dist.top_mining.by_year": [
+      {
+        "expectancy": 0.004533,
+        "margin": 0.063773,
+        "n": 5595,
+        "payoff_ratio": 1.456974,
+        "win_rate": 0.470777,
+        "year": "2000"
+      },
+      {
+        "expectancy": 0.000395,
+        "margin": 0.00434,
+        "n": 5642,
+        "payoff_ratio": 1.037917,
+        "win_rate": 0.495037,
+        "year": "2001"
+      },
+      {
+        "expectancy": -0.034846,
+        "margin": -0.408089,
+        "n": 7033,
+        "payoff_ratio": 0.701632,
+        "win_rate": 0.179582,
+        "year": "2002"
+      },
+      {
+        "expectancy": 0.000367,
+        "margin": 0.002589,
+        "n": 16362,
+        "payoff_ratio": 1.275459,
+        "win_rate": 0.442061,
+        "year": "2003"
+      },
+      {
+        "expectancy": -0.016979,
+        "margin": -0.122535,
+        "n": 6085,
+        "payoff_ratio": 1.141378,
+        "win_rate": 0.344454,
+        "year": "2004"
+      },
+      {
+        "expectancy": -0.031107,
+        "margin": -0.18998,
+        "n": 6675,
+        "payoff_ratio": 1.106929,
+        "win_rate": 0.284644,
+        "year": "2005"
+      },
+      {
+        "expectancy": 0.082925,
+        "margin": 0.326912,
+        "n": 16602,
+        "payoff_ratio": 4.049863,
+        "win_rate": 0.524937,
+        "year": "2006"
+      },
+      {
+        "expectancy": 0.16615,
+        "margin": 0.607182,
+        "n": 7260,
+        "payoff_ratio": 5.594858,
+        "win_rate": 0.758815,
+        "year": "2007"
+      },
+      {
+        "expectancy": -0.023836,
+        "margin": -0.110095,
+        "n": 7219,
+        "payoff_ratio": 1.286103,
+        "win_rate": 0.327331,
+        "year": "2008"
+      },
+      {
+        "expectancy": 0.039687,
+        "margin": 0.305111,
+        "n": 3559,
+        "payoff_ratio": 2.25585,
+        "win_rate": 0.612251,
+        "year": "2009"
+      },
+      {
+        "expectancy": 0.005272,
+        "margin": 0.040964,
+        "n": 11224,
+        "payoff_ratio": 1.429847,
+        "win_rate": 0.452512,
+        "year": "2010"
+      },
+      {
+        "expectancy": -0.022874,
+        "margin": -0.25013,
+        "n": 13128,
+        "payoff_ratio": 0.743727,
+        "win_rate": 0.323355,
+        "year": "2011"
+      },
+      {
+        "expectancy": -0.014554,
+        "margin": -0.122451,
+        "n": 18133,
+        "payoff_ratio": 1.00245,
+        "win_rate": 0.376937,
+        "year": "2012"
+      },
+      {
+        "expectancy": -0.006976,
+        "margin": -0.051963,
+        "n": 13488,
+        "payoff_ratio": 1.229834,
+        "win_rate": 0.396501,
+        "year": "2013"
+      },
+      {
+        "expectancy": 0.022819,
+        "margin": 0.169917,
+        "n": 24537,
+        "payoff_ratio": 1.771681,
+        "win_rate": 0.530709,
+        "year": "2014"
+      },
+      {
+        "expectancy": 0.021481,
+        "margin": 0.064297,
+        "n": 6782,
+        "payoff_ratio": 1.865302,
+        "win_rate": 0.4133,
+        "year": "2015"
+      },
+      {
+        "expectancy": -0.005738,
+        "margin": -0.052516,
+        "n": 47413,
+        "payoff_ratio": 1.20188,
+        "win_rate": 0.401641,
+        "year": "2016"
+      }
+    ],
+    "trade_dist.top_mining.expectancy": 0.008601,
+    "trade_dist.top_mining.margin": 0.056183,
+    "trade_dist.top_mining.n": 216737,
+    "trade_dist.top_mining.paired_vs_ref": {
+      "delta_ret_mean": 0.0,
+      "delta_ret_quantiles": {
+        "p25": 0.0,
+        "p5": 0.0,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p95": 0.0
+      },
+      "flip_ref_loss_to_win": 0,
+      "flip_ref_win_to_loss": 0,
+      "n_matched": 216737,
+      "share_better": 0.0,
+      "share_identical": 1.0,
+      "share_worse": 0.0,
+      "stopped_here_not_ref": {
+        "n": 0
+      },
+      "stopped_ref_not_here": {
+        "n": 0
+      }
+    },
+    "trade_dist.top_mining.payoff_ratio": 1.679637,
+    "trade_dist.top_mining.profit_concentration": {
+      "expectancy_ex_top1pct_trades": -0.002837,
+      "top10pct_winners_profit_share": 0.5362,
+      "top1pct_winners_profit_share": 0.1859,
+      "top5pct_winners_profit_share": 0.3934
+    },
+    "trade_dist.top_mining.quantiles": {
+      "p1": -0.154064,
+      "p10": -0.0987,
+      "p25": -0.0607,
+      "p5": -0.1127,
+      "p50": -0.0079,
+      "p75": 0.0265,
+      "p90": 0.1049,
+      "p95": 0.1998,
+      "p99": 0.5353
+    },
+    "trade_dist.top_mining.win_rate": 0.429368,
+    "trade_dist.uniform_judgment.avg_loss": -0.056582,
+    "trade_dist.uniform_judgment.avg_win": 0.091974,
+    "trade_dist.uniform_judgment.big_win_share": {
+      "ge_2x_avg_loss": 0.1039,
+      "ge_3x_avg_loss": 0.068,
+      "ge_5x_avg_loss": 0.0306
+    },
+    "trade_dist.uniform_judgment.buckets": [
+      {
+        "bin": "≤-15%",
+        "n": 1606,
+        "share": 0.0039
+      },
+      {
+        "bin": "-15~-10%",
+        "n": 29097,
+        "share": 0.0703
+      },
+      {
+        "bin": "-10~-5%",
+        "n": 90167,
+        "share": 0.2179
+      },
+      {
+        "bin": "-5~0%",
+        "n": 120021,
+        "share": 0.2901
+      },
+      {
+        "bin": "0~5%",
+        "n": 94704,
+        "share": 0.2289
+      },
+      {
+        "bin": "5~10%",
+        "n": 30237,
+        "share": 0.0731
+      },
+      {
+        "bin": "10~20%",
+        "n": 25279,
+        "share": 0.0611
+      },
+      {
+        "bin": "20~30%",
+        "n": 11441,
+        "share": 0.0277
+      },
+      {
+        "bin": ">30%",
+        "n": 11198,
+        "share": 0.0271
+      }
+    ],
+    "trade_dist.uniform_judgment.by_reason": [
+      {
+        "avg_holding": 13.28,
+        "avg_ret": 0.017543,
+        "n": 277861,
+        "reason": "bbi_exit",
+        "share": 0.6716,
+        "win_rate": 0.5133
+      },
+      {
+        "avg_holding": 9.08,
+        "avg_ret": -0.096955,
+        "n": 97544,
+        "reason": "stop",
+        "share": 0.2358,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 15.8,
+        "avg_ret": 0.193469,
+        "n": 32574,
+        "reason": "trail_stop",
+        "share": 0.0787,
+        "win_rate": 0.8373
+      },
+      {
+        "avg_holding": 18.41,
+        "avg_ret": 0.221693,
+        "n": 3744,
+        "reason": "trail_stop_delayed",
+        "share": 0.009,
+        "win_rate": 0.7863
+      },
+      {
+        "avg_holding": 5.35,
+        "avg_ret": -0.140332,
+        "n": 1990,
+        "reason": "stop_delayed",
+        "share": 0.0048,
+        "win_rate": 0.001
+      },
+      {
+        "avg_holding": 21.89,
+        "avg_ret": -0.039181,
+        "n": 37,
+        "reason": "bbi_exit_delayed",
+        "share": 0.0001,
+        "win_rate": 0.2703
+      }
+    ],
+    "trade_dist.uniform_judgment.by_year": [
+      {
+        "expectancy": 0.018019,
+        "margin": 0.139165,
+        "n": 75157,
+        "payoff_ratio": 1.670463,
+        "win_rate": 0.513631,
+        "year": "2022"
+      },
+      {
+        "expectancy": -0.012536,
+        "margin": -0.119696,
+        "n": 151114,
+        "payoff_ratio": 1.101789,
+        "win_rate": 0.356089,
+        "year": "2023"
+      },
+      {
+        "expectancy": 0.057402,
+        "margin": 0.246517,
+        "n": 74050,
+        "payoff_ratio": 2.287402,
+        "win_rate": 0.550709,
+        "year": "2024"
+      },
+      {
+        "expectancy": 0.028626,
+        "margin": 0.224339,
+        "n": 27534,
+        "payoff_ratio": 2.251517,
+        "win_rate": 0.531888,
+        "year": "2025"
+      },
+      {
+        "expectancy": -0.025963,
+        "margin": -0.179411,
+        "n": 85895,
+        "payoff_ratio": 1.124457,
+        "win_rate": 0.291298,
+        "year": "2026"
+      }
+    ],
+    "trade_dist.uniform_judgment.expectancy": 0.005483,
+    "trade_dist.uniform_judgment.margin": 0.036909,
+    "trade_dist.uniform_judgment.n": 413750,
+    "trade_dist.uniform_judgment.payoff_ratio": 1.62552,
+    "trade_dist.uniform_judgment.profit_concentration": {
+      "expectancy_ex_top1pct_trades": -0.001571,
+      "top10pct_winners_profit_share": 0.4474,
+      "top1pct_winners_profit_share": 0.1029,
+      "top5pct_winners_profit_share": 0.2939
+    },
+    "trade_dist.uniform_judgment.quantiles": {
+      "p1": -0.1337,
+      "p10": -0.0957,
+      "p25": -0.0741,
+      "p5": -0.1059,
+      "p50": -0.0101,
+      "p75": 0.0288,
+      "p90": 0.1178,
+      "p95": 0.213055,
+      "p99": 0.4616
+    },
+    "trade_dist.uniform_judgment.win_rate": 0.417786,
+    "trade_dist.uniform_mining.avg_loss": -0.05713,
+    "trade_dist.uniform_mining.avg_win": 0.095957,
+    "trade_dist.uniform_mining.big_win_share": {
+      "ge_2x_avg_loss": 0.0924,
+      "ge_3x_avg_loss": 0.0602,
+      "ge_5x_avg_loss": 0.0293
+    },
+    "trade_dist.uniform_mining.buckets": [
+      {
+        "bin": "≤-15%",
+        "n": 2490,
+        "share": 0.0115
+      },
+      {
+        "bin": "-15~-10%",
+        "n": 17767,
+        "share": 0.082
+      },
+      {
+        "bin": "-10~-5%",
+        "n": 38991,
+        "share": 0.1799
+      },
+      {
+        "bin": "-5~0%",
+        "n": 64429,
+        "share": 0.2973
+      },
+      {
+        "bin": "0~5%",
+        "n": 55038,
+        "share": 0.2539
+      },
+      {
+        "bin": "5~10%",
+        "n": 15355,
+        "share": 0.0708
+      },
+      {
+        "bin": "10~20%",
+        "n": 11851,
+        "share": 0.0547
+      },
+      {
+        "bin": "20~30%",
+        "n": 4978,
+        "share": 0.023
+      },
+      {
+        "bin": ">30%",
+        "n": 5838,
+        "share": 0.0269
+      }
+    ],
+    "trade_dist.uniform_mining.by_reason": [
+      {
+        "avg_holding": 13.36,
+        "avg_ret": 0.024021,
+        "n": 156412,
+        "reason": "bbi_exit",
+        "share": 0.7217,
+        "win_rate": 0.5375
+      },
+      {
+        "avg_holding": 7.8,
+        "avg_ret": -0.099515,
+        "n": 43732,
+        "reason": "stop",
+        "share": 0.2018,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 21.4,
+        "avg_ret": 0.265353,
+        "n": 9780,
+        "reason": "trail_stop",
+        "share": 0.0451,
+        "win_rate": 0.7693
+      },
+      {
+        "avg_holding": 4.92,
+        "avg_ret": -0.147082,
+        "n": 4528,
+        "reason": "stop_delayed",
+        "share": 0.0209,
+        "win_rate": 0.0004
+      },
+      {
+        "avg_holding": 23.37,
+        "avg_ret": 0.242023,
+        "n": 2208,
+        "reason": "trail_stop_delayed",
+        "share": 0.0102,
+        "win_rate": 0.6544
+      },
+      {
+        "avg_holding": 10.06,
+        "avg_ret": -0.058674,
+        "n": 77,
+        "reason": "bbi_exit_delayed",
+        "share": 0.0004,
+        "win_rate": 0.1429
+      }
+    ],
+    "trade_dist.uniform_mining.by_year": [
+      {
+        "expectancy": 0.004533,
+        "margin": 0.063773,
+        "n": 5595,
+        "payoff_ratio": 1.456974,
+        "win_rate": 0.470777,
+        "year": "2000"
+      },
+      {
+        "expectancy": 0.000395,
+        "margin": 0.00434,
+        "n": 5642,
+        "payoff_ratio": 1.037917,
+        "win_rate": 0.495037,
+        "year": "2001"
+      },
+      {
+        "expectancy": -0.034846,
+        "margin": -0.408089,
+        "n": 7033,
+        "payoff_ratio": 0.701632,
+        "win_rate": 0.179582,
+        "year": "2002"
+      },
+      {
+        "expectancy": 0.000367,
+        "margin": 0.002589,
+        "n": 16362,
+        "payoff_ratio": 1.275459,
+        "win_rate": 0.442061,
+        "year": "2003"
+      },
+      {
+        "expectancy": -0.016979,
+        "margin": -0.122535,
+        "n": 6085,
+        "payoff_ratio": 1.141378,
+        "win_rate": 0.344454,
+        "year": "2004"
+      },
+      {
+        "expectancy": -0.031107,
+        "margin": -0.18998,
+        "n": 6675,
+        "payoff_ratio": 1.106929,
+        "win_rate": 0.284644,
+        "year": "2005"
+      },
+      {
+        "expectancy": 0.082925,
+        "margin": 0.326912,
+        "n": 16602,
+        "payoff_ratio": 4.049863,
+        "win_rate": 0.524937,
+        "year": "2006"
+      },
+      {
+        "expectancy": 0.16615,
+        "margin": 0.607182,
+        "n": 7260,
+        "payoff_ratio": 5.594858,
+        "win_rate": 0.758815,
+        "year": "2007"
+      },
+      {
+        "expectancy": -0.023836,
+        "margin": -0.110095,
+        "n": 7219,
+        "payoff_ratio": 1.286103,
+        "win_rate": 0.327331,
+        "year": "2008"
+      },
+      {
+        "expectancy": 0.039687,
+        "margin": 0.305111,
+        "n": 3559,
+        "payoff_ratio": 2.25585,
+        "win_rate": 0.612251,
+        "year": "2009"
+      },
+      {
+        "expectancy": 0.005272,
+        "margin": 0.040964,
+        "n": 11224,
+        "payoff_ratio": 1.429847,
+        "win_rate": 0.452512,
+        "year": "2010"
+      },
+      {
+        "expectancy": -0.022874,
+        "margin": -0.25013,
+        "n": 13128,
+        "payoff_ratio": 0.743727,
+        "win_rate": 0.323355,
+        "year": "2011"
+      },
+      {
+        "expectancy": -0.014554,
+        "margin": -0.122451,
+        "n": 18133,
+        "payoff_ratio": 1.00245,
+        "win_rate": 0.376937,
+        "year": "2012"
+      },
+      {
+        "expectancy": -0.006976,
+        "margin": -0.051963,
+        "n": 13488,
+        "payoff_ratio": 1.229834,
+        "win_rate": 0.396501,
+        "year": "2013"
+      },
+      {
+        "expectancy": 0.022819,
+        "margin": 0.169917,
+        "n": 24537,
+        "payoff_ratio": 1.771681,
+        "win_rate": 0.530709,
+        "year": "2014"
+      },
+      {
+        "expectancy": 0.021481,
+        "margin": 0.064297,
+        "n": 6782,
+        "payoff_ratio": 1.865302,
+        "win_rate": 0.4133,
+        "year": "2015"
+      },
+      {
+        "expectancy": -0.005738,
+        "margin": -0.052516,
+        "n": 47413,
+        "payoff_ratio": 1.20188,
+        "win_rate": 0.401641,
+        "year": "2016"
+      }
+    ],
+    "trade_dist.uniform_mining.expectancy": 0.008601,
+    "trade_dist.uniform_mining.margin": 0.056183,
+    "trade_dist.uniform_mining.n": 216737,
+    "trade_dist.uniform_mining.payoff_ratio": 1.679637,
+    "trade_dist.uniform_mining.profit_concentration": {
+      "expectancy_ex_top1pct_trades": -0.002837,
+      "top10pct_winners_profit_share": 0.5362,
+      "top1pct_winners_profit_share": 0.1859,
+      "top5pct_winners_profit_share": 0.3934
+    },
+    "trade_dist.uniform_mining.quantiles": {
+      "p1": -0.154064,
+      "p10": -0.0987,
+      "p25": -0.0607,
+      "p5": -0.1127,
+      "p50": -0.0079,
+      "p75": 0.0265,
+      "p90": 0.1049,
+      "p95": 0.1998,
+      "p99": 0.5353
+    },
+    "trade_dist.uniform_mining.win_rate": 0.429368,
+    "verdict": "untested",
+    "window_usage": {
+      "k": null,
+      "note": "判定窗在挖掘段内（非受保护段 2017~2021）——读挖掘段不入台账（v2 口径）",
+      "window": "mining_segment"
+    }
+  },
+  "kind": "r39_dist",
+  "missing": [],
+  "path": "results/R39/r39_v2_pre_dist.json",
+  "schema": "result_digest/v1",
+  "source_name": "_factor_exit__r39_v2_pre_dist.json",
+  "source_sha256": "3b8ed28de9efa187927c4b2ce7fa92aa688ff4f6de890f44769c87d53c9dfd04",
+  "tag": "r39_v2_pre_dist",
+  "unit": "R39"
+}

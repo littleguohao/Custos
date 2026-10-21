@@ -1,0 +1,3328 @@
+{
+  "digest_version": 1,
+  "fields": {
+    "merged.ref.dist.avg_loss": -0.059144,
+    "merged.ref.dist.avg_win": 0.098036,
+    "merged.ref.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1048,
+      "ge_3x_avg_loss": 0.0688,
+      "ge_5x_avg_loss": 0.0324
+    },
+    "merged.ref.dist.buckets": [
+      {
+        "bin": "≤-15%",
+        "n": 6805,
+        "share": 0.0119
+      },
+      {
+        "bin": "-15~-10%",
+        "n": 95631,
+        "share": 0.1678
+      },
+      {
+        "bin": "-10~-5%",
+        "n": 44220,
+        "share": 0.0776
+      },
+      {
+        "bin": "-5~0%",
+        "n": 174620,
+        "share": 0.3064
+      },
+      {
+        "bin": "0~5%",
+        "n": 137270,
+        "share": 0.2409
+      },
+      {
+        "bin": "5~10%",
+        "n": 42330,
+        "share": 0.0743
+      },
+      {
+        "bin": "10~20%",
+        "n": 35198,
+        "share": 0.0618
+      },
+      {
+        "bin": "20~30%",
+        "n": 15796,
+        "share": 0.0277
+      },
+      {
+        "bin": ">30%",
+        "n": 17991,
+        "share": 0.0316
+      }
+    ],
+    "merged.ref.dist.by_reason": [
+      {
+        "avg_holding": 14.12,
+        "avg_ret": 0.021771,
+        "n": 441862,
+        "reason": "bbi_exit",
+        "share": 0.7754,
+        "win_rate": 0.5066
+      },
+      {
+        "avg_holding": 10.54,
+        "avg_ret": -0.117687,
+        "n": 97326,
+        "reason": "stop",
+        "share": 0.1708,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 26.99,
+        "avg_ret": 0.327022,
+        "n": 23679,
+        "reason": "bbi_exit+scaled",
+        "share": 0.0416,
+        "win_rate": 0.9964
+      },
+      {
+        "avg_holding": 6.51,
+        "avg_ret": -0.177195,
+        "n": 5085,
+        "reason": "stop_delayed",
+        "share": 0.0089,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 19.08,
+        "avg_ret": -0.009055,
+        "n": 1047,
+        "reason": "bbi_exit_delayed",
+        "share": 0.0018,
+        "win_rate": 0.3381
+      },
+      {
+        "avg_holding": 37.78,
+        "avg_ret": 0.454604,
+        "n": 815,
+        "reason": "bbi_exit_delayed+scaled",
+        "share": 0.0014,
+        "win_rate": 0.9767
+      },
+      {
+        "avg_holding": 12.94,
+        "avg_ret": -0.013072,
+        "n": 32,
+        "reason": "stop+scaled",
+        "share": 0.0001,
+        "win_rate": 0.1562
+      },
+      {
+        "avg_holding": 13.0,
+        "avg_ret": -0.023167,
+        "n": 15,
+        "reason": "stop_delayed+scaled",
+        "share": 0.0,
+        "win_rate": 0.2667
+      }
+    ],
+    "merged.ref.dist.by_year": [
+      {
+        "expectancy": 0.00426,
+        "margin": 0.061262,
+        "n": 5470,
+        "payoff_ratio": 1.43555,
+        "win_rate": 0.471846,
+        "year": "2000"
+      },
+      {
+        "expectancy": -0.00176,
+        "margin": -0.019132,
+        "n": 5319,
+        "payoff_ratio": 0.9407,
+        "win_rate": 0.496146,
+        "year": "2001"
+      },
+      {
+        "expectancy": -0.038544,
+        "margin": -0.462717,
+        "n": 6692,
+        "payoff_ratio": 0.551048,
+        "win_rate": 0.182008,
+        "year": "2002"
+      },
+      {
+        "expectancy": 0.005238,
+        "margin": 0.037424,
+        "n": 15268,
+        "payoff_ratio": 1.273846,
+        "win_rate": 0.477207,
+        "year": "2003"
+      },
+      {
+        "expectancy": -0.020292,
+        "margin": -0.141233,
+        "n": 5874,
+        "payoff_ratio": 1.04626,
+        "win_rate": 0.347463,
+        "year": "2004"
+      },
+      {
+        "expectancy": -0.028399,
+        "margin": -0.159447,
+        "n": 6196,
+        "payoff_ratio": 1.137336,
+        "win_rate": 0.308425,
+        "year": "2005"
+      },
+      {
+        "expectancy": 0.075157,
+        "margin": 0.326721,
+        "n": 15580,
+        "payoff_ratio": 3.727383,
+        "win_rate": 0.538254,
+        "year": "2006"
+      },
+      {
+        "expectancy": 0.151764,
+        "margin": 0.612036,
+        "n": 7125,
+        "payoff_ratio": 5.487615,
+        "win_rate": 0.766175,
+        "year": "2007"
+      },
+      {
+        "expectancy": -0.025349,
+        "margin": -0.112985,
+        "n": 6897,
+        "payoff_ratio": 1.100017,
+        "win_rate": 0.363201,
+        "year": "2008"
+      },
+      {
+        "expectancy": 0.04092,
+        "margin": 0.312579,
+        "n": 3442,
+        "payoff_ratio": 2.318856,
+        "win_rate": 0.613887,
+        "year": "2009"
+      },
+      {
+        "expectancy": 0.005096,
+        "margin": 0.038452,
+        "n": 10967,
+        "payoff_ratio": 1.378805,
+        "win_rate": 0.458831,
+        "year": "2010"
+      },
+      {
+        "expectancy": -0.024279,
+        "margin": -0.253008,
+        "n": 12693,
+        "payoff_ratio": 0.720518,
+        "win_rate": 0.328212,
+        "year": "2011"
+      },
+      {
+        "expectancy": -0.015453,
+        "margin": -0.125933,
+        "n": 17281,
+        "payoff_ratio": 0.940323,
+        "win_rate": 0.389445,
+        "year": "2012"
+      },
+      {
+        "expectancy": -0.009686,
+        "margin": -0.068539,
+        "n": 12776,
+        "payoff_ratio": 1.138368,
+        "win_rate": 0.399108,
+        "year": "2013"
+      },
+      {
+        "expectancy": 0.023486,
+        "margin": 0.176207,
+        "n": 23602,
+        "payoff_ratio": 1.787806,
+        "win_rate": 0.534912,
+        "year": "2014"
+      },
+      {
+        "expectancy": 0.005478,
+        "margin": 0.015978,
+        "n": 6488,
+        "payoff_ratio": 1.459129,
+        "win_rate": 0.422626,
+        "year": "2015"
+      },
+      {
+        "expectancy": 0.013121,
+        "margin": 0.120298,
+        "n": 27365,
+        "payoff_ratio": 1.783249,
+        "win_rate": 0.479591,
+        "year": "2016"
+      },
+      {
+        "expectancy": 0.020573,
+        "margin": 0.158386,
+        "n": 71184,
+        "payoff_ratio": 1.712652,
+        "win_rate": 0.527029,
+        "year": "2022"
+      },
+      {
+        "expectancy": -0.01257,
+        "margin": -0.116136,
+        "n": 142376,
+        "payoff_ratio": 1.090109,
+        "win_rate": 0.362308,
+        "year": "2023"
+      },
+      {
+        "expectancy": 0.073692,
+        "margin": 0.276908,
+        "n": 68419,
+        "payoff_ratio": 2.494826,
+        "win_rate": 0.563045,
+        "year": "2024"
+      },
+      {
+        "expectancy": 0.028506,
+        "margin": 0.225783,
+        "n": 26334,
+        "payoff_ratio": 2.248213,
+        "win_rate": 0.533645,
+        "year": "2025"
+      },
+      {
+        "expectancy": -0.029839,
+        "margin": -0.198189,
+        "n": 72513,
+        "payoff_ratio": 1.035552,
+        "win_rate": 0.293078,
+        "year": "2026"
+      }
+    ],
+    "merged.ref.dist.expectancy": 0.009421,
+    "merged.ref.dist.holding": {
+      "avg_loss": 11.378992,
+      "avg_win": 17.435175
+    },
+    "merged.ref.dist.margin": 0.059938,
+    "merged.ref.dist.median_loss": -0.0431,
+    "merged.ref.dist.median_win": 0.041,
+    "merged.ref.dist.n": 569861,
+    "merged.ref.dist.payoff_ratio": 1.657575,
+    "merged.ref.dist.profit_concentration": {
+      "expectancy_ex_top1pct_trades": 0.000535,
+      "top10pct_winners_profit_share": 0.4791,
+      "top1pct_winners_profit_share": 0.1274,
+      "top5pct_winners_profit_share": 0.3272
+    },
+    "merged.ref.dist.quantiles": {
+      "p1": -0.1536,
+      "p10": -0.1121,
+      "p25": -0.0522,
+      "p5": -0.1234,
+      "p50": -0.0074,
+      "p75": 0.0312,
+      "p90": 0.1245,
+      "p95": 0.226,
+      "p99": 0.52384
+    },
+    "merged.ref.dist.win_rate": 0.43622,
+    "merged.x10.dist.avg_loss": -0.060399,
+    "merged.x10.dist.avg_win": 0.098565,
+    "merged.x10.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1047,
+      "ge_3x_avg_loss": 0.0684,
+      "ge_5x_avg_loss": 0.0318
+    },
+    "merged.x10.dist.buckets": [
+      {
+        "bin": "≤-15%",
+        "n": 13164,
+        "share": 0.0231
+      },
+      {
+        "bin": "-15~-10%",
+        "n": 78720,
+        "share": 0.1381
+      },
+      {
+        "bin": "-10~-5%",
+        "n": 49981,
+        "share": 0.0877
+      },
+      {
+        "bin": "-5~0%",
+        "n": 176945,
+        "share": 0.3105
+      },
+      {
+        "bin": "0~5%",
+        "n": 138199,
+        "share": 0.2425
+      },
+      {
+        "bin": "5~10%",
+        "n": 42758,
+        "share": 0.075
+      },
+      {
+        "bin": "10~20%",
+        "n": 35754,
+        "share": 0.0627
+      },
+      {
+        "bin": "20~30%",
+        "n": 16072,
+        "share": 0.0282
+      },
+      {
+        "bin": ">30%",
+        "n": 18351,
+        "share": 0.0322
+      }
+    ],
+    "merged.x10.dist.by_reason": [
+      {
+        "avg_holding": 14.34,
+        "avg_ret": 0.019712,
+        "n": 455139,
+        "reason": "bbi_exit",
+        "share": 0.7986,
+        "win_rate": 0.4958
+      },
+      {
+        "avg_holding": 11.62,
+        "avg_ret": -0.129106,
+        "n": 84276,
+        "reason": "stop",
+        "share": 0.1479,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 27.11,
+        "avg_ret": 0.3223,
+        "n": 24484,
+        "reason": "bbi_exit+scaled",
+        "share": 0.043,
+        "win_rate": 0.9927
+      },
+      {
+        "avg_holding": 7.87,
+        "avg_ret": -0.212545,
+        "n": 3881,
+        "reason": "stop_delayed",
+        "share": 0.0068,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 17.91,
+        "avg_ret": -0.029623,
+        "n": 1279,
+        "reason": "bbi_exit_delayed",
+        "share": 0.0022,
+        "win_rate": 0.2823
+      },
+      {
+        "avg_holding": 37.32,
+        "avg_ret": 0.441122,
+        "n": 857,
+        "reason": "bbi_exit_delayed+scaled",
+        "share": 0.0015,
+        "win_rate": 0.965
+      },
+      {
+        "avg_holding": 18.33,
+        "avg_ret": -0.0218,
+        "n": 18,
+        "reason": "stop+scaled",
+        "share": 0.0,
+        "win_rate": 0.0556
+      },
+      {
+        "avg_holding": 19.5,
+        "avg_ret": -0.03635,
+        "n": 10,
+        "reason": "stop_delayed+scaled",
+        "share": 0.0,
+        "win_rate": 0.3
+      }
+    ],
+    "merged.x10.dist.by_year": [
+      {
+        "expectancy": 0.004293,
+        "margin": 0.06172,
+        "n": 5470,
+        "payoff_ratio": 1.436102,
+        "win_rate": 0.472212,
+        "year": "2000"
+      },
+      {
+        "expectancy": -0.001861,
+        "margin": -0.020029,
+        "n": 5319,
+        "payoff_ratio": 0.929597,
+        "win_rate": 0.498214,
+        "year": "2001"
+      },
+      {
+        "expectancy": -0.039155,
+        "margin": -0.462439,
+        "n": 6692,
+        "payoff_ratio": 0.549561,
+        "win_rate": 0.182905,
+        "year": "2002"
+      },
+      {
+        "expectancy": 0.008048,
+        "margin": 0.0581,
+        "n": 15268,
+        "payoff_ratio": 1.319683,
+        "win_rate": 0.489193,
+        "year": "2003"
+      },
+      {
+        "expectancy": -0.022074,
+        "margin": -0.150626,
+        "n": 5874,
+        "payoff_ratio": 1.001513,
+        "win_rate": 0.348996,
+        "year": "2004"
+      },
+      {
+        "expectancy": -0.023359,
+        "margin": -0.124908,
+        "n": 6196,
+        "payoff_ratio": 1.204255,
+        "win_rate": 0.32876,
+        "year": "2005"
+      },
+      {
+        "expectancy": 0.078099,
+        "margin": 0.340406,
+        "n": 15580,
+        "payoff_ratio": 3.874122,
+        "win_rate": 0.545571,
+        "year": "2006"
+      },
+      {
+        "expectancy": 0.152029,
+        "margin": 0.613491,
+        "n": 7125,
+        "payoff_ratio": 5.519506,
+        "win_rate": 0.766877,
+        "year": "2007"
+      },
+      {
+        "expectancy": -0.023454,
+        "margin": -0.102159,
+        "n": 6897,
+        "payoff_ratio": 1.0122,
+        "win_rate": 0.394809,
+        "year": "2008"
+      },
+      {
+        "expectancy": 0.041331,
+        "margin": 0.317053,
+        "n": 3442,
+        "payoff_ratio": 2.349216,
+        "win_rate": 0.61563,
+        "year": "2009"
+      },
+      {
+        "expectancy": 0.004731,
+        "margin": 0.035408,
+        "n": 10967,
+        "payoff_ratio": 1.352584,
+        "win_rate": 0.460472,
+        "year": "2010"
+      },
+      {
+        "expectancy": -0.024728,
+        "margin": -0.255449,
+        "n": 12693,
+        "payoff_ratio": 0.708249,
+        "win_rate": 0.329946,
+        "year": "2011"
+      },
+      {
+        "expectancy": -0.015402,
+        "margin": -0.124064,
+        "n": 17281,
+        "payoff_ratio": 0.925469,
+        "win_rate": 0.39529,
+        "year": "2012"
+      },
+      {
+        "expectancy": -0.010274,
+        "margin": -0.071275,
+        "n": 12776,
+        "payoff_ratio": 1.113617,
+        "win_rate": 0.401847,
+        "year": "2013"
+      },
+      {
+        "expectancy": 0.024107,
+        "margin": 0.179853,
+        "n": 23602,
+        "payoff_ratio": 1.801058,
+        "win_rate": 0.536861,
+        "year": "2014"
+      },
+      {
+        "expectancy": -0.004306,
+        "margin": -0.011901,
+        "n": 6572,
+        "payoff_ratio": 1.265258,
+        "win_rate": 0.42955,
+        "year": "2015"
+      },
+      {
+        "expectancy": 0.014009,
+        "margin": 0.128756,
+        "n": 27363,
+        "payoff_ratio": 1.821842,
+        "win_rate": 0.483134,
+        "year": "2016"
+      },
+      {
+        "expectancy": 0.021389,
+        "margin": 0.164436,
+        "n": 71184,
+        "payoff_ratio": 1.721229,
+        "win_rate": 0.531917,
+        "year": "2022"
+      },
+      {
+        "expectancy": -0.012544,
+        "margin": -0.11502,
+        "n": 142377,
+        "payoff_ratio": 1.085979,
+        "win_rate": 0.364371,
+        "year": "2023"
+      },
+      {
+        "expectancy": 0.075095,
+        "margin": 0.278934,
+        "n": 68419,
+        "payoff_ratio": 2.435786,
+        "win_rate": 0.569988,
+        "year": "2024"
+      },
+      {
+        "expectancy": 0.028899,
+        "margin": 0.229417,
+        "n": 26334,
+        "payoff_ratio": 2.267029,
+        "win_rate": 0.535505,
+        "year": "2025"
+      },
+      {
+        "expectancy": -0.031491,
+        "margin": -0.204075,
+        "n": 72513,
+        "payoff_ratio": 0.994632,
+        "win_rate": 0.297271,
+        "year": "2026"
+      }
+    ],
+    "merged.x10.dist.expectancy": 0.009645,
+    "merged.x10.dist.holding": {
+      "avg_loss": 12.036505,
+      "avg_win": 17.591051
+    },
+    "merged.x10.dist.margin": 0.060673,
+    "merged.x10.dist.median_loss": -0.0417,
+    "merged.x10.dist.median_win": 0.0413,
+    "merged.x10.dist.n": 569944,
+    "merged.x10.dist.paired_vs_ref": {
+      "delta_ret_mean": 0.000287,
+      "delta_ret_quantiles": {
+        "p25": 0.0,
+        "p5": -0.0084,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p95": 0.0
+      },
+      "flip_ref_loss_to_win": 2549,
+      "flip_ref_win_to_loss": 0,
+      "n_matched": 569859,
+      "share_better": 0.0208,
+      "share_identical": 0.9215,
+      "share_worse": 0.0576,
+      "stopped_here_not_ref": {
+        "avg_ret_here": -0.171171,
+        "avg_ret_ref": -0.151218,
+        "n": 951,
+        "share_here_better": 0.0
+      },
+      "stopped_ref_not_here": {
+        "avg_ret_here": -0.04385,
+        "avg_ret_ref": -0.110798,
+        "n": 13999,
+        "share_here_better": 0.8121
+      }
+    },
+    "merged.x10.dist.payoff_ratio": 1.631883,
+    "merged.x10.dist.profit_concentration": {
+      "expectancy_ex_top1pct_trades": 0.000715,
+      "top10pct_winners_profit_share": 0.4781,
+      "top1pct_winners_profit_share": 0.1267,
+      "top5pct_winners_profit_share": 0.3263
+    },
+    "merged.x10.dist.quantiles": {
+      "p1": -0.1709,
+      "p10": -0.1196,
+      "p25": -0.0496,
+      "p5": -0.134,
+      "p50": -0.0068,
+      "p75": 0.0321,
+      "p90": 0.1268,
+      "p95": 0.2287,
+      "p99": 0.527857
+    },
+    "merged.x10.dist.win_rate": 0.440629,
+    "merged.x12.dist.avg_loss": -0.062009,
+    "merged.x12.dist.avg_win": 0.0988,
+    "merged.x12.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1033,
+      "ge_3x_avg_loss": 0.067,
+      "ge_5x_avg_loss": 0.0308
+    },
+    "merged.x12.dist.buckets": [
+      {
+        "bin": "≤-15%",
+        "n": 27385,
+        "share": 0.048
+      },
+      {
+        "bin": "-15~-10%",
+        "n": 52244,
+        "share": 0.0917
+      },
+      {
+        "bin": "-10~-5%",
+        "n": 57891,
+        "share": 0.1016
+      },
+      {
+        "bin": "-5~0%",
+        "n": 179190,
+        "share": 0.3144
+      },
+      {
+        "bin": "0~5%",
+        "n": 139073,
+        "share": 0.244
+      },
+      {
+        "bin": "5~10%",
+        "n": 43191,
+        "share": 0.0758
+      },
+      {
+        "bin": "10~20%",
+        "n": 36161,
+        "share": 0.0634
+      },
+      {
+        "bin": "20~30%",
+        "n": 16242,
+        "share": 0.0285
+      },
+      {
+        "bin": ">30%",
+        "n": 18569,
+        "share": 0.0326
+      }
+    ],
+    "merged.x12.dist.by_reason": [
+      {
+        "avg_holding": 14.72,
+        "avg_ret": 0.016364,
+        "n": 472684,
+        "reason": "bbi_exit",
+        "share": 0.8293,
+        "win_rate": 0.4805
+      },
+      {
+        "avg_holding": 13.26,
+        "avg_ret": -0.14913,
+        "n": 66318,
+        "reason": "stop",
+        "share": 0.1164,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 27.31,
+        "avg_ret": 0.317926,
+        "n": 25184,
+        "reason": "bbi_exit+scaled",
+        "share": 0.0442,
+        "win_rate": 0.9883
+      },
+      {
+        "avg_holding": 8.61,
+        "avg_ret": -0.232111,
+        "n": 3394,
+        "reason": "stop_delayed",
+        "share": 0.006,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 17.48,
+        "avg_ret": -0.042361,
+        "n": 1450,
+        "reason": "bbi_exit_delayed",
+        "share": 0.0025,
+        "win_rate": 0.251
+      },
+      {
+        "avg_holding": 37.09,
+        "avg_ret": 0.429299,
+        "n": 886,
+        "reason": "bbi_exit_delayed+scaled",
+        "share": 0.0016,
+        "win_rate": 0.9549
+      },
+      {
+        "avg_holding": 19.7,
+        "avg_ret": -0.04447,
+        "n": 20,
+        "reason": "stop+scaled",
+        "share": 0.0,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 22.8,
+        "avg_ret": -0.07364,
+        "n": 10,
+        "reason": "stop_delayed+scaled",
+        "share": 0.0,
+        "win_rate": 0.1
+      }
+    ],
+    "merged.x12.dist.by_year": [
+      {
+        "expectancy": 0.004285,
+        "margin": 0.061458,
+        "n": 5470,
+        "payoff_ratio": 1.432381,
+        "win_rate": 0.472578,
+        "year": "2000"
+      },
+      {
+        "expectancy": -0.002427,
+        "margin": -0.025742,
+        "n": 5319,
+        "payoff_ratio": 0.903774,
+        "win_rate": 0.49953,
+        "year": "2001"
+      },
+      {
+        "expectancy": -0.040588,
+        "margin": -0.465469,
+        "n": 6692,
+        "payoff_ratio": 0.539835,
+        "win_rate": 0.183951,
+        "year": "2002"
+      },
+      {
+        "expectancy": 0.010661,
+        "margin": 0.077737,
+        "n": 15270,
+        "payoff_ratio": 1.360872,
+        "win_rate": 0.50131,
+        "year": "2003"
+      },
+      {
+        "expectancy": -0.024623,
+        "margin": -0.163546,
+        "n": 5876,
+        "payoff_ratio": 0.946341,
+        "win_rate": 0.350238,
+        "year": "2004"
+      },
+      {
+        "expectancy": -0.023263,
+        "margin": -0.120694,
+        "n": 6196,
+        "payoff_ratio": 1.188766,
+        "win_rate": 0.336185,
+        "year": "2005"
+      },
+      {
+        "expectancy": 0.081664,
+        "margin": 0.35857,
+        "n": 15580,
+        "payoff_ratio": 4.134319,
+        "win_rate": 0.553338,
+        "year": "2006"
+      },
+      {
+        "expectancy": 0.152332,
+        "margin": 0.615804,
+        "n": 7125,
+        "payoff_ratio": 5.570457,
+        "win_rate": 0.768,
+        "year": "2007"
+      },
+      {
+        "expectancy": -0.023158,
+        "margin": -0.099688,
+        "n": 6897,
+        "payoff_ratio": 0.997078,
+        "win_rate": 0.401044,
+        "year": "2008"
+      },
+      {
+        "expectancy": 0.041292,
+        "margin": 0.316505,
+        "n": 3442,
+        "payoff_ratio": 2.339838,
+        "win_rate": 0.615921,
+        "year": "2009"
+      },
+      {
+        "expectancy": 0.004074,
+        "margin": 0.029967,
+        "n": 10967,
+        "payoff_ratio": 1.312079,
+        "win_rate": 0.462478,
+        "year": "2010"
+      },
+      {
+        "expectancy": -0.026463,
+        "margin": -0.265433,
+        "n": 12693,
+        "payoff_ratio": 0.673843,
+        "win_rate": 0.331994,
+        "year": "2011"
+      },
+      {
+        "expectancy": -0.015684,
+        "margin": -0.124118,
+        "n": 17281,
+        "payoff_ratio": 0.904267,
+        "win_rate": 0.401018,
+        "year": "2012"
+      },
+      {
+        "expectancy": -0.012587,
+        "margin": -0.084549,
+        "n": 12776,
+        "payoff_ratio": 1.045402,
+        "win_rate": 0.404352,
+        "year": "2013"
+      },
+      {
+        "expectancy": 0.024866,
+        "margin": 0.185788,
+        "n": 23602,
+        "payoff_ratio": 1.835067,
+        "win_rate": 0.538514,
+        "year": "2014"
+      },
+      {
+        "expectancy": -0.005114,
+        "margin": -0.014026,
+        "n": 6572,
+        "payoff_ratio": 1.241336,
+        "win_rate": 0.432136,
+        "year": "2015"
+      },
+      {
+        "expectancy": 0.014857,
+        "margin": 0.137741,
+        "n": 27361,
+        "payoff_ratio": 1.877298,
+        "win_rate": 0.485289,
+        "year": "2016"
+      },
+      {
+        "expectancy": 0.022732,
+        "margin": 0.175877,
+        "n": 71184,
+        "payoff_ratio": 1.765894,
+        "win_rate": 0.537424,
+        "year": "2022"
+      },
+      {
+        "expectancy": -0.012502,
+        "margin": -0.113602,
+        "n": 142378,
+        "payoff_ratio": 1.079103,
+        "win_rate": 0.367374,
+        "year": "2023"
+      },
+      {
+        "expectancy": 0.073977,
+        "margin": 0.269615,
+        "n": 68417,
+        "payoff_ratio": 2.291696,
+        "win_rate": 0.57341,
+        "year": "2024"
+      },
+      {
+        "expectancy": 0.02934,
+        "margin": 0.233658,
+        "n": 26334,
+        "payoff_ratio": 2.295935,
+        "win_rate": 0.537062,
+        "year": "2025"
+      },
+      {
+        "expectancy": -0.034211,
+        "margin": -0.214599,
+        "n": 72514,
+        "payoff_ratio": 0.938699,
+        "win_rate": 0.301211,
+        "year": "2026"
+      }
+    ],
+    "merged.x12.dist.expectancy": 0.009441,
+    "merged.x12.dist.holding": {
+      "avg_loss": 12.993025,
+      "avg_win": 17.765882
+    },
+    "merged.x12.dist.margin": 0.05871,
+    "merged.x12.dist.median_loss": -0.0406,
+    "merged.x12.dist.median_win": 0.0415,
+    "merged.x12.dist.n": 569946,
+    "merged.x12.dist.paired_vs_ref": {
+      "delta_ret_mean": 8.8e-05,
+      "delta_ret_quantiles": {
+        "p25": 0.0,
+        "p5": -0.0312,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p95": 0.0
+      },
+      "flip_ref_loss_to_win": 4651,
+      "flip_ref_win_to_loss": 0,
+      "n_matched": 569855,
+      "share_better": 0.0463,
+      "share_identical": 0.8541,
+      "share_worse": 0.0996,
+      "stopped_here_not_ref": {
+        "avg_ret_here": -0.180009,
+        "avg_ret_ref": -0.157742,
+        "n": 1338,
+        "share_here_better": 0.0
+      },
+      "stopped_ref_not_here": {
+        "avg_ret_here": -0.055838,
+        "avg_ret_ref": -0.112846,
+        "n": 32340,
+        "share_here_better": 0.7936
+      }
+    },
+    "merged.x12.dist.payoff_ratio": 1.593324,
+    "merged.x12.dist.profit_concentration": {
+      "expectancy_ex_top1pct_trades": 0.000467,
+      "top10pct_winners_profit_share": 0.4777,
+      "top1pct_winners_profit_share": 0.1265,
+      "top5pct_winners_profit_share": 0.3259
+    },
+    "merged.x12.dist.quantiles": {
+      "p1": -0.1857,
+      "p10": -0.1337,
+      "p25": -0.0476,
+      "p5": -0.1491,
+      "p50": -0.0064,
+      "p75": 0.0328,
+      "p90": 0.1284,
+      "p95": 0.2304,
+      "p99": 0.5302
+    },
+    "merged.x12.dist.win_rate": 0.444316,
+    "merged.x15.dist.avg_loss": -0.063882,
+    "merged.x15.dist.avg_win": 0.099161,
+    "merged.x15.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1015,
+      "ge_3x_avg_loss": 0.0652,
+      "ge_5x_avg_loss": 0.0295
+    },
+    "merged.x15.dist.buckets": [
+      {
+        "bin": "≤-15%",
+        "n": 51833,
+        "share": 0.0909
+      },
+      {
+        "bin": "-15~-10%",
+        "n": 19593,
+        "share": 0.0344
+      },
+      {
+        "bin": "-10~-5%",
+        "n": 62804,
+        "share": 0.1102
+      },
+      {
+        "bin": "-5~0%",
+        "n": 180732,
+        "share": 0.3171
+      },
+      {
+        "bin": "0~5%",
+        "n": 139764,
+        "share": 0.2452
+      },
+      {
+        "bin": "5~10%",
+        "n": 43524,
+        "share": 0.0764
+      },
+      {
+        "bin": "10~20%",
+        "n": 36503,
+        "share": 0.064
+      },
+      {
+        "bin": "20~30%",
+        "n": 16404,
+        "share": 0.0288
+      },
+      {
+        "bin": ">30%",
+        "n": 18794,
+        "share": 0.033
+      }
+    ],
+    "merged.x15.dist.by_reason": [
+      {
+        "avg_holding": 15.17,
+        "avg_ret": 0.0122,
+        "n": 491162,
+        "reason": "bbi_exit",
+        "share": 0.8618,
+        "win_rate": 0.4647
+      },
+      {
+        "avg_holding": 15.7,
+        "avg_ret": -0.180017,
+        "n": 47290,
+        "reason": "stop",
+        "share": 0.083,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 27.63,
+        "avg_ret": 0.311787,
+        "n": 26091,
+        "reason": "bbi_exit+scaled",
+        "share": 0.0458,
+        "win_rate": 0.9771
+      },
+      {
+        "avg_holding": 9.84,
+        "avg_ret": -0.261199,
+        "n": 2849,
+        "reason": "stop_delayed",
+        "share": 0.005,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 17.54,
+        "avg_ret": -0.054617,
+        "n": 1629,
+        "reason": "bbi_exit_delayed",
+        "share": 0.0029,
+        "win_rate": 0.2253
+      },
+      {
+        "avg_holding": 36.76,
+        "avg_ret": 0.419323,
+        "n": 918,
+        "reason": "bbi_exit_delayed+scaled",
+        "share": 0.0016,
+        "win_rate": 0.9412
+      },
+      {
+        "avg_holding": 28.38,
+        "avg_ret": -0.1228,
+        "n": 8,
+        "reason": "stop_delayed+scaled",
+        "share": 0.0,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 26.5,
+        "avg_ret": -0.082275,
+        "n": 4,
+        "reason": "stop+scaled",
+        "share": 0.0,
+        "win_rate": 0.0
+      }
+    ],
+    "merged.x15.dist.by_year": [
+      {
+        "expectancy": 0.004493,
+        "margin": 0.064804,
+        "n": 5470,
+        "payoff_ratio": 1.450144,
+        "win_rate": 0.472943,
+        "year": "2000"
+      },
+      {
+        "expectancy": -0.002787,
+        "margin": -0.028944,
+        "n": 5319,
+        "payoff_ratio": 0.883531,
+        "win_rate": 0.501974,
+        "year": "2001"
+      },
+      {
+        "expectancy": -0.041533,
+        "margin": -0.469163,
+        "n": 6692,
+        "payoff_ratio": 0.530776,
+        "win_rate": 0.1841,
+        "year": "2002"
+      },
+      {
+        "expectancy": 0.012516,
+        "margin": 0.092556,
+        "n": 15275,
+        "payoff_ratio": 1.405811,
+        "win_rate": 0.508216,
+        "year": "2003"
+      },
+      {
+        "expectancy": -0.026126,
+        "margin": -0.170274,
+        "n": 5875,
+        "payoff_ratio": 0.909723,
+        "win_rate": 0.353362,
+        "year": "2004"
+      },
+      {
+        "expectancy": -0.023501,
+        "margin": -0.120081,
+        "n": 6196,
+        "payoff_ratio": 1.168692,
+        "win_rate": 0.341026,
+        "year": "2005"
+      },
+      {
+        "expectancy": 0.085406,
+        "margin": 0.375031,
+        "n": 15580,
+        "payoff_ratio": 4.447526,
+        "win_rate": 0.558601,
+        "year": "2006"
+      },
+      {
+        "expectancy": 0.152473,
+        "margin": 0.617368,
+        "n": 7125,
+        "payoff_ratio": 5.62635,
+        "win_rate": 0.768281,
+        "year": "2007"
+      },
+      {
+        "expectancy": -0.022459,
+        "margin": -0.096311,
+        "n": 6897,
+        "payoff_ratio": 0.981751,
+        "win_rate": 0.408293,
+        "year": "2008"
+      },
+      {
+        "expectancy": 0.041364,
+        "margin": 0.317518,
+        "n": 3442,
+        "payoff_ratio": 2.351175,
+        "win_rate": 0.615921,
+        "year": "2009"
+      },
+      {
+        "expectancy": 0.003163,
+        "margin": 0.022705,
+        "n": 10967,
+        "payoff_ratio": 1.264039,
+        "win_rate": 0.464393,
+        "year": "2010"
+      },
+      {
+        "expectancy": -0.028536,
+        "margin": -0.277431,
+        "n": 12693,
+        "payoff_ratio": 0.639619,
+        "win_rate": 0.332467,
+        "year": "2011"
+      },
+      {
+        "expectancy": -0.01587,
+        "margin": -0.123389,
+        "n": 17281,
+        "payoff_ratio": 0.887751,
+        "win_rate": 0.406342,
+        "year": "2012"
+      },
+      {
+        "expectancy": -0.014839,
+        "margin": -0.096594,
+        "n": 12776,
+        "payoff_ratio": 0.987219,
+        "win_rate": 0.406622,
+        "year": "2013"
+      },
+      {
+        "expectancy": 0.026136,
+        "margin": 0.195271,
+        "n": 23602,
+        "payoff_ratio": 1.900146,
+        "win_rate": 0.540081,
+        "year": "2014"
+      },
+      {
+        "expectancy": -0.00412,
+        "margin": -0.011196,
+        "n": 6572,
+        "payoff_ratio": 1.219836,
+        "win_rate": 0.439288,
+        "year": "2015"
+      },
+      {
+        "expectancy": 0.015642,
+        "margin": 0.146695,
+        "n": 27361,
+        "payoff_ratio": 1.93943,
+        "win_rate": 0.486897,
+        "year": "2016"
+      },
+      {
+        "expectancy": 0.02385,
+        "margin": 0.18563,
+        "n": 71184,
+        "payoff_ratio": 1.813032,
+        "win_rate": 0.541119,
+        "year": "2022"
+      },
+      {
+        "expectancy": -0.012364,
+        "margin": -0.111552,
+        "n": 142377,
+        "payoff_ratio": 1.077726,
+        "win_rate": 0.369744,
+        "year": "2023"
+      },
+      {
+        "expectancy": 0.071397,
+        "margin": 0.252122,
+        "n": 68417,
+        "payoff_ratio": 2.071394,
+        "win_rate": 0.577707,
+        "year": "2024"
+      },
+      {
+        "expectancy": 0.02959,
+        "margin": 0.236124,
+        "n": 26334,
+        "payoff_ratio": 2.316239,
+        "win_rate": 0.53767,
+        "year": "2025"
+      },
+      {
+        "expectancy": -0.037118,
+        "margin": -0.22472,
+        "n": 72516,
+        "payoff_ratio": 0.888496,
+        "win_rate": 0.304802,
+        "year": "2026"
+      }
+    ],
+    "merged.x15.dist.expectancy": 0.009061,
+    "merged.x15.dist.holding": {
+      "avg_loss": 14.070732,
+      "avg_win": 17.934307
+    },
+    "merged.x15.dist.margin": 0.055577,
+    "merged.x15.dist.median_loss": -0.0398,
+    "merged.x15.dist.median_win": 0.0417,
+    "merged.x15.dist.n": 569951,
+    "merged.x15.dist.paired_vs_ref": {
+      "delta_ret_mean": -0.000284,
+      "delta_ret_quantiles": {
+        "p25": 0.0,
+        "p5": -0.0543,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p95": 0.0209
+      },
+      "flip_ref_loss_to_win": 6404,
+      "flip_ref_win_to_loss": 0,
+      "n_matched": 569850,
+      "share_better": 0.0664,
+      "share_identical": 0.833,
+      "share_worse": 0.1006,
+      "stopped_here_not_ref": {
+        "avg_ret_here": -0.204249,
+        "avg_ret_ref": -0.17218,
+        "n": 1601,
+        "share_here_better": 0.0
+      },
+      "stopped_ref_not_here": {
+        "avg_ret_here": -0.067575,
+        "avg_ret_ref": -0.115003,
+        "n": 51626,
+        "share_here_better": 0.7111
+      }
+    },
+    "merged.x15.dist.payoff_ratio": 1.552251,
+    "merged.x15.dist.profit_concentration": {
+      "expectancy_ex_top1pct_trades": 1.3e-05,
+      "top10pct_winners_profit_share": 0.4778,
+      "top1pct_winners_profit_share": 0.1267,
+      "top5pct_winners_profit_share": 0.3261
+    },
+    "merged.x15.dist.quantiles": {
+      "p1": -0.2099,
+      "p10": -0.128,
+      "p25": -0.0461,
+      "p5": -0.173,
+      "p50": -0.006,
+      "p75": 0.0334,
+      "p90": 0.1297,
+      "p95": 0.2321,
+      "p99": 0.5336
+    },
+    "merged.x15.dist.win_rate": 0.447388,
+    "merged.x20.dist.avg_loss": -0.065777,
+    "merged.x20.dist.avg_win": 0.099567,
+    "merged.x20.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.0996,
+      "ge_3x_avg_loss": 0.0635,
+      "ge_5x_avg_loss": 0.0281
+    },
+    "merged.x20.dist.buckets": [
+      {
+        "bin": "≤-15%",
+        "n": 41155,
+        "share": 0.0722
+      },
+      {
+        "bin": "-15~-10%",
+        "n": 25686,
+        "share": 0.0451
+      },
+      {
+        "bin": "-10~-5%",
+        "n": 64830,
+        "share": 0.1137
+      },
+      {
+        "bin": "-5~0%",
+        "n": 181779,
+        "share": 0.3189
+      },
+      {
+        "bin": "0~5%",
+        "n": 140307,
+        "share": 0.2462
+      },
+      {
+        "bin": "5~10%",
+        "n": 43826,
+        "share": 0.0769
+      },
+      {
+        "bin": "10~20%",
+        "n": 36821,
+        "share": 0.0646
+      },
+      {
+        "bin": "20~30%",
+        "n": 16552,
+        "share": 0.029
+      },
+      {
+        "bin": ">30%",
+        "n": 18984,
+        "share": 0.0333
+      }
+    ],
+    "merged.x20.dist.by_reason": [
+      {
+        "avg_holding": 15.71,
+        "avg_ret": 0.007185,
+        "n": 509358,
+        "reason": "bbi_exit",
+        "share": 0.8937,
+        "win_rate": 0.45
+      },
+      {
+        "avg_holding": 19.04,
+        "avg_ret": -0.230643,
+        "n": 28355,
+        "reason": "stop",
+        "share": 0.0498,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 28.13,
+        "avg_ret": 0.302966,
+        "n": 27192,
+        "reason": "bbi_exit+scaled",
+        "share": 0.0477,
+        "win_rate": 0.9577
+      },
+      {
+        "avg_holding": 11.39,
+        "avg_ret": -0.307581,
+        "n": 2265,
+        "reason": "stop_delayed",
+        "share": 0.004,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 17.86,
+        "avg_ret": -0.071007,
+        "n": 1810,
+        "reason": "bbi_exit_delayed",
+        "share": 0.0032,
+        "win_rate": 0.2028
+      },
+      {
+        "avg_holding": 36.62,
+        "avg_ret": 0.408451,
+        "n": 951,
+        "reason": "bbi_exit_delayed+scaled",
+        "share": 0.0017,
+        "win_rate": 0.9222
+      },
+      {
+        "avg_holding": 31.0,
+        "avg_ret": -0.1394,
+        "n": 8,
+        "reason": "stop_delayed+scaled",
+        "share": 0.0,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 31.0,
+        "avg_ret": -0.1373,
+        "n": 1,
+        "reason": "stop+scaled",
+        "share": 0.0,
+        "win_rate": 0.0
+      }
+    ],
+    "merged.x20.dist.by_year": [
+      {
+        "expectancy": 0.004332,
+        "margin": 0.062218,
+        "n": 5470,
+        "payoff_ratio": 1.433633,
+        "win_rate": 0.473126,
+        "year": "2000"
+      },
+      {
+        "expectancy": -0.003139,
+        "margin": -0.032106,
+        "n": 5319,
+        "payoff_ratio": 0.861239,
+        "win_rate": 0.50517,
+        "year": "2001"
+      },
+      {
+        "expectancy": -0.041611,
+        "margin": -0.466398,
+        "n": 6692,
+        "payoff_ratio": 0.535519,
+        "win_rate": 0.184848,
+        "year": "2002"
+      },
+      {
+        "expectancy": 0.014938,
+        "margin": 0.113802,
+        "n": 15276,
+        "payoff_ratio": 1.504444,
+        "win_rate": 0.513092,
+        "year": "2003"
+      },
+      {
+        "expectancy": -0.0269,
+        "margin": -0.173174,
+        "n": 5875,
+        "payoff_ratio": 0.890649,
+        "win_rate": 0.355745,
+        "year": "2004"
+      },
+      {
+        "expectancy": -0.022154,
+        "margin": -0.113011,
+        "n": 6196,
+        "payoff_ratio": 1.175394,
+        "win_rate": 0.346675,
+        "year": "2005"
+      },
+      {
+        "expectancy": 0.088963,
+        "margin": 0.387678,
+        "n": 15580,
+        "payoff_ratio": 4.75549,
+        "win_rate": 0.561425,
+        "year": "2006"
+      },
+      {
+        "expectancy": 0.152438,
+        "margin": 0.616751,
+        "n": 7125,
+        "payoff_ratio": 5.593247,
+        "win_rate": 0.768421,
+        "year": "2007"
+      },
+      {
+        "expectancy": -0.022065,
+        "margin": -0.094475,
+        "n": 6897,
+        "payoff_ratio": 0.97475,
+        "win_rate": 0.411918,
+        "year": "2008"
+      },
+      {
+        "expectancy": 0.041258,
+        "margin": 0.316034,
+        "n": 3442,
+        "payoff_ratio": 2.334589,
+        "win_rate": 0.615921,
+        "year": "2009"
+      },
+      {
+        "expectancy": 0.001501,
+        "margin": 0.010455,
+        "n": 10967,
+        "payoff_ratio": 1.195007,
+        "win_rate": 0.466034,
+        "year": "2010"
+      },
+      {
+        "expectancy": -0.031312,
+        "margin": -0.292449,
+        "n": 12693,
+        "payoff_ratio": 0.598605,
+        "win_rate": 0.333097,
+        "year": "2011"
+      },
+      {
+        "expectancy": -0.012952,
+        "margin": -0.101383,
+        "n": 17281,
+        "payoff_ratio": 0.924815,
+        "win_rate": 0.418147,
+        "year": "2012"
+      },
+      {
+        "expectancy": -0.014126,
+        "margin": -0.090842,
+        "n": 12776,
+        "payoff_ratio": 0.99233,
+        "win_rate": 0.411083,
+        "year": "2013"
+      },
+      {
+        "expectancy": 0.027604,
+        "margin": 0.206479,
+        "n": 23602,
+        "payoff_ratio": 1.985071,
+        "win_rate": 0.54148,
+        "year": "2014"
+      },
+      {
+        "expectancy": 0.001102,
+        "margin": 0.002956,
+        "n": 6572,
+        "payoff_ratio": 1.21834,
+        "win_rate": 0.453743,
+        "year": "2015"
+      },
+      {
+        "expectancy": 0.016153,
+        "margin": 0.152664,
+        "n": 27359,
+        "payoff_ratio": 1.988331,
+        "win_rate": 0.487299,
+        "year": "2016"
+      },
+      {
+        "expectancy": 0.024575,
+        "margin": 0.192552,
+        "n": 71184,
+        "payoff_ratio": 1.850736,
+        "win_rate": 0.543338,
+        "year": "2022"
+      },
+      {
+        "expectancy": -0.012593,
+        "margin": -0.112613,
+        "n": 142377,
+        "payoff_ratio": 1.068789,
+        "win_rate": 0.370762,
+        "year": "2023"
+      },
+      {
+        "expectancy": 0.067631,
+        "margin": 0.229238,
+        "n": 68419,
+        "payoff_ratio": 1.82574,
+        "win_rate": 0.583127,
+        "year": "2024"
+      },
+      {
+        "expectancy": 0.029663,
+        "margin": 0.236551,
+        "n": 26334,
+        "payoff_ratio": 2.317595,
+        "win_rate": 0.537974,
+        "year": "2025"
+      },
+      {
+        "expectancy": -0.039768,
+        "margin": -0.233681,
+        "n": 72504,
+        "payoff_ratio": 0.848565,
+        "win_rate": 0.30728,
+        "year": "2026"
+      }
+    ],
+    "merged.x20.dist.expectancy": 0.008633,
+    "merged.x20.dist.holding": {
+      "avg_loss": 15.174388,
+      "avg_win": 18.112375
+    },
+    "merged.x20.dist.margin": 0.052212,
+    "merged.x20.dist.median_loss": -0.0392,
+    "merged.x20.dist.median_win": 0.0418,
+    "merged.x20.dist.n": 569940,
+    "merged.x20.dist.paired_vs_ref": {
+      "delta_ret_mean": -0.000714,
+      "delta_ret_quantiles": {
+        "p25": 0.0,
+        "p5": -0.0766,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p95": 0.0302
+      },
+      "flip_ref_loss_to_win": 7905,
+      "flip_ref_win_to_loss": 0,
+      "n_matched": 569837,
+      "share_better": 0.078,
+      "share_identical": 0.8293,
+      "share_worse": 0.0927,
+      "stopped_here_not_ref": {
+        "avg_ret_here": -0.246177,
+        "avg_ret_ref": -0.189067,
+        "n": 1340,
+        "share_here_better": 0.0
+      },
+      "stopped_ref_not_here": {
+        "avg_ret_here": -0.081539,
+        "avg_ret_ref": -0.116095,
+        "n": 70287,
+        "share_here_better": 0.6069
+      }
+    },
+    "merged.x20.dist.payoff_ratio": 1.51371,
+    "merged.x20.dist.profit_concentration": {
+      "expectancy_ex_top1pct_trades": -0.000508,
+      "top10pct_winners_profit_share": 0.4781,
+      "top1pct_winners_profit_share": 0.1274,
+      "top5pct_winners_profit_share": 0.3266
+    },
+    "merged.x20.dist.quantiles": {
+      "p1": -0.2508,
+      "p10": -0.1144,
+      "p25": -0.045,
+      "p5": -0.2099,
+      "p50": -0.0057,
+      "p75": 0.034,
+      "p90": 0.131,
+      "p95": 0.2336,
+      "p99": 0.537
+    },
+    "merged.x20.dist.win_rate": 0.45003,
+    "merged.x5.dist.avg_loss": -0.052507,
+    "merged.x5.dist.avg_win": 0.096626,
+    "merged.x5.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1078,
+      "ge_3x_avg_loss": 0.0732,
+      "ge_5x_avg_loss": 0.0369
+    },
+    "merged.x5.dist.buckets": [
+      {
+        "bin": "≤-15%",
+        "n": 4056,
+        "share": 0.0071
+      },
+      {
+        "bin": "-15~-10%",
+        "n": 20259,
+        "share": 0.0355
+      },
+      {
+        "bin": "-10~-5%",
+        "n": 159245,
+        "share": 0.2794
+      },
+      {
+        "bin": "-5~0%",
+        "n": 151201,
+        "share": 0.2653
+      },
+      {
+        "bin": "0~5%",
+        "n": 131494,
+        "share": 0.2307
+      },
+      {
+        "bin": "5~10%",
+        "n": 39702,
+        "share": 0.0697
+      },
+      {
+        "bin": "10~20%",
+        "n": 32581,
+        "share": 0.0572
+      },
+      {
+        "bin": "20~30%",
+        "n": 14672,
+        "share": 0.0257
+      },
+      {
+        "bin": ">30%",
+        "n": 16762,
+        "share": 0.0294
+      }
+    ],
+    "merged.x5.dist.by_reason": [
+      {
+        "avg_holding": 13.02,
+        "avg_ret": 0.030928,
+        "n": 375410,
+        "reason": "bbi_exit",
+        "share": 0.6586,
+        "win_rate": 0.5673
+      },
+      {
+        "avg_holding": 7.25,
+        "avg_ret": -0.078341,
+        "n": 166218,
+        "reason": "stop",
+        "share": 0.2916,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 26.41,
+        "avg_ret": 0.336533,
+        "n": 21136,
+        "reason": "bbi_exit+scaled",
+        "share": 0.0371,
+        "win_rate": 0.9985
+      },
+      {
+        "avg_holding": 5.99,
+        "avg_ret": -0.162781,
+        "n": 5647,
+        "reason": "stop_delayed",
+        "share": 0.0099,
+        "win_rate": 0.0019
+      },
+      {
+        "avg_holding": 37.71,
+        "avg_ret": 0.463865,
+        "n": 746,
+        "reason": "bbi_exit_delayed+scaled",
+        "share": 0.0013,
+        "win_rate": 0.9732
+      },
+      {
+        "avg_holding": 21.06,
+        "avg_ret": 0.027638,
+        "n": 740,
+        "reason": "bbi_exit_delayed",
+        "share": 0.0013,
+        "win_rate": 0.4622
+      },
+      {
+        "avg_holding": 10.56,
+        "avg_ret": 0.018858,
+        "n": 59,
+        "reason": "stop+scaled",
+        "share": 0.0001,
+        "win_rate": 0.7119
+      },
+      {
+        "avg_holding": 13.81,
+        "avg_ret": 0.004656,
+        "n": 16,
+        "reason": "stop_delayed+scaled",
+        "share": 0.0,
+        "win_rate": 0.5
+      }
+    ],
+    "merged.x5.dist.by_year": [
+      {
+        "expectancy": 0.003616,
+        "margin": 0.05192,
+        "n": 5470,
+        "payoff_ratio": 1.418218,
+        "win_rate": 0.465448,
+        "year": "2000"
+      },
+      {
+        "expectancy": 0.001493,
+        "margin": 0.017739,
+        "n": 5319,
+        "payoff_ratio": 1.116893,
+        "win_rate": 0.49013,
+        "year": "2001"
+      },
+      {
+        "expectancy": -0.029382,
+        "margin": -0.411055,
+        "n": 6692,
+        "payoff_ratio": 0.693842,
+        "win_rate": 0.179319,
+        "year": "2002"
+      },
+      {
+        "expectancy": -0.00283,
+        "margin": -0.02067,
+        "n": 15268,
+        "payoff_ratio": 1.326166,
+        "win_rate": 0.409222,
+        "year": "2003"
+      },
+      {
+        "expectancy": -0.013006,
+        "margin": -0.09964,
+        "n": 5877,
+        "payoff_ratio": 1.273866,
+        "win_rate": 0.34014,
+        "year": "2004"
+      },
+      {
+        "expectancy": -0.023477,
+        "margin": -0.151856,
+        "n": 6196,
+        "payoff_ratio": 1.279703,
+        "win_rate": 0.286798,
+        "year": "2005"
+      },
+      {
+        "expectancy": 0.062815,
+        "margin": 0.277772,
+        "n": 15580,
+        "payoff_ratio": 3.564483,
+        "win_rate": 0.496855,
+        "year": "2006"
+      },
+      {
+        "expectancy": 0.149669,
+        "margin": 0.597602,
+        "n": 7125,
+        "payoff_ratio": 5.233112,
+        "win_rate": 0.758035,
+        "year": "2007"
+      },
+      {
+        "expectancy": -0.022899,
+        "margin": -0.104404,
+        "n": 6897,
+        "payoff_ratio": 1.164056,
+        "win_rate": 0.357692,
+        "year": "2008"
+      },
+      {
+        "expectancy": 0.040029,
+        "margin": 0.304862,
+        "n": 3442,
+        "payoff_ratio": 2.297996,
+        "win_rate": 0.608077,
+        "year": "2009"
+      },
+      {
+        "expectancy": 0.005328,
+        "margin": 0.042266,
+        "n": 10967,
+        "payoff_ratio": 1.493937,
+        "win_rate": 0.443239,
+        "year": "2010"
+      },
+      {
+        "expectancy": -0.018845,
+        "margin": -0.218538,
+        "n": 12693,
+        "payoff_ratio": 0.853832,
+        "win_rate": 0.320886,
+        "year": "2011"
+      },
+      {
+        "expectancy": -0.012173,
+        "margin": -0.107498,
+        "n": 17281,
+        "payoff_ratio": 1.078125,
+        "win_rate": 0.373705,
+        "year": "2012"
+      },
+      {
+        "expectancy": -0.005343,
+        "margin": -0.042092,
+        "n": 12776,
+        "payoff_ratio": 1.359911,
+        "win_rate": 0.381653,
+        "year": "2013"
+      },
+      {
+        "expectancy": 0.020905,
+        "margin": 0.158632,
+        "n": 23602,
+        "payoff_ratio": 1.750508,
+        "win_rate": 0.522202,
+        "year": "2014"
+      },
+      {
+        "expectancy": -0.000156,
+        "margin": -0.000446,
+        "n": 6569,
+        "payoff_ratio": 1.396633,
+        "win_rate": 0.416806,
+        "year": "2015"
+      },
+      {
+        "expectancy": 0.010389,
+        "margin": 0.094785,
+        "n": 27390,
+        "payoff_ratio": 1.726775,
+        "win_rate": 0.461519,
+        "year": "2016"
+      },
+      {
+        "expectancy": 0.013712,
+        "margin": 0.106993,
+        "n": 71184,
+        "payoff_ratio": 1.659117,
+        "win_rate": 0.483058,
+        "year": "2022"
+      },
+      {
+        "expectancy": -0.011995,
+        "margin": -0.118988,
+        "n": 142376,
+        "payoff_ratio": 1.174174,
+        "win_rate": 0.340956,
+        "year": "2023"
+      },
+      {
+        "expectancy": 0.072856,
+        "margin": 0.292715,
+        "n": 68419,
+        "payoff_ratio": 3.063186,
+        "win_rate": 0.538827,
+        "year": "2024"
+      },
+      {
+        "expectancy": 0.025822,
+        "margin": 0.203469,
+        "n": 26334,
+        "payoff_ratio": 2.190898,
+        "win_rate": 0.51686,
+        "year": "2025"
+      },
+      {
+        "expectancy": -0.023321,
+        "margin": -0.173739,
+        "n": 72515,
+        "payoff_ratio": 1.241462,
+        "win_rate": 0.272399,
+        "year": "2026"
+      }
+    ],
+    "merged.x5.dist.expectancy": 0.009036,
+    "merged.x5.dist.holding": {
+      "avg_loss": 8.452642,
+      "avg_win": 16.586575
+    },
+    "merged.x5.dist.margin": 0.060591,
+    "merged.x5.dist.median_loss": -0.0579,
+    "merged.x5.dist.median_win": 0.0399,
+    "merged.x5.dist.n": 569972,
+    "merged.x5.dist.paired_vs_ref": {
+      "delta_ret_mean": -0.000321,
+      "delta_ret_quantiles": {
+        "p25": 0.0,
+        "p5": -0.034,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p95": 0.0472
+      },
+      "flip_ref_loss_to_win": 389,
+      "flip_ref_win_to_loss": 13763,
+      "n_matched": 569859,
+      "share_better": 0.1602,
+      "share_identical": 0.7469,
+      "share_worse": 0.0929,
+      "stopped_here_not_ref": {
+        "avg_ret_here": -0.071223,
+        "avg_ret_ref": -0.020962,
+        "n": 70476,
+        "share_here_better": 0.1653
+      },
+      "stopped_ref_not_here": {
+        "avg_ret_here": -0.042466,
+        "avg_ret_ref": -0.123563,
+        "n": 1616,
+        "share_here_better": 0.5427
+      }
+    },
+    "merged.x5.dist.payoff_ratio": 1.840262,
+    "merged.x5.dist.profit_concentration": {
+      "expectancy_ex_top1pct_trades": 0.000431,
+      "top10pct_winners_profit_share": 0.4821,
+      "top1pct_winners_profit_share": 0.128,
+      "top5pct_winners_profit_share": 0.3292
+    },
+    "merged.x5.dist.quantiles": {
+      "p1": -0.1374,
+      "p10": -0.0821,
+      "p25": -0.0629,
+      "p5": -0.0965,
+      "p50": -0.0108,
+      "p75": 0.0269,
+      "p90": 0.1146,
+      "p95": 0.2153,
+      "p99": 0.507829
+    },
+    "merged.x5.dist.win_rate": 0.412671,
+    "merged.x6.dist.avg_loss": -0.054933,
+    "merged.x6.dist.avg_win": 0.097241,
+    "merged.x6.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1071,
+      "ge_3x_avg_loss": 0.0717,
+      "ge_5x_avg_loss": 0.0353
+    },
+    "merged.x6.dist.buckets": [
+      {
+        "bin": "≤-15%",
+        "n": 4746,
+        "share": 0.0083
+      },
+      {
+        "bin": "-15~-10%",
+        "n": 30010,
+        "share": 0.0527
+      },
+      {
+        "bin": "-10~-5%",
+        "n": 133969,
+        "share": 0.235
+      },
+      {
+        "bin": "-5~0%",
+        "n": 160895,
+        "share": 0.2823
+      },
+      {
+        "bin": "0~5%",
+        "n": 133775,
+        "share": 0.2347
+      },
+      {
+        "bin": "5~10%",
+        "n": 40601,
+        "share": 0.0712
+      },
+      {
+        "bin": "10~20%",
+        "n": 33559,
+        "share": 0.0589
+      },
+      {
+        "bin": "20~30%",
+        "n": 15143,
+        "share": 0.0266
+      },
+      {
+        "bin": ">30%",
+        "n": 17264,
+        "share": 0.0303
+      }
+    ],
+    "merged.x6.dist.by_reason": [
+      {
+        "avg_holding": 13.31,
+        "avg_ret": 0.028287,
+        "n": 396877,
+        "reason": "bbi_exit",
+        "share": 0.6963,
+        "win_rate": 0.5473
+      },
+      {
+        "avg_holding": 8.2,
+        "avg_ret": -0.088668,
+        "n": 143814,
+        "reason": "stop",
+        "share": 0.2523,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 26.57,
+        "avg_ret": 0.333426,
+        "n": 22053,
+        "reason": "bbi_exit+scaled",
+        "share": 0.0387,
+        "win_rate": 0.998
+      },
+      {
+        "avg_holding": 6.09,
+        "avg_ret": -0.168093,
+        "n": 5561,
+        "reason": "stop_delayed",
+        "share": 0.0098,
+        "win_rate": 0.0005
+      },
+      {
+        "avg_holding": 20.58,
+        "avg_ret": 0.016717,
+        "n": 823,
+        "reason": "bbi_exit_delayed",
+        "share": 0.0014,
+        "win_rate": 0.4204
+      },
+      {
+        "avg_holding": 37.73,
+        "avg_ret": 0.459745,
+        "n": 776,
+        "reason": "bbi_exit_delayed+scaled",
+        "share": 0.0014,
+        "win_rate": 0.9729
+      },
+      {
+        "avg_holding": 11.58,
+        "avg_ret": 0.012975,
+        "n": 48,
+        "reason": "stop+scaled",
+        "share": 0.0001,
+        "win_rate": 0.625
+      },
+      {
+        "avg_holding": 12.8,
+        "avg_ret": 0.00673,
+        "n": 10,
+        "reason": "stop_delayed+scaled",
+        "share": 0.0,
+        "win_rate": 0.5
+      }
+    ],
+    "merged.x6.dist.by_year": [
+      {
+        "expectancy": 0.004037,
+        "margin": 0.05797,
+        "n": 5470,
+        "payoff_ratio": 1.432298,
+        "win_rate": 0.469104,
+        "year": "2000"
+      },
+      {
+        "expectancy": 0.00072,
+        "margin": 0.008337,
+        "n": 5319,
+        "payoff_ratio": 1.062703,
+        "win_rate": 0.493138,
+        "year": "2001"
+      },
+      {
+        "expectancy": -0.032188,
+        "margin": -0.427208,
+        "n": 6692,
+        "payoff_ratio": 0.646299,
+        "win_rate": 0.180215,
+        "year": "2002"
+      },
+      {
+        "expectancy": -0.000466,
+        "margin": -0.003366,
+        "n": 15268,
+        "payoff_ratio": 1.29684,
+        "win_rate": 0.432015,
+        "year": "2003"
+      },
+      {
+        "expectancy": -0.015321,
+        "margin": -0.113843,
+        "n": 5877,
+        "payoff_ratio": 1.189597,
+        "win_rate": 0.342862,
+        "year": "2004"
+      },
+      {
+        "expectancy": -0.024131,
+        "margin": -0.147889,
+        "n": 6196,
+        "payoff_ratio": 1.25283,
+        "win_rate": 0.295997,
+        "year": "2005"
+      },
+      {
+        "expectancy": 0.067565,
+        "margin": 0.295777,
+        "n": 15580,
+        "payoff_ratio": 3.582621,
+        "win_rate": 0.513992,
+        "year": "2006"
+      },
+      {
+        "expectancy": 0.150711,
+        "margin": 0.603463,
+        "n": 7125,
+        "payoff_ratio": 5.320278,
+        "win_rate": 0.761684,
+        "year": "2007"
+      },
+      {
+        "expectancy": -0.022823,
+        "margin": -0.102404,
+        "n": 6897,
+        "payoff_ratio": 1.119362,
+        "win_rate": 0.369436,
+        "year": "2008"
+      },
+      {
+        "expectancy": 0.040468,
+        "margin": 0.308975,
+        "n": 3442,
+        "payoff_ratio": 2.31437,
+        "win_rate": 0.610691,
+        "year": "2009"
+      },
+      {
+        "expectancy": 0.005434,
+        "margin": 0.042577,
+        "n": 10967,
+        "payoff_ratio": 1.457285,
+        "win_rate": 0.44953,
+        "year": "2010"
+      },
+      {
+        "expectancy": -0.020138,
+        "margin": -0.22624,
+        "n": 12693,
+        "payoff_ratio": 0.816228,
+        "win_rate": 0.324352,
+        "year": "2011"
+      },
+      {
+        "expectancy": -0.013189,
+        "margin": -0.113706,
+        "n": 17281,
+        "payoff_ratio": 1.029725,
+        "win_rate": 0.378971,
+        "year": "2012"
+      },
+      {
+        "expectancy": -0.005951,
+        "margin": -0.045644,
+        "n": 12776,
+        "payoff_ratio": 1.302749,
+        "win_rate": 0.388619,
+        "year": "2013"
+      },
+      {
+        "expectancy": 0.021677,
+        "margin": 0.163572,
+        "n": 23602,
+        "payoff_ratio": 1.746536,
+        "win_rate": 0.527667,
+        "year": "2014"
+      },
+      {
+        "expectancy": -0.000954,
+        "margin": -0.002703,
+        "n": 6571,
+        "payoff_ratio": 1.367277,
+        "win_rate": 0.419723,
+        "year": "2015"
+      },
+      {
+        "expectancy": 0.011252,
+        "margin": 0.102557,
+        "n": 27378,
+        "payoff_ratio": 1.730649,
+        "win_rate": 0.468771,
+        "year": "2016"
+      },
+      {
+        "expectancy": 0.015487,
+        "margin": 0.119351,
+        "n": 71184,
+        "payoff_ratio": 1.640933,
+        "win_rate": 0.498005,
+        "year": "2022"
+      },
+      {
+        "expectancy": -0.012425,
+        "margin": -0.120048,
+        "n": 142376,
+        "payoff_ratio": 1.134959,
+        "win_rate": 0.348345,
+        "year": "2023"
+      },
+      {
+        "expectancy": 0.074051,
+        "margin": 0.289852,
+        "n": 68419,
+        "payoff_ratio": 2.84299,
+        "win_rate": 0.550067,
+        "year": "2024"
+      },
+      {
+        "expectancy": 0.02704,
+        "margin": 0.213272,
+        "n": 26334,
+        "payoff_ratio": 2.202206,
+        "win_rate": 0.525556,
+        "year": "2025"
+      },
+      {
+        "expectancy": -0.025284,
+        "margin": -0.181693,
+        "n": 72515,
+        "payoff_ratio": 1.166925,
+        "win_rate": 0.27979,
+        "year": "2026"
+      }
+    ],
+    "merged.x6.dist.expectancy": 0.009236,
+    "merged.x6.dist.holding": {
+      "avg_loss": 9.336663,
+      "avg_win": 16.863366
+    },
+    "merged.x6.dist.margin": 0.060694,
+    "merged.x6.dist.median_loss": -0.0531,
+    "merged.x6.dist.median_win": 0.0403,
+    "merged.x6.dist.n": 569962,
+    "merged.x6.dist.paired_vs_ref": {
+      "delta_ret_mean": -0.000121,
+      "delta_ret_quantiles": {
+        "p25": 0.0,
+        "p5": -0.0206,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p95": 0.0366
+      },
+      "flip_ref_loss_to_win": 510,
+      "flip_ref_win_to_loss": 8753,
+      "n_matched": 569859,
+      "share_better": 0.1346,
+      "share_identical": 0.7968,
+      "share_worse": 0.0686,
+      "stopped_here_not_ref": {
+        "avg_ret_here": -0.079673,
+        "avg_ret_ref": -0.026955,
+        "n": 48342,
+        "share_here_better": 0.125
+      },
+      "stopped_ref_not_here": {
+        "avg_ret_here": -0.032918,
+        "avg_ret_ref": -0.121537,
+        "n": 1874,
+        "share_here_better": 0.5934
+      }
+    },
+    "merged.x6.dist.payoff_ratio": 1.770182,
+    "merged.x6.dist.profit_concentration": {
+      "expectancy_ex_top1pct_trades": 0.000522,
+      "top10pct_winners_profit_share": 0.4809,
+      "top1pct_winners_profit_share": 0.1277,
+      "top5pct_winners_profit_share": 0.3284
+    },
+    "merged.x6.dist.quantiles": {
+      "p1": -0.1441,
+      "p10": -0.0898,
+      "p25": -0.0687,
+      "p5": -0.1042,
+      "p50": -0.0094,
+      "p75": 0.0285,
+      "p90": 0.1186,
+      "p95": 0.2199,
+      "p99": 0.514539
+    },
+    "merged.x6.dist.win_rate": 0.421681,
+    "merged.x7.dist.avg_loss": -0.0568,
+    "merged.x7.dist.avg_win": 0.097724,
+    "merged.x7.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1063,
+      "ge_3x_avg_loss": 0.0707,
+      "ge_5x_avg_loss": 0.0341
+    },
+    "merged.x7.dist.buckets": [
+      {
+        "bin": "≤-15%",
+        "n": 5809,
+        "share": 0.0102
+      },
+      {
+        "bin": "-15~-10%",
+        "n": 44518,
+        "share": 0.0781
+      },
+      {
+        "bin": "-10~-5%",
+        "n": 107584,
+        "share": 0.1888
+      },
+      {
+        "bin": "-5~0%",
+        "n": 167746,
+        "share": 0.2943
+      },
+      {
+        "bin": "0~5%",
+        "n": 135395,
+        "share": 0.2376
+      },
+      {
+        "bin": "5~10%",
+        "n": 41396,
+        "share": 0.0726
+      },
+      {
+        "bin": "10~20%",
+        "n": 34366,
+        "share": 0.0603
+      },
+      {
+        "bin": "20~30%",
+        "n": 15480,
+        "share": 0.0272
+      },
+      {
+        "bin": ">30%",
+        "n": 17663,
+        "share": 0.031
+      }
+    ],
+    "merged.x7.dist.by_reason": [
+      {
+        "avg_holding": 13.61,
+        "avg_ret": 0.025826,
+        "n": 415524,
+        "reason": "bbi_exit",
+        "share": 0.729,
+        "win_rate": 0.5304
+      },
+      {
+        "avg_holding": 9.11,
+        "avg_ret": -0.099001,
+        "n": 124487,
+        "reason": "stop",
+        "share": 0.2184,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 26.73,
+        "avg_ret": 0.330354,
+        "n": 22819,
+        "reason": "bbi_exit+scaled",
+        "share": 0.04,
+        "win_rate": 0.997
+      },
+      {
+        "avg_holding": 6.28,
+        "avg_ret": -0.175018,
+        "n": 5365,
+        "reason": "stop_delayed",
+        "share": 0.0094,
+        "win_rate": 0.0002
+      },
+      {
+        "avg_holding": 20.09,
+        "avg_ret": 0.005664,
+        "n": 918,
+        "reason": "bbi_exit_delayed",
+        "share": 0.0016,
+        "win_rate": 0.3845
+      },
+      {
+        "avg_holding": 37.68,
+        "avg_ret": 0.456347,
+        "n": 800,
+        "reason": "bbi_exit_delayed+scaled",
+        "share": 0.0014,
+        "win_rate": 0.9712
+      },
+      {
+        "avg_holding": 13.75,
+        "avg_ret": 0.006558,
+        "n": 36,
+        "reason": "stop+scaled",
+        "share": 0.0001,
+        "win_rate": 0.5556
+      },
+      {
+        "avg_holding": 13.75,
+        "avg_ret": -0.016275,
+        "n": 8,
+        "reason": "stop_delayed+scaled",
+        "share": 0.0,
+        "win_rate": 0.375
+      }
+    ],
+    "merged.x7.dist.by_year": [
+      {
+        "expectancy": 0.004122,
+        "margin": 0.059162,
+        "n": 5470,
+        "payoff_ratio": 1.430699,
+        "win_rate": 0.470567,
+        "year": "2000"
+      },
+      {
+        "expectancy": -0.000382,
+        "margin": -0.00431,
+        "n": 5319,
+        "payoff_ratio": 1.003447,
+        "win_rate": 0.49483,
+        "year": "2001"
+      },
+      {
+        "expectancy": -0.034514,
+        "margin": -0.44134,
+        "n": 6692,
+        "payoff_ratio": 0.606935,
+        "win_rate": 0.180962,
+        "year": "2002"
+      },
+      {
+        "expectancy": 0.001896,
+        "margin": 0.013633,
+        "n": 15267,
+        "payoff_ratio": 1.286894,
+        "win_rate": 0.450907,
+        "year": "2003"
+      },
+      {
+        "expectancy": -0.017013,
+        "margin": -0.123083,
+        "n": 5876,
+        "payoff_ratio": 1.132669,
+        "win_rate": 0.345813,
+        "year": "2004"
+      },
+      {
+        "expectancy": -0.024379,
+        "margin": -0.142607,
+        "n": 6196,
+        "payoff_ratio": 1.230711,
+        "win_rate": 0.305681,
+        "year": "2005"
+      },
+      {
+        "expectancy": 0.070888,
+        "margin": 0.309282,
+        "n": 15580,
+        "payoff_ratio": 3.628108,
+        "win_rate": 0.525353,
+        "year": "2006"
+      },
+      {
+        "expectancy": 0.151307,
+        "margin": 0.607114,
+        "n": 7125,
+        "payoff_ratio": 5.3769,
+        "win_rate": 0.76393,
+        "year": "2007"
+      },
+      {
+        "expectancy": -0.022914,
+        "margin": -0.101657,
+        "n": 6897,
+        "payoff_ratio": 1.084866,
+        "win_rate": 0.37799,
+        "year": "2008"
+      },
+      {
+        "expectancy": 0.040817,
+        "margin": 0.312063,
+        "n": 3442,
+        "payoff_ratio": 2.325989,
+        "win_rate": 0.612725,
+        "year": "2009"
+      },
+      {
+        "expectancy": 0.005511,
+        "margin": 0.042594,
+        "n": 10967,
+        "payoff_ratio": 1.434474,
+        "win_rate": 0.45336,
+        "year": "2010"
+      },
+      {
+        "expectancy": -0.021322,
+        "margin": -0.233666,
+        "n": 12693,
+        "payoff_ratio": 0.783747,
+        "win_rate": 0.326952,
+        "year": "2011"
+      },
+      {
+        "expectancy": -0.014064,
+        "margin": -0.118624,
+        "n": 17281,
+        "payoff_ratio": 0.992061,
+        "win_rate": 0.383369,
+        "year": "2012"
+      },
+      {
+        "expectancy": -0.006914,
+        "margin": -0.051678,
+        "n": 12776,
+        "payoff_ratio": 1.247616,
+        "win_rate": 0.393237,
+        "year": "2013"
+      },
+      {
+        "expectancy": 0.022559,
+        "margin": 0.169267,
+        "n": 23602,
+        "payoff_ratio": 1.762741,
+        "win_rate": 0.531226,
+        "year": "2014"
+      },
+      {
+        "expectancy": -0.001807,
+        "margin": -0.005081,
+        "n": 6572,
+        "payoff_ratio": 1.338464,
+        "win_rate": 0.42255,
+        "year": "2015"
+      },
+      {
+        "expectancy": 0.012122,
+        "margin": 0.110507,
+        "n": 27374,
+        "payoff_ratio": 1.751993,
+        "win_rate": 0.47388,
+        "year": "2016"
+      },
+      {
+        "expectancy": 0.017475,
+        "margin": 0.133759,
+        "n": 71184,
+        "payoff_ratio": 1.651223,
+        "win_rate": 0.510943,
+        "year": "2022"
+      },
+      {
+        "expectancy": -0.012644,
+        "margin": -0.119949,
+        "n": 142376,
+        "payoff_ratio": 1.108621,
+        "win_rate": 0.354294,
+        "year": "2023"
+      },
+      {
+        "expectancy": 0.074623,
+        "margin": 0.286428,
+        "n": 68419,
+        "payoff_ratio": 2.687181,
+        "win_rate": 0.557637,
+        "year": "2024"
+      },
+      {
+        "expectancy": 0.027862,
+        "margin": 0.220389,
+        "n": 26334,
+        "payoff_ratio": 2.224333,
+        "win_rate": 0.530531,
+        "year": "2025"
+      },
+      {
+        "expectancy": -0.026884,
+        "margin": -0.186982,
+        "n": 72515,
+        "payoff_ratio": 1.114631,
+        "win_rate": 0.285913,
+        "year": "2026"
+      }
+    ],
+    "merged.x7.dist.expectancy": 0.009434,
+    "merged.x7.dist.holding": {
+      "avg_loss": 10.136592,
+      "avg_win": 17.108874
+    },
+    "merged.x7.dist.margin": 0.061051,
+    "merged.x7.dist.median_loss": -0.047,
+    "merged.x7.dist.median_win": 0.0407,
+    "merged.x7.dist.n": 569957,
+    "merged.x7.dist.paired_vs_ref": {
+      "delta_ret_mean": 7.6e-05,
+      "delta_ret_quantiles": {
+        "p25": 0.0,
+        "p5": 0.0,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p95": 0.0258
+      },
+      "flip_ref_loss_to_win": 677,
+      "flip_ref_win_to_loss": 4962,
+      "n_matched": 569859,
+      "share_better": 0.1051,
+      "share_identical": 0.848,
+      "share_worse": 0.0469,
+      "stopped_here_not_ref": {
+        "avg_ret_here": -0.087915,
+        "avg_ret_ref": -0.033282,
+        "n": 29532,
+        "share_here_better": 0.0871
+      },
+      "stopped_ref_not_here": {
+        "avg_ret_here": -0.029644,
+        "avg_ret_ref": -0.119422,
+        "n": 2385,
+        "share_here_better": 0.6478
+      }
+    },
+    "merged.x7.dist.payoff_ratio": 1.72051,
+    "merged.x7.dist.profit_concentration": {
+      "expectancy_ex_top1pct_trades": 0.000642,
+      "top10pct_winners_profit_share": 0.4798,
+      "top1pct_winners_profit_share": 0.1273,
+      "top5pct_winners_profit_share": 0.3275
+    },
+    "merged.x7.dist.quantiles": {
+      "p1": -0.1506,
+      "p10": -0.0974,
+      "p25": -0.0626,
+      "p5": -0.1119,
+      "p50": -0.0084,
+      "p75": 0.0298,
+      "p90": 0.1217,
+      "p95": 0.2234,
+      "p99": 0.519244
+    },
+    "merged.x7.dist.win_rate": 0.428629,
+    "merged.x8.dist.avg_loss": -0.058261,
+    "merged.x8.dist.avg_win": 0.098095,
+    "merged.x8.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1056,
+      "ge_3x_avg_loss": 0.0698,
+      "ge_5x_avg_loss": 0.0331
+    },
+    "merged.x8.dist.buckets": [
+      {
+        "bin": "≤-15%",
+        "n": 7345,
+        "share": 0.0129
+      },
+      {
+        "bin": "-15~-10%",
+        "n": 64262,
+        "share": 0.1128
+      },
+      {
+        "bin": "-10~-5%",
+        "n": 78865,
+        "share": 0.1384
+      },
+      {
+        "bin": "-5~0%",
+        "n": 172188,
+        "share": 0.3021
+      },
+      {
+        "bin": "0~5%",
+        "n": 136596,
+        "share": 0.2397
+      },
+      {
+        "bin": "5~10%",
+        "n": 42007,
+        "share": 0.0737
+      },
+      {
+        "bin": "10~20%",
+        "n": 35003,
+        "share": 0.0614
+      },
+      {
+        "bin": "20~30%",
+        "n": 15728,
+        "share": 0.0276
+      },
+      {
+        "bin": ">30%",
+        "n": 17953,
+        "share": 0.0315
+      }
+    ],
+    "merged.x8.dist.by_reason": [
+      {
+        "avg_holding": 13.88,
+        "avg_ret": 0.02358,
+        "n": 431120,
+        "reason": "bbi_exit",
+        "share": 0.7564,
+        "win_rate": 0.5167
+      },
+      {
+        "avg_holding": 9.98,
+        "avg_ret": -0.109205,
+        "n": 108417,
+        "reason": "stop",
+        "share": 0.1902,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 26.88,
+        "avg_ret": 0.327697,
+        "n": 23471,
+        "reason": "bbi_exit+scaled",
+        "share": 0.0412,
+        "win_rate": 0.9959
+      },
+      {
+        "avg_holding": 6.61,
+        "avg_ret": -0.182947,
+        "n": 5045,
+        "reason": "stop_delayed",
+        "share": 0.0089,
+        "win_rate": 0.0002
+      },
+      {
+        "avg_holding": 19.22,
+        "avg_ret": -0.00772,
+        "n": 1035,
+        "reason": "bbi_exit_delayed",
+        "share": 0.0018,
+        "win_rate": 0.343
+      },
+      {
+        "avg_holding": 37.54,
+        "avg_ret": 0.452437,
+        "n": 824,
+        "reason": "bbi_exit_delayed+scaled",
+        "share": 0.0014,
+        "win_rate": 0.9709
+      },
+      {
+        "avg_holding": 17.43,
+        "avg_ret": -0.002413,
+        "n": 30,
+        "reason": "stop+scaled",
+        "share": 0.0001,
+        "win_rate": 0.4
+      },
+      {
+        "avg_holding": 13.4,
+        "avg_ret": -0.0356,
+        "n": 5,
+        "reason": "stop_delayed+scaled",
+        "share": 0.0,
+        "win_rate": 0.2
+      }
+    ],
+    "merged.x8.dist.by_year": [
+      {
+        "expectancy": 0.004152,
+        "margin": 0.059624,
+        "n": 5470,
+        "payoff_ratio": 1.42803,
+        "win_rate": 0.471481,
+        "year": "2000"
+      },
+      {
+        "expectancy": -0.000653,
+        "margin": -0.007251,
+        "n": 5319,
+        "payoff_ratio": 0.983543,
+        "win_rate": 0.496898,
+        "year": "2001"
+      },
+      {
+        "expectancy": -0.036469,
+        "margin": -0.451726,
+        "n": 6692,
+        "payoff_ratio": 0.579438,
+        "win_rate": 0.181411,
+        "year": "2002"
+      },
+      {
+        "expectancy": 0.004468,
+        "margin": 0.032089,
+        "n": 15267,
+        "payoff_ratio": 1.29334,
+        "win_rate": 0.468134,
+        "year": "2003"
+      },
+      {
+        "expectancy": -0.018941,
+        "margin": -0.133884,
+        "n": 5876,
+        "payoff_ratio": 1.08022,
+        "win_rate": 0.346835,
+        "year": "2004"
+      },
+      {
+        "expectancy": -0.023942,
+        "margin": -0.134718,
+        "n": 6196,
+        "payoff_ratio": 1.224207,
+        "win_rate": 0.314881,
+        "year": "2005"
+      },
+      {
+        "expectancy": 0.073576,
+        "margin": 0.320299,
+        "n": 15580,
+        "payoff_ratio": 3.686082,
+        "win_rate": 0.533697,
+        "year": "2006"
+      },
+      {
+        "expectancy": 0.151753,
+        "margin": 0.611265,
+        "n": 7125,
+        "payoff_ratio": 5.467063,
+        "win_rate": 0.765895,
+        "year": "2007"
+      },
+      {
+        "expectancy": -0.02287,
+        "margin": -0.100869,
+        "n": 6897,
+        "payoff_ratio": 1.055924,
+        "win_rate": 0.38553,
+        "year": "2008"
+      },
+      {
+        "expectancy": 0.041004,
+        "margin": 0.313902,
+        "n": 3442,
+        "payoff_ratio": 2.333495,
+        "win_rate": 0.613887,
+        "year": "2009"
+      },
+      {
+        "expectancy": 0.005447,
+        "margin": 0.041547,
+        "n": 10967,
+        "payoff_ratio": 1.405383,
+        "win_rate": 0.457281,
+        "year": "2010"
+      },
+      {
+        "expectancy": -0.022574,
+        "margin": -0.241861,
+        "n": 12693,
+        "payoff_ratio": 0.754403,
+        "win_rate": 0.328134,
+        "year": "2011"
+      },
+      {
+        "expectancy": -0.014602,
+        "margin": -0.120854,
+        "n": 17281,
+        "payoff_ratio": 0.965208,
+        "win_rate": 0.387998,
+        "year": "2012"
+      },
+      {
+        "expectancy": -0.007799,
+        "margin": -0.056826,
+        "n": 12776,
+        "payoff_ratio": 1.200476,
+        "win_rate": 0.397621,
+        "year": "2013"
+      },
+      {
+        "expectancy": 0.023337,
+        "margin": 0.17452,
+        "n": 23602,
+        "payoff_ratio": 1.783592,
+        "win_rate": 0.533768,
+        "year": "2014"
+      },
+      {
+        "expectancy": -0.002959,
+        "margin": -0.008274,
+        "n": 6572,
+        "payoff_ratio": 1.311338,
+        "win_rate": 0.424376,
+        "year": "2015"
+      },
+      {
+        "expectancy": 0.012926,
+        "margin": 0.118136,
+        "n": 27366,
+        "payoff_ratio": 1.777969,
+        "win_rate": 0.478112,
+        "year": "2016"
+      },
+      {
+        "expectancy": 0.019044,
+        "margin": 0.145727,
+        "n": 71184,
+        "payoff_ratio": 1.669513,
+        "win_rate": 0.520328,
+        "year": "2022"
+      },
+      {
+        "expectancy": -0.012646,
+        "margin": -0.118161,
+        "n": 142376,
+        "payoff_ratio": 1.097026,
+        "win_rate": 0.358705,
+        "year": "2023"
+      },
+      {
+        "expectancy": 0.074833,
+        "margin": 0.28318,
+        "n": 68419,
+        "payoff_ratio": 2.575016,
+        "win_rate": 0.562899,
+        "year": "2024"
+      },
+      {
+        "expectancy": 0.02832,
+        "margin": 0.224163,
+        "n": 26334,
+        "payoff_ratio": 2.239159,
+        "win_rate": 0.532885,
+        "year": "2025"
+      },
+      {
+        "expectancy": -0.028447,
+        "margin": -0.192324,
+        "n": 72513,
+        "payoff_ratio": 1.070323,
+        "win_rate": 0.290693,
+        "year": "2026"
+      }
+    ],
+    "merged.x8.dist.expectancy": 0.009578,
+    "merged.x8.dist.holding": {
+      "avg_loss": 10.848503,
+      "avg_win": 17.309119
+    },
+    "merged.x8.dist.margin": 0.06126,
+    "merged.x8.dist.median_loss": -0.0443,
+    "merged.x8.dist.median_win": 0.041,
+    "merged.x8.dist.n": 569947,
+    "merged.x8.dist.paired_vs_ref": {
+      "delta_ret_mean": 0.000219,
+      "delta_ret_quantiles": {
+        "p25": 0.0,
+        "p5": 0.0,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p95": 0.0134
+      },
+      "flip_ref_loss_to_win": 959,
+      "flip_ref_win_to_loss": 2257,
+      "n_matched": 569858,
+      "share_better": 0.0686,
+      "share_identical": 0.8999,
+      "share_worse": 0.0315,
+      "stopped_here_not_ref": {
+        "avg_ret_here": -0.096059,
+        "avg_ret_ref": -0.040864,
+        "n": 14701,
+        "share_here_better": 0.0553
+      },
+      "stopped_ref_not_here": {
+        "avg_ret_here": -0.029303,
+        "avg_ret_ref": -0.116091,
+        "n": 3614,
+        "share_here_better": 0.7205
+      }
+    },
+    "merged.x8.dist.payoff_ratio": 1.68372,
+    "merged.x8.dist.profit_concentration": {
+      "expectancy_ex_top1pct_trades": 0.000724,
+      "top10pct_winners_profit_share": 0.4791,
+      "top1pct_winners_profit_share": 0.1271,
+      "top5pct_winners_profit_share": 0.327
+    },
+    "merged.x8.dist.quantiles": {
+      "p1": -0.1569,
+      "p10": -0.1049,
+      "p25": -0.0548,
+      "p5": -0.1194,
+      "p50": -0.0077,
+      "p75": 0.0308,
+      "p90": 0.1239,
+      "p95": 0.2255,
+      "p99": 0.5231
+    },
+    "merged.x8.dist.win_rate": 0.433877,
+    "provenance.cmdline": "--scan-widths --trade-dist --tag r44_scan_dist",
+    "provenance.data_last_date": "2026-09-04",
+    "provenance.git_dirty": false,
+    "provenance.git_sha": "ce48de678f",
+    "provenance.n_codes": 5576,
+    "provenance.universe_rule": "ashare_full_asof",
+    "provenance.universe_sha256": "f0692547ad66f1b2",
+    "readings.mining_a.ref.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1026,
+      "ge_3x_avg_loss": 0.0668,
+      "ge_5x_avg_loss": 0.0303
+    },
+    "readings.mining_a.ref.dist.margin": 0.070368,
+    "readings.mining_a.ref.dist.payoff_ratio": 1.612608,
+    "readings.mining_a.ref.dist.win_rate": 0.453128,
+    "readings.mining_a.x10.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1028,
+      "ge_3x_avg_loss": 0.0665,
+      "ge_5x_avg_loss": 0.0299
+    },
+    "readings.mining_a.x10.dist.margin": 0.07223,
+    "readings.mining_a.x10.dist.payoff_ratio": 1.587944,
+    "readings.mining_a.x10.dist.win_rate": 0.458637,
+    "readings.mining_a.x12.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1024,
+      "ge_3x_avg_loss": 0.0661,
+      "ge_5x_avg_loss": 0.0294
+    },
+    "readings.mining_a.x12.dist.margin": 0.073111,
+    "readings.mining_a.x12.dist.payoff_ratio": 1.568456,
+    "readings.mining_a.x12.dist.win_rate": 0.46245,
+    "readings.mining_a.x15.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1023,
+      "ge_3x_avg_loss": 0.0658,
+      "ge_5x_avg_loss": 0.0292
+    },
+    "readings.mining_a.x15.dist.margin": 0.074666,
+    "readings.mining_a.x15.dist.payoff_ratio": 1.558519,
+    "readings.mining_a.x15.dist.win_rate": 0.465517,
+    "readings.mining_a.x20.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1038,
+      "ge_3x_avg_loss": 0.0668,
+      "ge_5x_avg_loss": 0.0297
+    },
+    "readings.mining_a.x20.dist.margin": 0.080406,
+    "readings.mining_a.x20.dist.payoff_ratio": 1.573945,
+    "readings.mining_a.x20.dist.win_rate": 0.468914,
+    "readings.mining_a.x5.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1044,
+      "ge_3x_avg_loss": 0.0694,
+      "ge_5x_avg_loss": 0.0334
+    },
+    "readings.mining_a.x5.dist.margin": 0.067587,
+    "readings.mining_a.x5.dist.payoff_ratio": 1.730637,
+    "readings.mining_a.x5.dist.win_rate": 0.433802,
+    "readings.mining_a.x6.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1039,
+      "ge_3x_avg_loss": 0.0685,
+      "ge_5x_avg_loss": 0.0323
+    },
+    "readings.mining_a.x6.dist.margin": 0.06929,
+    "readings.mining_a.x6.dist.payoff_ratio": 1.685537,
+    "readings.mining_a.x6.dist.win_rate": 0.441655,
+    "readings.mining_a.x7.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1036,
+      "ge_3x_avg_loss": 0.0678,
+      "ge_5x_avg_loss": 0.0314
+    },
+    "readings.mining_a.x7.dist.margin": 0.070449,
+    "readings.mining_a.x7.dist.payoff_ratio": 1.65239,
+    "readings.mining_a.x7.dist.win_rate": 0.447467,
+    "readings.mining_a.x8.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1034,
+      "ge_3x_avg_loss": 0.0675,
+      "ge_5x_avg_loss": 0.0308
+    },
+    "readings.mining_a.x8.dist.margin": 0.071766,
+    "readings.mining_a.x8.dist.payoff_ratio": 1.627429,
+    "readings.mining_a.x8.dist.win_rate": 0.452366,
+    "readings.mining_b.ref.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1058,
+      "ge_3x_avg_loss": 0.0697,
+      "ge_5x_avg_loss": 0.0334
+    },
+    "readings.mining_b.ref.dist.margin": 0.05483,
+    "readings.mining_b.ref.dist.payoff_ratio": 1.680984,
+    "readings.mining_b.ref.dist.win_rate": 0.427828,
+    "readings.mining_b.x10.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1056,
+      "ge_3x_avg_loss": 0.0692,
+      "ge_5x_avg_loss": 0.0328
+    },
+    "readings.mining_b.x10.dist.margin": 0.055012,
+    "readings.mining_b.x10.dist.payoff_ratio": 1.654809,
+    "readings.mining_b.x10.dist.win_rate": 0.431687,
+    "readings.mining_b.x12.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1038,
+      "ge_3x_avg_loss": 0.0674,
+      "ge_5x_avg_loss": 0.0314
+    },
+    "readings.mining_b.x12.dist.margin": 0.051702,
+    "readings.mining_b.x12.dist.payoff_ratio": 1.606826,
+    "readings.mining_b.x12.dist.win_rate": 0.435311,
+    "readings.mining_b.x15.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1012,
+      "ge_3x_avg_loss": 0.0651,
+      "ge_5x_avg_loss": 0.0297
+    },
+    "readings.mining_b.x15.dist.margin": 0.04638,
+    "readings.mining_b.x15.dist.payoff_ratio": 1.550995,
+    "readings.mining_b.x15.dist.win_rate": 0.438384,
+    "readings.mining_b.x20.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.0979,
+      "ge_3x_avg_loss": 0.062,
+      "ge_5x_avg_loss": 0.0276
+    },
+    "readings.mining_b.x20.dist.margin": 0.038839,
+    "readings.mining_b.x20.dist.payoff_ratio": 1.488722,
+    "readings.mining_b.x20.dist.win_rate": 0.440651,
+    "readings.mining_b.x5.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1095,
+      "ge_3x_avg_loss": 0.0751,
+      "ge_5x_avg_loss": 0.0386
+    },
+    "readings.mining_b.x5.dist.margin": 0.057059,
+    "readings.mining_b.x5.dist.payoff_ratio": 1.897568,
+    "readings.mining_b.x5.dist.win_rate": 0.402176,
+    "readings.mining_b.x6.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1085,
+      "ge_3x_avg_loss": 0.0734,
+      "ge_5x_avg_loss": 0.0367
+    },
+    "readings.mining_b.x6.dist.margin": 0.056409,
+    "readings.mining_b.x6.dist.payoff_ratio": 1.814116,
+    "readings.mining_b.x6.dist.win_rate": 0.411761,
+    "readings.mining_b.x7.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1076,
+      "ge_3x_avg_loss": 0.0721,
+      "ge_5x_avg_loss": 0.0354
+    },
+    "readings.mining_b.x7.dist.margin": 0.056401,
+    "readings.mining_b.x7.dist.payoff_ratio": 1.755788,
+    "readings.mining_b.x7.dist.win_rate": 0.419273,
+    "readings.mining_b.x8.dist.big_win_share": {
+      "ge_2x_avg_loss": 0.1068,
+      "ge_3x_avg_loss": 0.071,
+      "ge_5x_avg_loss": 0.0343
+    },
+    "readings.mining_b.x8.dist.margin": 0.056089,
+    "readings.mining_b.x8.dist.payoff_ratio": 1.71292,
+    "readings.mining_b.x8.dist.win_rate": 0.424695,
+    "verdict": "falsified",
+    "window_usage": {
+      "k": null,
+      "note": "扫描模式只读挖掘 A∪B——判定段不读、批次门不触发（v2 纪律）",
+      "window": "not_read"
+    }
+  },
+  "kind": "r44_dist",
+  "missing": [],
+  "path": "results/R44/r44_scan_dist.json",
+  "schema": "result_digest/v1",
+  "source_name": "_plan_width_scan__r44_scan_dist.json",
+  "source_sha256": "6aa2d950a2064a1fe08f7d882fad66e553a23b0f24fcadc91cc1617f603b8daa",
+  "tag": "r44_scan_dist",
+  "unit": "R44"
+}
