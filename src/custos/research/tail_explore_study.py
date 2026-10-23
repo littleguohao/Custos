@@ -437,6 +437,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=1,
         help="warm 加载并行路数（同 tail_feature_study）",
     )
+    ap.add_argument(
+        "--score-workers",
+        type=int,
+        default=1,
+        help="as-of V0 分批量打分进程数（v0.447 score_pool：多进程 + 跨研究落盘缓存，读数逐位不变）",
+    )
     ap.add_argument("--tag", default="r49_v1")
     ap.add_argument(
         "--r48-tag",

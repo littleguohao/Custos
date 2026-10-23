@@ -693,7 +693,7 @@ class TestProductionRecordUse:
         monkeypatch.setattr(
             brs,
             "warm_gates",
-            lambda codes, regime, index_df, *, gates, count, cost_bps, start, end, warmup_bars=0, load_workers=1: (
+            lambda codes, regime, index_df, *, gates, count, cost_bps, start, end, warmup_bars=0, load_workers=1, score_workers=1: (
                 spec[(start, end)]
             ),
         )
@@ -812,7 +812,7 @@ class TestProductionRecordUse:
         monkeypatch.setattr(
             brs,
             "warm_gates",
-            lambda codes, regime, index_df, *, gates, count, cost_bps, start, end, warmup_bars=0, load_workers=1: (
+            lambda codes, regime, index_df, *, gates, count, cost_bps, start, end, warmup_bars=0, load_workers=1, score_workers=1: (
                 spec[(start, end)]
             ),
         )
@@ -1439,17 +1439,22 @@ class TestR45Mode:
 class TestPrescoreAndRefDedupe:
     """v0.446 R40/R45 提速：母体 V0 分预算与惰性逐位一致；参照档交易集复用。"""
 
-    @staticmethod
-    def _inline_executor(n, index_df):
+    @pytest.fixture(autouse=True)
+    def _inline_pool(self, monkeypatch):
+        """score_pool 的 executor 换成进程内（测试 monkeypatch 的假打分对子进程不可见）。"""
         import contextlib
 
-        brs._sw_init(index_df)
+        from custos.research import score_pool as sp
 
         class _Ex:
             def map(self, fn, it, chunksize=1):
                 return map(fn, it)
 
-        return contextlib.nullcontext(_Ex())
+        def factory(n, initargs):
+            sp._w_init(*initargs)
+            return contextlib.nullcontext(_Ex())
+
+        monkeypatch.setattr(sp, "EXECUTOR_FACTORY", factory)
 
     def test_prescore_bit_identical_to_lazy(self, monkeypatch):
         import random as _r
@@ -1500,7 +1505,6 @@ class TestPrescoreAndRefDedupe:
             object(),
             pre_cache,
             4,
-            executor_factory=self._inline_executor,
         )
         assert n == 7 and pre_cache == lazy_cache  # 8 bar − 1 根现成分
         calls.clear()
@@ -1521,7 +1525,6 @@ class TestPrescoreAndRefDedupe:
                 object(),
                 pre_cache,
                 4,
-                executor_factory=self._inline_executor,
             )
             == 0
         )
@@ -1558,9 +1561,7 @@ class TestPrescoreAndRefDedupe:
             score_cache=lazy,
         )
         pre: dict = {}
-        brs.prescore_pool(
-            pool, per_code, object(), pre, 2, executor_factory=self._inline_executor
-        )
+        brs.prescore_pool(pool, per_code, object(), pre, 2)
         assert pre == lazy and set(pre) == {
             (s, "000001", i) for s in per_code for i in (0, 1)
         }

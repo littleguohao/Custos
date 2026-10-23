@@ -63,6 +63,9 @@ uv run python -m custos.research factor_exit_study --tag r39_v2_pre \
 #   --score-workers N：母体缺分 bar 先多进程一次算完（读数与原惰性串行逐位一致，不进冻结哈希）；
 #   stderr 现有 [prescore] 进度与逐臂 [arm] 行（每臂耗时 / 打分缓存量），可据此估剩余时间。
 #   N 取物理核数（本机 8 路实测 4~5×）；内存 ≈ 每路一份上证指数 + 当前任务 df，量级很小。
+#   v0.447：warm 阶段（信号日 V0 分，profile 占 warm 99%）同样走 --score-workers；且 V0 分**跨研究落盘缓存**
+#   （artifacts/cache/v0_score/<源码哈希>/，键 = as-of 帧内容摘要，代码一改自动换目录）——R40/R45/R44/R47~R50
+#   同票同信号日只算一次，后跑的研究大部分命中。磁盘量级：每 bar 约 50 字节。CUSTOS_V0_SCORE_CACHE=off 可关。
 # ③ R40 预演（46 门 × 5 档；随机臂成簇抽样 v0.399/0.409）
 uv run python -m custos.research bear_regime_study --tag r40_v2_pre --gates all --load-workers 4 --score-workers 8 \
   --mining-start <SEG_A_START> --mining-end 2016-12-31 \
@@ -129,10 +132,10 @@ git commit -m "batch b1 reads" && git push
 
 ## 第二批预告（不在第一批，第一批判定段读完后再跑）
 
-- R47 浮盈保护扫描（只读挖掘 A∪B）：`uv run python -m custos.research plan_rules_replay --scan-protect --trade-dist --load-workers 4 --tag r47_scan`，
+- R47 浮盈保护扫描（只读挖掘 A∪B）：`uv run python -m custos.research plan_rules_replay --scan-protect --trade-dist --load-workers 4 --score-workers 8 --tag r47_scan`，
   然后 `result_digest r47_scan <产物>/_plan_protect_scan__r47_scan.json --tag r47_scan --write --backfill`（报告自动生成）。
 - R48 + R49 一条命令（只读挖掘 A∪B；v0.444：R49 内部完整跑一遍 R48 含 200 臂池，同次落 R48 产物，读数与单独跑一致——**不要再单独跑 R48**，否则全宇宙加载 + 重放重复一次）：
-  `uv run python -m custos.research tail_explore_study --load-workers 4 --tag r49_v1 --r48-tag r48_v1`，然后两条摘要：
+  `uv run python -m custos.research tail_explore_study --load-workers 4 --score-workers 8 --tag r49_v1 --r48-tag r48_v1`，然后两条摘要：
   `result_digest r48 artifacts/logs/tail_feature/_tail_feature__r48_v1.json --tag r48_v1 --write --backfill`；
   `result_digest r49 artifacts/logs/tail_feature/_tail_explore__r49_v1.json --tag r49_v1 --write --backfill`。
-  （只要 R48 时：`tail_feature_study --load-workers 4 --tag r48_v1`。）
+  （只要 R48 时：`tail_feature_study --load-workers 4 --score-workers 8 --tag r48_v1`。）

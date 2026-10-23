@@ -900,6 +900,7 @@ def warm_v0_signals(
     end: str,
     warmup_bars: int = 0,
     load_workers: int = 1,
+    score_workers: int = 1,
 ) -> dict[str, dict]:
     """V0 重放信号预热：逐股加载 → j_low+0AMV 信号扫描 → as-of V0 技术分。
 
@@ -912,9 +913,11 @@ def warm_v0_signals(
     ``load_workers``（v0.441，TODO #112）：>1 时逐股「加载+扫描+打分」整体
     线程并行（每票独立、备忘挂在 df 对象自身），产物按提交序装配与串行
     逐位一致；默认 1=原行为。
+    ``score_workers``（v0.447）：信号扫完后批量打 as-of V0 分（``score_pool``：>1 多进程 + 跨研究落盘缓存），
+    读数与原逐信号串行逐位一致（失败信号同样丢弃）。
     """
     from custos.research import backtest_factors as bt  # noqa: PLC0415
-    from custos.research import score_return_study as srs  # noqa: PLC0415
+    from custos.research import score_pool  # noqa: PLC0415
     import time as _time  # noqa: PLC0415
 
     _t0 = _time.time()  # TODO #92 warm 耗时埋点（[TIME] warm 行，return 前打印）
@@ -937,16 +940,10 @@ def warm_v0_signals(
             sigs = [s for s in sigs if str(s.get("date") or "")[:10] >= start]
         if not sigs:
             return None
-        scores: dict[str, float] = {}
-        for s in sigs:
-            try:
-                score, _level, _contrib = srs.asof_technical_score(
-                    df, index_df, s["i"], code
-                )
-            except Exception:  # noqa: BLE001 — 单信号评分失败丢该信号
-                continue
-            scores[s["date"]] = score
-        return {"df": df, "signals": sigs, "scores": scores}
+        todo = list(
+            {s["date"]: s["i"] for s in sigs}.items()
+        )  # 同日去重（原逐信号覆盖同值）
+        return {"df": df, "signals": sigs, "scores": {}, "_to_score": todo}
 
     per_code: dict[str, dict] = {}
     if load_workers and load_workers > 1 and len(codes) > 1:
@@ -958,6 +955,7 @@ def warm_v0_signals(
             r = _one(code)
             if r is not None:
                 per_code[code] = r
+    score_pool.fill_signal_scores(per_code, index_df, int(score_workers or 1))
     print(  # TODO #92 新增行（既有 [warmup] 进度行逐字不动）
         f"[TIME] warm {start}~{end} {_time.time() - _t0:.0f}s"
         f"（{len(per_code)}/{len(codes)} 票有信号）",

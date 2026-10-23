@@ -664,6 +664,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="warm 加载并行路数（v0.441，TODO #112：逐股 加载+扫描+打分 线程并行，"
         "产物与串行逐位一致；默认 1=原行为）",
     )
+    ap.add_argument(
+        "--score-workers",
+        type=int,
+        default=1,
+        help="as-of V0 分批量打分进程数（v0.447 score_pool：多进程 + 跨研究落盘缓存，读数逐位不变）",
+    )
     ap.add_argument("--tag", default="r48_v1")
     ap.add_argument("--out-dir", default=str(LOGS / "tail_feature"))
     return ap

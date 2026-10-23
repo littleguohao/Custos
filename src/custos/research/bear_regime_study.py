@@ -203,6 +203,7 @@ def warm_gates(
     end: str,
     warmup_bars: int = 0,
     load_workers: int = 1,
+    score_workers: int = 1,
 ) -> dict[str, dict]:
     """R40 预热：逐股加载一次 → 逐门扫信号（门在内层 ⇒ df 只加载一次）→
     as-of V0 分（与门无关，按 (code, date) 去重）。
@@ -214,9 +215,10 @@ def warm_gates(
     N 根作指标预热（定案豁免），**各门信号仍只收 date ≥ start**。
     ``load_workers``（v0.441，TODO #112）：>1 时逐股「加载+逐门扫描+打分」
     整体线程并行（每票独立），产物按提交序装配与串行逐位一致；默认 1=原行为。
+    ``score_workers``（v0.447）：扫完全部门后批量打分（``score_pool``，多进程 + 落盘缓存），逐位一致。
     """
     from custos.research import backtest_factors as bt  # noqa: PLC0415
-    from custos.research import score_return_study as srs  # noqa: PLC0415
+    from custos.research import score_pool  # noqa: PLC0415
     import time as _time  # noqa: PLC0415
 
     _t0 = _time.time()  # TODO #92 warm 耗时埋点（[TIME] warm 行，return 前打印）
@@ -226,7 +228,7 @@ def warm_gates(
         if df is None or not len(df):
             return None
         gate_signals: dict[str, list] = {}
-        scores: dict[str, float] = {}
+        todo: dict[str, int] = {}
         for g in gates:
             sigs: list[dict] = []
             bt.evaluate_trades(
@@ -243,16 +245,13 @@ def warm_gates(
             if sigs:
                 gate_signals[g] = sigs
             for s in sigs:
-                if s["date"] in scores:
-                    continue
-                try:
-                    score, _level, _contrib = srs.asof_technical_score(
-                        df, index_df, s["i"], code
-                    )
-                except Exception:  # noqa: BLE001 — 单信号评分失败丢该信号  # pylint: disable=broad-exception-caught
-                    continue
-                scores[s["date"]] = score
-        return {"df": df, "gate_signals": gate_signals, "scores": scores}
+                todo.setdefault(s["date"], s["i"])  # 与门无关，按日期去重（同原逻辑）
+        return {
+            "df": df,
+            "gate_signals": gate_signals,
+            "scores": {},
+            "_to_score": list(todo.items()),
+        }
 
     per_code: dict[str, dict] = {}
     if load_workers and load_workers > 1 and len(codes) > 1:
@@ -264,6 +263,7 @@ def warm_gates(
             r = _one(code)
             if r is not None:
                 per_code[code] = r
+    score_pool.fill_signal_scores(per_code, index_df, int(score_workers or 1))
     # 分子=任一门有信号的票（per_code 含 df 加载成功但 0 信号的票，母体口径）
     n_sig = sum(1 for p in per_code.values() if p["gate_signals"])
     print(  # TODO #92 新增行（既有 [warmup] 进度行逐字不动）
@@ -433,31 +433,9 @@ def random_entries(
     return out
 
 
-# ---- 随机入场 V0 分多进程预算（v0.446，R40/R45 提速；逐位不变）----
-# 耗时大头：随机臂每抽到一个新 (票, bar) 就做一次 as-of compute_metrics（~30ms），母体百万级 bar
-# 单核要几天。预算 = 把母体里「pack["scores"] 没有的 bar」按票分块交进程池一次算完，填进与
-# random_entries 同键的 score_cache——之后抽样全部命中缓存，结果与惰性串行逐位一致（同函数同输入，
-# 失败同样缓存 None）。df 逐任务 pickle 下发（Windows spawn 可用），上证指数经 initializer 一次下发。
-_SW: dict[str, Any] = {}
-_SW_CHUNK = 64
-
-
-def _sw_init(index_df: Any) -> None:
-    _SW["index_df"] = index_df
-
-
-def _sw_score(task: tuple[str, Any, list[int]]) -> list[Optional[float]]:
-    from custos.research import score_return_study as srs  # noqa: PLC0415
-
-    code, df, idxs = task
-    out: list[Optional[float]] = []
-    for i in idxs:
-        try:
-            score, _lv, _ct = srs.asof_technical_score(df, _SW["index_df"], i, code)
-        except Exception:  # noqa: BLE001 — 与 random_entries 同语义：失败记 None  # pylint: disable=broad-exception-caught
-            score = None
-        out.append(score)
-    return out
+# ---- 随机入场 V0 分批量预算（v0.446；v0.447 起走 score_pool：多进程 + 跨研究落盘缓存）----
+# 母体里「pack["scores"] 没有的 bar」一次算完填进与 random_entries 同键的 score_cache——之后抽样全部命中，
+# 与惰性串行逐位一致（同函数同输入；失败缓存 None）。
 
 
 def prescore_pool(
@@ -466,10 +444,10 @@ def prescore_pool(
     index_df: Any,
     score_cache: dict[Any, Optional[float]],
     workers: int,
-    *,
-    executor_factory: Optional[Callable[[int, Any], Any]] = None,
 ) -> int:
-    """母体中缺分的 bar 多进程预算进 ``score_cache``（键与 ``random_entries`` 一致）；返回新算个数。"""
+    """母体中缺分的 bar 批量预算进 ``score_cache``（键与 ``random_entries`` 一致）；返回新算个数。"""
+    from custos.research import score_pool  # noqa: PLC0415
+
     tasks: dict[tuple[Any, str], list[tuple[Any, int]]] = {}
     for item in pool:
         if len(item) == 4:
@@ -486,41 +464,26 @@ def prescore_pool(
         tasks.setdefault((seg, code), []).append((key, i))
     if not tasks:
         return 0
-    # 每任务 ≤ _SW_CHUNK 个 bar（同票拆块）：负载均衡——按票整块会让少数长序列票拖尾
-    items: list[tuple[tuple[Any, str], list[tuple[Any, int]]]] = []
-    for sc, ks in tasks.items():
-        for k0 in range(0, len(ks), _SW_CHUNK):
-            items.append((sc, ks[k0 : k0 + _SW_CHUNK]))
-    payload = [
-        (
-            code,
-            (per_code[seg][code] if seg is not None else per_code[code])["df"],
-            [i for _k, i in ks],
-        )
-        for (seg, code), ks in items
-    ]
-    if executor_factory is None:
-        from concurrent.futures import ProcessPoolExecutor  # noqa: PLC0415
-
-        def executor_factory(n: int, idx: Any) -> Any:  # type: ignore[misc]
-            return ProcessPoolExecutor(
-                max_workers=n, initializer=_sw_init, initargs=(idx,)
+    items = list(tasks.items())
+    res = score_pool.score_tasks(
+        [
+            (
+                code,
+                (per_code[seg][code] if seg is not None else per_code[code])["df"],
+                [i for _k, i in ks],
             )
-
-    import time as _time  # noqa: PLC0415
-
-    t0, done, total = _time.time(), 0, sum(len(ks) for _c, ks in items)
-    with executor_factory(workers, index_df) as ex:
-        for ((_sc, _code), ks), scores in zip(items, ex.map(_sw_score, payload)):
-            for (key, _i), sc in zip(ks, scores):
-                score_cache[key] = sc
-            done += len(ks)
-            if done == total or done % 50000 < len(ks):
-                print(
-                    f"[prescore] {done}/{total} bar  {_time.time() - t0:.0f}s",
-                    file=sys.stderr,
-                )
-    return total
+            for (seg, code), ks in items
+        ],
+        index_df,
+        workers,
+        label="prescore",
+    )
+    n = 0
+    for (_sc, ks), rs in zip(items, res):
+        for (key, _i), (ok, sc) in zip(ks, rs):
+            score_cache[key] = sc if ok else None
+            n += 1
+    return n
 
 
 def cluster_shapes(sigs: list[dict]) -> list[list[int]]:
@@ -828,6 +791,7 @@ def _resolve_warm(
                 # v2 段前预热 300 根（v0.359，owner review #3）；legacy 0 根
                 warmup_bars=300 if _is_v2 else 0,
                 load_workers=int(getattr(args, "load_workers", 1) or 1),
+                score_workers=int(getattr(args, "score_workers", 1) or 1),
             )
 
     return regime_bear, index_df, warm_fn
@@ -955,6 +919,7 @@ def _run_random_arms(
     import time as _time  # noqa: PLC0415
 
     sw = int(getattr(args, "score_workers", 0) or 0)
+    # 只在 sw>1 时整母体预算（sw=1 时整母体串行比惰性只算被抽中的 bar 更慢）
     if sw > 1 and random_entry_fn is None and index_df is not None:
         for w in ("mining", "judgment"):  # 母体提前建（与惰性建同内容）
             if w not in bar_pools:
@@ -1685,7 +1650,7 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--score-workers",
         type=int,
-        default=0,
+        default=1,
         help="随机臂入场 V0 分多进程预算路数（v0.446：>1 时母体缺分 bar 先一次算完，读数与惰性串行逐位一致；"
         "0=原惰性行为）",
     )

@@ -556,6 +556,7 @@ def _production_warm_fn(
             # 信号仍 ≥段起点）；legacy 0 根（R40 兼容逐位不变）
             warmup_bars=300 if len(mining_segs) >= 2 else 0,
             load_workers=int(getattr(args, "load_workers", 1) or 1),
+            score_workers=int(getattr(args, "score_workers", 1) or 1),
         )
 
     return warm_fn, regime
@@ -1344,6 +1345,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=1,
         help="warm 加载并行路数（v0.441，TODO #112：逐股 加载+扫描+打分 线程并行，"
         "产物与串行逐位一致；默认 1=原行为）",
+    )
+    ap.add_argument(
+        "--score-workers",
+        type=int,
+        default=1,
+        help="as-of V0 分批量打分进程数（v0.447 score_pool：多进程 + 跨研究落盘缓存，读数逐位不变）",
     )
     ap.add_argument(
         "--out-dir",

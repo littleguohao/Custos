@@ -195,6 +195,8 @@ uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 �
   （`--ic-gate` / `--gate-order`）须已在研究单元预注册。
 - **因子 IC 画像**（`factor_ic_profile`）是分诊镜，不是晋级判据（晋级永远走双窗 + 三轴
   交易语义）。
+- **V0 分落盘缓存**（`research/score_pool.py`，v0.447）：只服务研究；键 = 三层 as-of 帧内容摘要，版本目录 = 打分源码 +
+  契约 JSON 内容哈希（自动失效，勿手改）；测试 conftest 默认 `CUSTOS_V0_SCORE_CACHE=off`，专测用例自行设目录。
 - **指标盘缓存**（`research/indicator_cache.py`）：不得服务 live、不得服务 as-of 重播种
   路径；指标实现任何改动必须 bump `INDICATOR_PACK_VERSION`。
 

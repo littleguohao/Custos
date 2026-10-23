@@ -180,6 +180,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "clamp(S·m) 矩阵化重打分（与 technical_score 逐位一致）；C1~C4（双挖掘段选格 / 邻格平滑 / "
         "簇级置换同预算零假设）；--batch-id 同次读判定段走 judgment_line；副读数 64 个家族开/关子格",
     ),
+    "score_pool": (
+        "engine",
+        "as-of V0 技术分批量打分（v0.447）：多进程 + 跨研究落盘缓存（键 = 三层 as-of 帧内容摘要，版本 = 打分源码哈希）；"
+        "R40/R45/R44/R47~R50 warm 与随机臂共用，读数与串行逐位一致；CUSTOS_V0_SCORE_CACHE=off 关缓存",
+    ),
     "tail_explore_study": (
         "study",
         "R49 B1 高盈亏比交易逆向画像（v0.443，探索）：R48 同交易集，R43 37 维 + R20 因子面板 + s_shape 分项 + 超卖回看铺成格子，"

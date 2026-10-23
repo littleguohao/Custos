@@ -500,6 +500,7 @@ def run_study(
                 # v2 段前预热 300 根（v0.359，owner review #3）；legacy 0 根
                 warmup_bars=300 if layout == "v2" else 0,
                 load_workers=int(getattr(args, "load_workers", 1) or 1),
+                score_workers=int(getattr(args, "score_workers", 1) or 1),
             )
 
     # ── 逐段 warm →（v2）段末隔离带 clip → attach 配对剔除 ──
@@ -1153,6 +1154,7 @@ def _scan_prepare(
                 end=end,
                 warmup_bars=300,  # 段前预热 300 根（v0.359，v2 纪律）
                 load_workers=int(getattr(args, "load_workers", 1) or 1),
+                score_workers=int(getattr(args, "score_workers", 1) or 1),
             )
 
     # ── 逐段 warm → 段末隔离带 clip → 锚点附着（x=0 建子集；低档化在重放时）──
@@ -1454,6 +1456,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=1,
         help="warm 加载并行路数（v0.441，TODO #112：逐股 加载+扫描+打分 线程并行，"
         "产物与串行逐位一致；默认 1=原行为）",
+    )
+    ap.add_argument(
+        "--score-workers",
+        type=int,
+        default=1,
+        help="as-of V0 分批量打分进程数（v0.447 score_pool：多进程 + 跨研究落盘缓存，读数逐位不变）",
     )
     ap.add_argument("--tag", required=True)
     ap.add_argument("--out-dir", default=str(LOGS))
