@@ -20,6 +20,8 @@
   回注 prompt 重试（每算子最多 ``MAX_ATTEMPTS`` 次），仍失败 raise LLMError。
 - ``interpret`` 是唯一允许"失败降级"的算子：LLM 挂了返回确定性模板字符串
   （含指标数值），**绝不 raise** —— 反馈解读缺失不该拖死整个进化循环。
+  唯一例外：--agent-relay 的协议信号（RelayPause/RelayError）必须透出，
+  见 interpret 函数 docstring。
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ from custos.research.evolution.expr_dsl import (
 )
 from custos.research.evolution.ic_eval import ICStats
 from custos.research.evolution.llm_client import ChatLLM, LLMError
+from custos.research.evolution.relay import RelayError, RelayPause
 from custos.research.evolution.trajectory import Trajectory, TrajectoryPool
 
 # 每个算子的"产出→解析→校验"重试上限（错误原因回注 prompt）。
@@ -448,11 +451,18 @@ def _interpret_fallback(trajectory: Trajectory, sota: Trajectory | None) -> str:
 
 
 def interpret(trajectory: Trajectory, sota: Trajectory | None, llm: ChatLLM) -> str:
-    """反馈解读：LLM 写一段中文解读；LLM 任何失败 → 确定性模板，绝不 raise。"""
+    """反馈解读：LLM 写一段中文解读；LLM 任何失败 → 确定性模板，绝不 raise。
+
+    例外（v0.448）：RelayPause / RelayError 是 --agent-relay 的协议信号，
+    **必须透出**——吞掉会让待答请求静默退化成一个「已完成」候选，断点
+    续跑协议直接崩坏。
+    """
     try:
         text = llm.chat(_interpret_prompt(trajectory, sota), json_mode=False)
         if isinstance(text, str) and text.strip():
             return text.strip()
+    except (RelayPause, RelayError):
+        raise  # 中继协议信号不透出 = 断点协议崩坏（见 docstring）
     except Exception:  # noqa: BLE001 —— 反馈缺失不许拖死进化循环，模板兜底
         pass
     return _interpret_fallback(trajectory, sota)

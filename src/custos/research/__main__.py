@@ -69,7 +69,8 @@ TOOLS: dict[str, tuple[str, str]] = {
     "evolution_loop": (
         "engine",
         "LLM 因子进化循环：DSL 白名单 + 挖掘/判定双窗 + 轨迹池"
-        "（CUSTOS_LLM_* 配置 LLM，或 --mock-llm 演示；别名 evolution）",
+        "（CUSTOS_LLM_* 配置 LLM；--agent-relay agent 提案中继；"
+        "--mock-llm 演示；别名 evolution）",
     ),
     "exit_campaign": (
         "driver",

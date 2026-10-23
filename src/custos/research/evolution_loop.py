@@ -16,8 +16,16 @@
         --codes-file codes.txt --mock-llm --tag mock_demo
 
 LLM 配置走环境变量 CUSTOS_LLM_BASE_URL / CUSTOS_LLM_API_KEY / CUSTOS_LLM_MODEL
-（+可选 CUSTOS_LLM_TIMEOUT；--timeout 可覆盖）。未配置且未给 --mock-llm →
-fail-closed 报错退出。
+（+可选 CUSTOS_LLM_TIMEOUT；--timeout 可覆盖）。未配置且未给 --mock-llm /
+--agent-relay → fail-closed 报错退出。
+
+--agent-relay（v0.448，agent 提案、脚本决策）：提案改走文件中继——每次需要
+LLM 时把请求落 {out_dir}/{tag}/relay/pending_request.json 并以退出码 3 暂停；
+外部 agent（如 Kimi Work 会话/定时任务）读请求、按 request_id 写
+response.json 后，用**同一命令行**续跑（断点 relay_checkpoint.json 含位标/
+rng 快照/transcript，配置指纹不符 fail-closed）。判定链、DSL 门、双窗隔离
+与 API 模式逐位一致；谱系标注见 summary config 块 llm_source。协议细节见
+evolution/relay.py 模块 docstring。
 
 双窗物理隔离（双窗制度的核心，见 evolution/dual_window.py）：
   ① 数据加载后**立刻按 mining_end 截尾**一份副本给进化循环 —— 挖掘全程
@@ -56,6 +64,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 from custos.core.paths import BASE, LOGS, RESEARCH_DIR  # noqa: E402
 from custos.research import backtest_factors as bt  # noqa: E402
+from custos.research.evolution import relay  # noqa: E402
 from custos.research.evolution.dual_window import (  # noqa: E402
     DualWindowResult,
     Window,
@@ -150,6 +159,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "--mock-llm",
         action="store_true",
         help="用内置确定性脚本化 proposer（演示/无 LLM 环境）",
+    )
+    ap.add_argument(
+        "--agent-relay",
+        action="store_true",
+        help="提案走文件中继（agent 提案、脚本决策；不需 CUSTOS_LLM_*。"
+        "每次待答退出码 3，agent 写 response.json 后用同参数续跑）",
+    )
+    ap.add_argument(
+        "--relay-dir",
+        default="",
+        help="中继目录（默认 {out-dir}/{tag}/relay；pending_request.json /"
+        " response.json / answered/ 所在）",
     )
     ap.add_argument(
         "--timeout", type=int, default=None, help="LLM HTTP 超时秒数（覆盖环境变量）"
@@ -402,6 +423,13 @@ def _validate_args(
         ap.error("--gate-order marks_first 需要 --marks（无 marks 门可前置）")
     if args.ic_gate == "off" and not args.marks:
         ap.error("--ic-gate off 需要 --marks（否则挖掘侧没有任何统计门）")
+    if args.agent_relay and args.mock_llm:
+        ap.error("--agent-relay 与 --mock-llm 互斥（两种提案来源只能选一）")
+    if args.agent_relay and args.plan > 0:
+        ap.error(
+            "--agent-relay 暂不支持 --plan（规划层在循环外调 LLM，"
+            "断点续跑协议 v1 只覆盖循环内提案）"
+        )
     _validate_mining_window(args, ap)
     if args.grid_judge:
         args.final_judge = True  # --grid-judge 隐含双窗终审（三轴终审吃它的产出）
@@ -429,14 +457,18 @@ def _validate_args(
 
 
 def _assemble_llm(args: Any, ap: argparse.ArgumentParser) -> Any:
-    """LLM 装配：--mock-llm → 内置 MockLLM；否则环境变量，缺失 fail-closed。"""
+    """LLM 装配：--mock-llm → 内置 MockLLM；--agent-relay → RelayLLM
+    （transcript 在 main 拿到 out_dir 后按断点装配）；否则环境变量，
+    缺失 fail-closed。"""
     if args.mock_llm:
         return MockLLM()
+    if args.agent_relay:
+        return relay.RelayLLM()
     cfg = LLMConfig.from_env()
     if cfg is None:
         ap.error(
             "未配置 CUSTOS_LLM_BASE_URL/CUSTOS_LLM_API_KEY/CUSTOS_LLM_MODEL，"
-            "或用 --mock-llm 演示"
+            "或用 --mock-llm 演示 / --agent-relay 走 agent 提案中继"
         )
     assert cfg is not None  # ap.error 已 SystemExit，窄化类型
     if args.timeout is not None:
@@ -877,6 +909,13 @@ def _write_summary(res: _RunResult, grid: dict[str, Any]) -> Path:
             "退化为「gate×出场」（R32 结论 5 / #70）"
         )
     config["plan"] = getattr(res.args, "plan_summary", None)  # #72 规划层汇总
+    # 提案来源标注（v0.448，谱系可比性）：relay 轨迹的提案来自 agent（如
+    # Kimi Work 会话），与 API 模型提案的轨迹对照解读时按本字段分组。
+    config["llm_source"] = (
+        "agent_relay"
+        if res.args.agent_relay
+        else ("mock" if res.args.mock_llm else "api")
+    )
     if res.cfg.marks_path:  # R36 Phase 2：marks 口径进 config 块（可复核）
         config["marks_note"] = (
             "marks 监督门（自指口径：TS_RANK 于案例自身窗口，买点分位 + "
@@ -1024,12 +1063,14 @@ class _ExecCtx:
     pool: TrajectoryPool
     cell_runner: Any  # joint 的循环内三轴适应度执行器（非 joint 为 None）
     marks_bars_provider: Any = None  # marks 全历史 loader（None → excerpt 回退）
+    resume: relay.ResumeState | None = None  # --agent-relay 断点续跑位标
 
 
 def _execute(ctx: _ExecCtx) -> int:
     """跑进化循环；token 预算超支 → 警告后带着已落池的轨迹继续走收尾。
 
     返回 LLM 级错误计数（llm_error 事件数——未产出候选，不进轨迹池）。
+    RelayPause（--agent-relay 待答）不在此捕获，直接透传给 main 落断点。
     """
     handler = _make_on_event(ctx.args, ctx.llm)
     try:
@@ -1041,10 +1082,88 @@ def _execute(ctx: _ExecCtx) -> int:
             on_event=handler,
             cell_runner=ctx.cell_runner,
             marks_bars_provider=ctx.marks_bars_provider,
+            resume=ctx.resume,
         )
     except _BudgetExceeded as exc:
         print(f"[WARN] {exc}", file=sys.stderr)
     return int(getattr(handler, "llm_errors", 0))
+
+
+def _relay_resume(
+    args: Any, cfg: LoopConfig, out_dir: Path, tag: str, llm: Any
+) -> relay.ResumeState | None:
+    """--agent-relay 续跑装配：读断点 + 消费应答 → RelayLLM transcript。
+
+    无断点 → None（首跑）；断点 tag/配置指纹/应答违例 → RelayError
+    （main 转 exit 2，fail-closed）。
+    """
+    ck = relay.load_checkpoint(relay.checkpoint_path(out_dir))
+    rdir = relay.relay_dir_for(out_dir, args.relay_dir)
+    if ck is None:
+        print(f"[RELAY] 首跑（无断点）：待答请求将落 {rdir}", flush=True)
+        return None
+    if ck["tag"] != tag:
+        raise relay.RelayError(
+            f"断点 tag 不符: {ck['tag']!r}（本次 {tag!r}）——断点只能由同一运行续跑"
+        )
+    fp = relay.cfg_fingerprint(asdict(cfg))
+    if ck["cfg_fingerprint"] != fp:
+        raise relay.RelayError(
+            "断点配置指纹不符——换参数续跑会把不同配置的候选混进同一池，"
+            "请换 --tag 开新运行"
+        )
+    content = relay.read_response(rdir, ck["pending"])
+    transcript = [*ck["transcript"], {**ck["pending"], "response": content}]
+    llm.load_transcript(transcript)
+    pos = ck["position"]
+    print(f"[RELAY] 续跑：位标 {pos}，已应答 {len(transcript)} 次", flush=True)
+    return relay.ResumeState(
+        position=(pos[0], pos[1], pos[2]), rng_state=ck["rng_state"]
+    )
+
+
+def _relay_pause_exit(
+    args: Any,
+    cfg: LoopConfig,
+    out_dir: Path,
+    tag: str,
+    llm: Any,
+    pause: relay.RelayPause,
+) -> int:
+    """RelayPause 收尾：落断点 + 待答请求，打机器可读协议行，返回退出码 3。"""
+    assert pause.position is not None  # run_loop 在候选边界已挂位标
+    rdir = relay.relay_dir_for(out_dir, args.relay_dir)
+    ck_path = relay.checkpoint_path(out_dir)
+    relay.save_checkpoint(
+        ck_path,
+        tag=tag,
+        cfg_fp=relay.cfg_fingerprint(asdict(cfg)),
+        position=pause.position,
+        rng_state=pause.rng_state,
+        transcript=list(llm.transcript),
+        pending=pause.request,
+    )
+    req_path = relay.write_pending(rdir, pause.request)
+    print(f"\n[RELAY] 暂停待答（退出码 {relay.EXIT_PAUSE}）", flush=True)
+    print(f"[RELAY] 待答请求 → {req_path}", flush=True)
+    print(
+        f"[RELAY] agent 按该请求产出后写 {rdir / relay.RESPONSE_NAME}"
+        "（request_id 必须与待答一致），再用同一命令行续跑",
+        flush=True,
+    )
+    print(
+        json.dumps(
+            {
+                "relay": "pending",
+                "request_file": str(req_path),
+                "request_id": pause.request["request_id"],
+                "checkpoint": str(ck_path),
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
+    return relay.EXIT_PAUSE
 
 
 def main(
@@ -1124,12 +1243,38 @@ def main(
         marks_bars_provider = _ft.partial(
             bt._load_one_bars, count=args.count, start=None, end=None
         )
+    resume = None
+    if args.agent_relay:
+        if args.max_tokens_budget:
+            print(
+                "[INFO] --agent-relay：中继模式无 token 计数，"
+                "--max-tokens-budget 不生效",
+                flush=True,
+            )
+        try:
+            resume = _relay_resume(args, cfg, out_dir, tag, prep.llm)
+        except relay.RelayError as exc:
+            print(f"[ERR] {exc}", file=sys.stderr)
+            return 2
     pool_size_before = len(pool)  # 本 run 新增轨迹数的基线（空结果护栏用）
-    llm_errors = _execute(
-        _ExecCtx(
-            args, cfg, mining_bars, prep.llm, pool, cell_runner, marks_bars_provider
+    try:
+        llm_errors = _execute(
+            _ExecCtx(
+                args,
+                cfg,
+                mining_bars,
+                prep.llm,
+                pool,
+                cell_runner,
+                marks_bars_provider,
+                resume,
+            )
         )
-    )
+    except relay.RelayPause as pause:
+        return _relay_pause_exit(args, cfg, out_dir, tag, prep.llm, pause)
+    except relay.RelayError as exc:
+        print(f"[ERR] {exc}", file=sys.stderr)
+        return 2
 
     # 空结果护栏（对照 backtest_factors._empty_result_guard 语义）：本次运行什么都没
     # 产出（LLM 全挂等）→ 非零退出且不写产物；有 fail 轨迹属正常研究产出，落盘。
@@ -1143,6 +1288,10 @@ def main(
         )
         return 2
     pool.save()
+    if args.agent_relay:
+        # 正常收尾：清断点与待答请求（本运行闭环，下次同 tag 即全新首跑）
+        relay.clear_checkpoint(relay.checkpoint_path(out_dir))
+        relay.clear_pending(relay.relay_dir_for(out_dir, args.relay_dir))
 
     dual = _run_final_judge(args, prep.judge_load, prep.codes, pool, cell_runner)
     if getattr(args, "_judgment_gated", False):

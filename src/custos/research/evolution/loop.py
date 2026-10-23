@@ -30,6 +30,12 @@ from custos.research.evolution.dual_window import (
 from custos.research.evolution.expr_dsl import ExprError, complexity, parse, violations
 from custos.research.evolution.ic_eval import evaluate_expression_rich
 from custos.research.evolution.llm_client import ChatLLM, LLMError
+from custos.research.evolution.relay import (
+    RelayPause,
+    ResumeState,
+    rng_from_json,
+    snapshot_rng,
+)
 from custos.research.evolution.trajectory import (
     EVOLUTION_PHASES,
     IC_SKIPPED_MARK,
@@ -568,6 +574,7 @@ def run_loop(
     on_event: Callable[[dict], None] | None = None,
     cell_runner: CellRunner | None = None,
     marks_bars_provider: Any = None,
+    resume: ResumeState | None = None,
 ) -> TrajectoryPool:
     """跑完整进化循环，返回 pool（就地累积，返回值仅为方便链式）。
 
@@ -578,6 +585,11 @@ def run_loop(
     ``cfg.joint=True`` 时必须给 ``cell_runner``（三轴适应度执行器，协议见
     模块顶部 ``CellRunner`` 注释）——它是循环内唯一的三轴单元格入口，
     只在 IC 门过门后被调用（控成本）。
+
+    ``resume``（--agent-relay 断点续跑）：位标之前的候选一律跳过（其轨迹已
+    在池里增量落盘），到位标候选时用快照恢复 rng 再重进——该候选已应答的
+    LLM 调用由 RelayLLM 当前段 transcript 重放（逐位一致），下游全确定性。
+    位标越界（配置改动后位标落在循环外）→ ValueError（fail-closed）。
     """
     _validate_cfg(cfg)
     if cfg.joint and cell_runner is None:
@@ -598,22 +610,52 @@ def run_loop(
         marks_cases = (
             load_marks_json(mp) if mp.lower().endswith(".json") else load_cases(mp)
         )  # fail-closed（坏路径/空清单/坏 JSON raise）
+    rng = random.Random(cfg.seed)
     ctx = _RunCtx(
         cfg=cfg,
         mining_bars=clip_tail(bars_by_code, cfg.mining_end),
         llm=llm,
         pool=pool,
-        rng=random.Random(cfg.seed),
+        rng=rng,
         on_event=on_event,
         cell_runner=cell_runner,
         marks_cases=marks_cases,
         marks_bars_provider=marks_bars_provider,
     )
-    for direction in cfg.directions:
+    resumed = resume is None
+    begin_candidate = getattr(llm, "begin_candidate", None)  # RelayLLM 段钩子
+    for d_i, direction in enumerate(cfg.directions):
         for round_i in range(cfg.rounds):
             phase = cfg.phase_schedule[round_i % len(cfg.phase_schedule)]
             for cand_i in range(cfg.candidates_per_round):
-                _step(ctx, direction, phase, round_i, cand_i)
+                is_resume_target = False
+                if resume is not None and not resumed:
+                    pos = (d_i, round_i, cand_i)
+                    if pos < resume.position:
+                        continue
+                    if pos == resume.position:
+                        # 候选起步时的 rng 快照恢复：位标前候选的 rng 消耗
+                        # 已由快照复现，重进后随机序列与单次运行逐位一致
+                        rng.setstate(rng_from_json(resume.rng_state))
+                        resumed = True
+                        is_resume_target = True
+                # RelayLLM 段钩子：新候选开新段；续跑目标候选除外——其段
+                # 记录（transcript）已由 CLI 从断点装配，清掉就无法重放
+                if not is_resume_target and begin_candidate is not None:
+                    begin_candidate()
+                snapshot = snapshot_rng(rng)
+                try:
+                    _step(ctx, direction, phase, round_i, cand_i)
+                except RelayPause as pause:
+                    # 候选边界快照 + 位标挂上：CLI 落断点后退出码 3；
+                    # 已完成候选的轨迹先落盘（pool.path 为 None 的内存池跳过）
+                    pause.position = (d_i, round_i, cand_i)
+                    pause.rng_state = snapshot
+                    if pool.path is not None:
+                        pool.save()
+                    raise
+    if resume is not None and not resumed:
+        raise ValueError(f"断点位标越界: {resume.position} 不在本轮循环范围内")
     return pool
 
 

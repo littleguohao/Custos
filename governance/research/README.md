@@ -482,7 +482,7 @@ append-only、生产机写入提交）：
 | 工具 | 单元 | 作用 |
 |---|---|---|
 | `strategy_grid` | 通用 | 因子×出场联合寻优网格；出场 schema 与 live `EXIT_RULES.json` 一致，CLI 第一名可回流 |
-| `evolution_loop` | R32 | LLM 因子进化（LLM 只提案，decision 确定性）；`--joint` / `--grid-judge` |
+| `evolution_loop` | R32 | LLM 因子进化（LLM 只提案，decision 确定性）；`--joint` / `--grid-judge`；提案双通道：API 直连（CUSTOS_LLM_*）/ `--agent-relay` 文件中继（v0.448，协议见 `evolution/relay.py` docstring） |
 | `score_evolution_study` | R34 / R36 | 打分基因组裁决；`--v0-lattice` 调权格 / `--addon-leg` 骨架加腿 |
 | `score_filter_study` | R36 P4 | 排序器→过滤器判据 |
 | `exit_campaign` | R37 | 出场基因组战役壳（CTL-1~5；台账续跑带 objective 版本守卫） |
@@ -499,6 +499,9 @@ append-only、生产机写入提交）：
 
 **LLM 进化引擎口径**：LLM 只做假设生成/变异/杂交与解读；live 链路零 LLM；候选晋级 live
 须判定窗终审 + 因子注册表 status 流程 + owner 拍板。演进与冒烟记录见 R32。
+提案来源双通道（v0.448）：API 直连（CUSTOS_LLM_*）与 `--agent-relay` 文件中继
+（agent 提案、脚本决策，退出码 3 握手 + 断点续跑）；谱系对照按 summary config 的
+`llm_source` 分组解读。
 
 ---
 
