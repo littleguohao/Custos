@@ -309,22 +309,37 @@ class TestRelayCLI:
         ]
 
     @staticmethod
+    def _read_json_retry(path, attempts=50, delay=0.01):
+        """读中继文件带毫秒级重试：Windows 下脚本侧 tmp+replace 原子写的瞬间，
+        读者撞上 PermissionError（CI windows 偶发）——重试跨过替换窗口。"""
+        import time
+
+        for _ in range(attempts):
+            try:
+                return json.loads(path.read_text("utf-8"))
+            except (OSError, ValueError):
+                time.sleep(delay)
+        return json.loads(path.read_text("utf-8"))  # 最后一击：原样抛异常
+
+    @staticmethod
     def _answer_pending(out_dir, content_iter):
-        """读待答请求 → 写应答（模拟 agent 一轮）。"""
+        """读待答请求 → 写应答（模拟 agent 一轮；应答原子写，对齐协议建议）。"""
         rdir = out_dir / "relay"
-        req = json.loads((rdir / "pending_request.json").read_text("utf-8"))
+        req = TestRelayCLI._read_json_retry(rdir / "pending_request.json")
         content = (
             "（假解读）中继模式读数已记录。"
             if not req["json_mode"]
             else json.dumps(next(content_iter), ensure_ascii=False)
         )
-        (rdir / "response.json").write_text(
+        tmp = rdir / "response.json.tmp"
+        tmp.write_text(
             json.dumps(
                 {"request_id": req["request_id"], "content": content},
                 ensure_ascii=False,
             ),
             encoding="utf-8",
         )
+        tmp.replace(rdir / "response.json")  # 原子写：读者（waiter）不会读到半截
         return req["request_id"]
 
     def test_pause_resume_cycle_to_completion(self, tmp_path, capsys):
@@ -465,7 +480,7 @@ class TestRelayV449(TestRelayCLI):
             while not stop.is_set():
                 p = rdir / "pending_request.json"
                 if p.exists() and not (rdir / "response.json").exists():
-                    rid = json.loads(p.read_text("utf-8"))["request_id"]
+                    rid = self._read_json_retry(p)["request_id"]
                     if rid not in seen:
                         seen.add(rid)
                         answered.append(self._answer_pending(out_dir, cands))

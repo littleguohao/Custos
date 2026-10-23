@@ -18,8 +18,12 @@ config 块的 ``llm_source`` 标注（谱系可比性：relay 轨迹的提案来
 - ``pending_request.json``  脚本写：当前待答请求
   （schema_version / request_id / request_hash / messages / json_mode /
   json_schema）；
-- ``response.json``  agent 写：``{"request_id": ..., "content": ...}``；
-- ``answered/{request_id}.json``  应答被消费后归档（防二次消费）。
+- ``response.json``  agent 写：``{"request_id": ..., "content": ...}``——
+  **请原子写**（先写 ``response.json.tmp`` 再 replace），避免常驻模式的
+  读者读到半截 JSON；读 ``pending_request.json`` 时撞上 PermissionError /
+  半截 JSON 请毫秒级重试（写侧同为 tmp+replace 原子替换）；
+- ``answered/{request_id}.json``  应答被消费后归档（防二次消费；
+  崩溃窗口自愈见 read_response docstring）。
 
 断点文件 ``{out_dir}/relay_checkpoint.json``：循环位标 + 该候选起步时的
 rng 状态 + **当前候选段**的已应答 transcript（跨候选不保留——已完成候选
