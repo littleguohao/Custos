@@ -29,6 +29,7 @@
 | 114 | R47 挖掘段扫描：工具已落地 v0.434（`plan_rules_replay --scan-protect`）；第一批判定段读完后跑，命令见 runbook「第二批预告」 | P2 | 生产机 | 第一批读完后跑 r47_scan + 摘要入库 | [R47](governance/research/R47_profit_protection_breakeven_trail.md) |
 | 115 | R48 挖掘段跑数：工具已落地 v0.439（`tail_feature_study`）；与 R47 同排第二批，命令见 runbook「第二批预告」 | P2 | 生产机 | 第一批读完后跑 r48_v1 + 摘要入库 | [R48](governance/research/R48_tail_entry_features.md) |
 | 118 | R49 逆向画像跑数：工具已落地 v0.443（`tail_explore_study`）；与 R47/R48 同排第二批，命令见 runbook「第二批预告」；线索两窗复现 + 过 q95 者另行预注册 | P2 | 生产机 | 第一批读完后跑 r49_v1 + 摘要入库 | [R49](governance/research/R49_tail_reverse_profile.md) |
+| 119 | R50 ≥20% 波段逆向匹配工具 `swing_recall_study`（ZigZag 波段 + B1 L1~L4 / QN 12 门召回、精度 lift、提前量、漏斗、兑现）；排期在第二批之后最后跑 | P3 | coder | 按 R50「工程落点」实现 + 校准两连测；跑数等第二批完 | [R50](governance/research/R50_swing_winner_recall.md) |
 
 ## 已闭环索引
 
