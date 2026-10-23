@@ -1034,6 +1034,18 @@ class TestGetXdxrCacheFirst:
             raise RuntimeError("stop here")
 
         monkeypatch.setattr(af, "_tdx_market", mark)
+        # 桩掉建连接：原测试依赖真实 Quotes.factory 先成功（选 bestip / 建 TCP）——
+        # 无网 / mootdx 配置触发测速的机器上它先抛异常，_tdx_market 走不到 ⇒ 误红（环境相关）
+        from mootdx import quotes as _mq
+
+        class _Client:
+            def get_xdxr_info(self, market, code):  # 走不到：参数 _tdx_market 先抛
+                return []
+
+        class _Q:
+            client = _Client()
+
+        monkeypatch.setattr(_mq.Quotes, "factory", staticmethod(lambda *a, **k: _Q()))
         with pytest.raises(af.AdjustError):
             af.get_xdxr("600000", refresh=True)
         assert called["n"] == 1, "refresh=True 必须绕过缓存去取数"
