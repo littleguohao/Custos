@@ -1434,3 +1434,191 @@ class TestR45Mode:
         assert out["ok"] is True and out["neighbors"] == ["x5_T2", "x12_T2"]
         by["x12_T2"] = cell("x12_T2", 0.1, -0.05)
         assert brs.judge_c3_r45(list(by.values()), by["x8_T2"])["ok"] is False
+
+
+class TestPrescoreAndRefDedupe:
+    """v0.446 R40/R45 提速：母体 V0 分预算与惰性逐位一致；参照档交易集复用。"""
+
+    @staticmethod
+    def _inline_executor(n, index_df):
+        import contextlib
+
+        brs._sw_init(index_df)
+
+        class _Ex:
+            def map(self, fn, it, chunksize=1):
+                return map(fn, it)
+
+        return contextlib.nullcontext(_Ex())
+
+    def test_prescore_bit_identical_to_lazy(self, monkeypatch):
+        import random as _r
+
+        import pandas as pd
+
+        from custos.research import score_return_study as srs
+
+        df = pd.DataFrame(
+            {
+                "date": pd.to_datetime(
+                    ["2023-01-02", "2023-01-03", "2023-01-04", "2023-01-05"]
+                )
+            }
+        )
+        per_code = {
+            "000001": {
+                "df": df,
+                "scores": {"2023-01-03": 55.0},
+            },  # 有现成分的 bar 不预算
+            "000002": {"df": df, "scores": {}},
+        }
+        regime = brs.invert_regime_bearish({"2023-01-01": "空头"})
+        calls = []
+
+        def fake_asof(df_arg, index_df, i, code):
+            calls.append((code, i))
+            if i == 0:
+                raise RuntimeError("打分失败")
+            return 60.0 + i + (code == "000002"), "中", {}
+
+        monkeypatch.setattr(srs, "asof_technical_score", fake_asof)
+        pool = brs.bear_bar_pool(per_code, regime)
+        lazy_cache: dict = {}
+        a = brs.random_entries(
+            per_code,
+            regime,
+            8,
+            _r.Random(3),
+            index_df=object(),
+            pool=pool,
+            score_cache=lazy_cache,
+        )
+        pre_cache: dict = {}
+        n = brs.prescore_pool(
+            pool,
+            per_code,
+            object(),
+            pre_cache,
+            4,
+            executor_factory=self._inline_executor,
+        )
+        assert n == 7 and pre_cache == lazy_cache  # 8 bar − 1 根现成分
+        calls.clear()
+        b = brs.random_entries(
+            per_code,
+            regime,
+            8,
+            _r.Random(3),
+            index_df=object(),
+            pool=pool,
+            score_cache=pre_cache,
+        )
+        assert a == b and calls == [], "预算后抽样零新增计算、结果逐位一致"
+        assert (
+            brs.prescore_pool(
+                pool,
+                per_code,
+                object(),
+                pre_cache,
+                4,
+                executor_factory=self._inline_executor,
+            )
+            == 0
+        )
+
+    def test_prescore_segment_keyed_pool(self, monkeypatch):
+        """v2 合并挖掘池（4 元组 + 段键 per_code）缓存键带段前缀，与 random_entries 一致。"""
+        import random as _r
+
+        import pandas as pd
+
+        from custos.research import score_return_study as srs
+
+        df = pd.DataFrame({"date": pd.to_datetime(["2023-01-02", "2023-01-03"])})
+        per_code = {
+            s: {"000001": {"df": df, "scores": {}}} for s in ("mining_a", "mining_b")
+        }
+        pool = [
+            (s, "000001", i, d)
+            for s in per_code
+            for i, d in enumerate(["2023-01-02", "2023-01-03"])
+        ]
+        monkeypatch.setattr(
+            srs, "asof_technical_score", lambda d, x, i, c: (50.0 + i, "中", {})
+        )
+        regime = brs.invert_regime_bearish({"2023-01-01": "空头"})
+        lazy: dict = {}
+        a = brs.random_entries(
+            per_code,
+            regime,
+            4,
+            _r.Random(1),
+            index_df=object(),
+            pool=pool,
+            score_cache=lazy,
+        )
+        pre: dict = {}
+        brs.prescore_pool(
+            pool, per_code, object(), pre, 2, executor_factory=self._inline_executor
+        )
+        assert pre == lazy and set(pre) == {
+            (s, "000001", i) for s in per_code for i in (0, 1)
+        }
+        assert a == brs.random_entries(
+            per_code,
+            regime,
+            4,
+            _r.Random(1),
+            index_df=object(),
+            pool=pool,
+            score_cache=pre,
+        )
+
+    def test_prescore_real_process_pool(self):
+        """真进程池（spawn 也可：df 逐任务下发、指数经 initializer）× 真打分函数 = 进程内直算。"""
+        import numpy as np
+        import pandas as pd
+
+        from custos.research import score_return_study as srs
+
+        rng = np.random.RandomState(0)
+        n = 320
+        d = pd.bdate_range("2015-01-01", periods=n)
+        c = 10 * np.exp(np.cumsum(rng.normal(0, 0.02, n)))
+        df = pd.DataFrame(
+            {
+                "date": d,
+                "open": c,
+                "high": c * 1.02,
+                "low": c * 0.98,
+                "close": c,
+                "volume": 1e6,
+                "amount": 1e7,
+            }
+        )
+        per_code = {"000001": {"df": df, "scores": {}}}
+        pool = [("000001", i, d[i].strftime("%Y-%m-%d")) for i in (300, 310)]
+        cache: dict = {}
+        brs.prescore_pool(pool, per_code, df, cache, 2)
+        for code, i, _d in pool:
+            want = srs.asof_technical_score(df, df, i, code)[0]
+            assert cache[(code, i)] == want
+
+    def test_ref_replayed_once_per_gate(self):
+        """参照档每门只重放一次（原先 2 次）；6 档 ⇒ 每门 6 次重放。"""
+        calls = []
+
+        def rp(subset, params):
+            calls.append(params.get("_tag"))
+            import helpers_null as hn
+
+            return [
+                hn.mk_trade("000001", "2023-01-02", 0.01),
+                hn.mk_trade("000002", "2023-01-03", -0.02),
+            ]
+
+        exits = [{"name": brs._REF_NAME, "params": {"_tag": "ref"}}] + [
+            {"name": f"e{k}", "params": {"_tag": k}} for k in range(5)
+        ]
+        brs.run_arm({"g1": 3, "g2": 2}, exits, lambda n, w: [{}] * n, rp, top_n=5)
+        assert calls.count("ref") == 2 and len(calls) == 12

@@ -433,6 +433,96 @@ def random_entries(
     return out
 
 
+# ---- 随机入场 V0 分多进程预算（v0.446，R40/R45 提速；逐位不变）----
+# 耗时大头：随机臂每抽到一个新 (票, bar) 就做一次 as-of compute_metrics（~30ms），母体百万级 bar
+# 单核要几天。预算 = 把母体里「pack["scores"] 没有的 bar」按票分块交进程池一次算完，填进与
+# random_entries 同键的 score_cache——之后抽样全部命中缓存，结果与惰性串行逐位一致（同函数同输入，
+# 失败同样缓存 None）。df 逐任务 pickle 下发（Windows spawn 可用），上证指数经 initializer 一次下发。
+_SW: dict[str, Any] = {}
+_SW_CHUNK = 64
+
+
+def _sw_init(index_df: Any) -> None:
+    _SW["index_df"] = index_df
+
+
+def _sw_score(task: tuple[str, Any, list[int]]) -> list[Optional[float]]:
+    from custos.research import score_return_study as srs  # noqa: PLC0415
+
+    code, df, idxs = task
+    out: list[Optional[float]] = []
+    for i in idxs:
+        try:
+            score, _lv, _ct = srs.asof_technical_score(df, _SW["index_df"], i, code)
+        except Exception:  # noqa: BLE001 — 与 random_entries 同语义：失败记 None  # pylint: disable=broad-exception-caught
+            score = None
+        out.append(score)
+    return out
+
+
+def prescore_pool(
+    pool: list[tuple[Any, ...]],
+    per_code: dict[str, Any],
+    index_df: Any,
+    score_cache: dict[Any, Optional[float]],
+    workers: int,
+    *,
+    executor_factory: Optional[Callable[[int, Any], Any]] = None,
+) -> int:
+    """母体中缺分的 bar 多进程预算进 ``score_cache``（键与 ``random_entries`` 一致）；返回新算个数。"""
+    tasks: dict[tuple[Any, str], list[tuple[Any, int]]] = {}
+    for item in pool:
+        if len(item) == 4:
+            seg, code, i, d = item
+            pack = per_code[seg][code]
+            key: Any = (seg, code, i)
+        else:
+            seg = None
+            code, i, d = item
+            pack = per_code[code]
+            key = (code, i)
+        if pack["scores"].get(d) is not None or key in score_cache:
+            continue
+        tasks.setdefault((seg, code), []).append((key, i))
+    if not tasks:
+        return 0
+    # 每任务 ≤ _SW_CHUNK 个 bar（同票拆块）：负载均衡——按票整块会让少数长序列票拖尾
+    items: list[tuple[tuple[Any, str], list[tuple[Any, int]]]] = []
+    for sc, ks in tasks.items():
+        for k0 in range(0, len(ks), _SW_CHUNK):
+            items.append((sc, ks[k0 : k0 + _SW_CHUNK]))
+    payload = [
+        (
+            code,
+            (per_code[seg][code] if seg is not None else per_code[code])["df"],
+            [i for _k, i in ks],
+        )
+        for (seg, code), ks in items
+    ]
+    if executor_factory is None:
+        from concurrent.futures import ProcessPoolExecutor  # noqa: PLC0415
+
+        def executor_factory(n: int, idx: Any) -> Any:  # type: ignore[misc]
+            return ProcessPoolExecutor(
+                max_workers=n, initializer=_sw_init, initargs=(idx,)
+            )
+
+    import time as _time  # noqa: PLC0415
+
+    t0, done, total = _time.time(), 0, sum(len(ks) for _c, ks in items)
+    with executor_factory(workers, index_df) as ex:
+        for ((_sc, _code), ks), scores in zip(items, ex.map(_sw_score, payload)):
+            for (key, _i), sc in zip(ks, scores):
+                score_cache[key] = sc
+            done += len(ks)
+            if done == total or done % 50000 < len(ks):
+                print(
+                    f"[prescore] {done}/{total} bar  {_time.time() - t0:.0f}s",
+                    file=sys.stderr,
+                )
+    return total
+
+
 def cluster_shapes(sigs: list[dict]) -> list[list[int]]:
     """候选信号的簇形状（v0.399，owner 2026-10-16 拍板 3b）：簇划分 = ``kit.cluster_ids``
     单源（同票、bar 间隔 ≤5 的连续段；v2 簇键含段），每簇 = 相对首 bar 的偏移清单。"""
@@ -537,14 +627,19 @@ def run_arm(
             else draw_entries(n_g, "mining")
         )
         ref_rd: Optional[dict] = None
+        ref_trades: Optional[list[dict]] = None
         for e in exits:
             if e["name"] == _REF_NAME:
-                ref_rd = _combine(
-                    replay_mining(entries, e["params"]), top_n, ref="self"
-                )
+                ref_trades = replay_mining(entries, e["params"])
+                ref_rd = _combine(ref_trades, top_n, ref="self")
                 break
         for e in exits:
-            trades = replay_mining(entries, e["params"])
+            # v0.446：参照档复用上面的交易集（原先同一入场同一参数重放两次）
+            trades = (
+                ref_trades
+                if e["name"] == _REF_NAME and ref_trades is not None
+                else replay_mining(entries, e["params"])
+            )
             rd = _combine(trades, top_n, ref=ref_rd)
             if rd and rd["objective"] is not None and rd["margin"] is not None:
                 if (
@@ -857,6 +952,22 @@ def _run_random_arms(
 
     _rand_entries._gate_aware = True  # type: ignore[attr-defined]
 
+    import time as _time  # noqa: PLC0415
+
+    sw = int(getattr(args, "score_workers", 0) or 0)
+    if sw > 1 and random_entry_fn is None and index_df is not None:
+        for w in ("mining", "judgment"):  # 母体提前建（与惰性建同内容）
+            if w not in bar_pools:
+                bar_pools[w], bar_pool_pc[w] = _pool_of(w)
+            n_new = prescore_pool(
+                bar_pools[w], bar_pool_pc[w], index_df, score_caches[w], sw
+            )
+            print(
+                f"[prescore] {w} 母体 {len(bar_pools[w])} bar，新算 {n_new}",
+                file=sys.stderr,
+            )
+    t_arms = _time.time()
+
     def _arm(_i: int) -> Optional[float]:
         def _judgment_reader(
             n_g: int, frozen_params: dict[str, Any], gate: Optional[str] = None
@@ -867,12 +978,14 @@ def _run_random_arms(
             （随机入场无门信号可携带——对等的是「臂冻结配置 vs top 冻结配置」，
             入场随机性两臂同分布）。v2.1 参照 = 同批判定入场 × trail08。"""
             entries_j = _rand_entries(n_g, "judgment", gate)  # 冻结门判定窗簇形状
-            ref_j = _combine(
-                replay("judgment", "__random__", entries_j, ref_trail),
-                args.top_n,
-                ref="self",
+            ref_trades_j = replay("judgment", "__random__", entries_j, ref_trail)
+            ref_j = _combine(ref_trades_j, args.top_n, ref="self")
+            # v0.446：冻结的就是参照档时复用同一交易集（重放确定性 + 读数不改写交易）
+            trades = (
+                ref_trades_j
+                if frozen_params == ref_trail
+                else replay("judgment", "__random__", entries_j, frozen_params)
             )
-            trades = replay("judgment", "__random__", entries_j, frozen_params)
             return _combine(trades, args.top_n, ref=ref_j)
 
         _judgment_reader._gate_aware = True  # type: ignore[attr-defined]
@@ -886,10 +999,18 @@ def _run_random_arms(
             judgment_counts=counts_j,
         )
         if arm["mining"] is None:
+            print(f"[arm] {_i + 1} 无可用格（不入池）", file=sys.stderr)
             return None
         jd = arm.get("judgment")
         if jd and jd.get("margin") is not None:
             pool_j.append(jd["margin"])  # 侧信道：判定窗池（与主池同臂）
+        el = _time.time() - t_arms
+        print(  # v0.446：逐臂进度（原先整段无输出，跑几天看不出进度）
+            f"[arm] {_i + 1}（目标池 {args.n_random}）累计 {el:.0f}s，"
+            f"均 {el / (_i + 1):.0f}s/臂；打分缓存 "
+            f"{ {w: len(c) for w, c in score_caches.items()} }",
+            file=sys.stderr,
+        )
         return arm["mining"]["readings"]["margin"]
 
     c4_pool = kit.assemble_c4_pool(args.n_random, _arm)
@@ -1560,6 +1681,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default=1,
         help="warm 加载并行路数（v0.441，TODO #112：逐股 加载+扫描+打分 线程并行，"
         "产物与串行逐位一致；默认 1=原行为）",
+    )
+    ap.add_argument(
+        "--score-workers",
+        type=int,
+        default=0,
+        help="随机臂入场 V0 分多进程预算路数（v0.446：>1 时母体缺分 bar 先一次算完，读数与惰性串行逐位一致；"
+        "0=原惰性行为）",
     )
     ap.add_argument(
         "--r45",

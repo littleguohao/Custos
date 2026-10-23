@@ -59,8 +59,12 @@ uv run python -m custos.research factor_exit_study --tag r39_v2_pre \
   --mining-start <SEG_A_START> --mining-end 2016-12-31 \
   --judgment-start 2022-01-01 --judgment-end 2026-09-04
 
+# ⚠️ R40/R45 提速（v0.446）：耗时大头是随机臂入场的 as-of V0 打分（~30ms/bar × 母体百万级 bar）。
+#   --score-workers N：母体缺分 bar 先多进程一次算完（读数与原惰性串行逐位一致，不进冻结哈希）；
+#   stderr 现有 [prescore] 进度与逐臂 [arm] 行（每臂耗时 / 打分缓存量），可据此估剩余时间。
+#   N 取物理核数（本机 8 路实测 4~5×）；内存 ≈ 每路一份上证指数 + 当前任务 df，量级很小。
 # ③ R40 预演（46 门 × 5 档；随机臂成簇抽样 v0.399/0.409）
-uv run python -m custos.research bear_regime_study --tag r40_v2_pre --gates all \
+uv run python -m custos.research bear_regime_study --tag r40_v2_pre --gates all --load-workers 4 --score-workers 8 \
   --mining-start <SEG_A_START> --mining-end 2016-12-31 \
   --judgment-start 2022-01-01 --judgment-end 2026-09-04
 
@@ -71,7 +75,7 @@ uv run python -m custos.research regime_style_study --out artifacts/logs/regime_
 uv run python -m custos.research plan_rules_replay --scan-widths --tag r44_scan
 
 # ⑥ R45 预演
-uv run python -m custos.research bear_regime_study --r45 --tag r45_v2_pre \
+uv run python -m custos.research bear_regime_study --r45 --tag r45_v2_pre --load-workers 4 --score-workers 8 \
   --mining-start <SEG_A_START> --mining-end 2016-12-31 \
   --judgment-start 2022-01-01 --judgment-end 2026-09-04
 

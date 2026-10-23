@@ -57,6 +57,8 @@ _BOOKKEEP_KEYS = {
     "jobs",
     # 「load_workers」（v0.441，TODO #112）：加载并行路数，产物逐位不变——同 jobs 口径
     "load_workers",
+    # 「score_workers」（v0.446）：随机臂打分预算路数，读数逐位不变——同 jobs 口径
+    "score_workers",
     # 「tag/out_dir」（v0.406 审计 P1-2）：只决定产物命名/位置，不影响读数——进哈希会让崩溃
     # 重跑换 tag/换目录被批次门误判「口径变了」。⚠️ timeout **留在哈希里**（审计 3 B-1：
     # score_evolution 的格子超时决定格子 ran/failed ⇒ 臂池/候选集会变，影响读数）
