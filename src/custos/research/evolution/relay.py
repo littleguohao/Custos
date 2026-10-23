@@ -31,8 +31,10 @@ transcript[n] 一致后直接返回已录应答——同一断点无论重启多
 的 LLM 产出逐位相同；哈希不符说明断点被换芯，立即 RelayError（不被
 _step 的 LLMError 兜底吞掉，直接终止运行）。
 
-成本注记：每次 LLM 往返 = 一次进程重启 + 重载 K 线。relay 模式适合无
-API key / 小宇宙 / 调试场景；大批量挖掘仍建议 API 直连模式。
+成本注记：退出模式下每次 LLM 往返 = 一次进程重启 + 重载 K 线 + 重算暂停候选。
+v0.449 起有**常驻模式**（``--relay-wait SECONDS``）：脚本落请求后原地轮询
+response.json，进程与已加载数据全程不退出；每次待答照样先落断点，等待超时
+或进程被杀都能用同一命令行按退出模式续跑（两种模式共用同一断点协议）。
 """
 
 from __future__ import annotations
@@ -42,7 +44,7 @@ import json
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 SCHEMA_VERSION = 1
 
@@ -151,10 +153,28 @@ class RelayLLM:
       在本模式下不生效（CLI 层打横幅明示）。
     """
 
-    def __init__(self, transcript: list[dict[str, Any]] | None = None) -> None:
+    def __init__(
+        self,
+        transcript: list[dict[str, Any]] | None = None,
+        *,
+        waiter: Callable[[dict[str, Any]], str] | None = None,
+    ) -> None:
         self.transcript: list[dict[str, Any]] = list(transcript or [])
         self._served = 0
         self.total_tokens = 0
+        # 常驻模式（v0.449）：新请求交给 waiter 原地等应答（waiter 超时可 raise RelayPause
+        # 回落退出模式）；None = 退出模式（raise RelayPause）
+        self.waiter = waiter
+        # 当前候选位标与起步 rng 快照（run_loop 每候选起步经 mark_candidate 挂上，
+        # 常驻模式 waiter 落断点用）
+        self.position: tuple[int, int, int] | None = None
+        self.rng_state: Any = None
+        # 断点里的 LLM 级错误累计（v0.449：跨暂停累加；CLI 挂上取数函数）
+        self.error_count_fn: Callable[[], int] | None = None
+
+    def mark_candidate(self, position: tuple[int, int, int], rng_state: Any) -> None:
+        self.position = position
+        self.rng_state = rng_state
 
     def begin_candidate(self) -> None:
         """开新候选段：清空段记录（run_loop 在每个候选起步调用）。
@@ -198,7 +218,11 @@ class RelayLLM:
             "json_mode": json_mode,
             "json_schema": json_schema,
         }
-        raise RelayPause(request)
+        if self.waiter is None:
+            raise RelayPause(request)
+        content = self.waiter(request)  # 超时 ⇒ waiter 自己 raise RelayPause
+        self.transcript.append({**request, "response": content})
+        return content
 
 
 # ── 断点与请求/应答文件 ───────────────────────────────────────────────────────
@@ -238,8 +262,9 @@ def save_checkpoint(
     rng_state: Any,
     transcript: list[dict[str, Any]],
     pending: dict[str, Any],
+    llm_errors: int = 0,
 ) -> None:
-    """落断点（pause 时）：位标 + rng 快照 + transcript + 待答请求。"""
+    """落断点（pause 时）：位标 + rng 快照 + transcript + 待答请求 + LLM 级错误累计。"""
     _write_json(
         path,
         {
@@ -250,6 +275,7 @@ def save_checkpoint(
             "rng_state": rng_state,
             "transcript": transcript,
             "pending": pending,
+            "llm_errors": int(llm_errors),  # v0.449：跨暂停累加（旧断点无此键按 0）
         },
     )
 
@@ -307,6 +333,21 @@ def read_response(relay_dir: Path, pending: dict[str, Any]) -> str:
     返回 content 文本（非空字符串，空应答 fail-closed）。
     """
     path = relay_dir / RESPONSE_NAME
+    want_id = pending.get("request_id")
+    archived = relay_dir / ANSWERED_DIR / f"{want_id}.json"
+    if not path.exists() and want_id and archived.exists():
+        # v0.449 崩溃窗口自愈：上次续跑已消费并归档该应答、但在落新断点前进程死了——
+        # 断点 pending 仍指向它，同 id 应答可安全复用（内容即上次喂给循环的那份）
+        resp = _read_json(archived, "归档应答")
+        content = resp.get("content") if isinstance(resp, dict) else None
+        if (
+            isinstance(resp, dict)
+            and resp.get("request_id") == want_id
+            and isinstance(content, str)
+            and content.strip()
+        ):
+            return content
+        raise RelayError(f"归档应答损坏: {archived}")
     if not path.exists():
         raise RelayError(
             f"断点存在但缺应答文件 {path}——请先按 {relay_dir / PENDING_NAME} "

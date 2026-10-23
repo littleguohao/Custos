@@ -167,6 +167,19 @@ def _build_parser() -> argparse.ArgumentParser:
         "每次待答退出码 3，agent 写 response.json 后用同参数续跑）",
     )
     ap.add_argument(
+        "--relay-wait",
+        type=float,
+        default=0.0,
+        help="常驻模式（v0.449）：>0 时每个请求原地轮询 response.json 最多 N 秒（进程与已加载 K 线不退出），"
+        "超时才回落退出码 3；0=每次往返退出重启（原行为）",
+    )
+    ap.add_argument(
+        "--relay-poll",
+        type=float,
+        default=2.0,
+        help="常驻模式轮询间隔秒（默认 2）",
+    )
+    ap.add_argument(
         "--relay-dir",
         default="",
         help="中继目录（默认 {out-dir}/{tag}/relay；pending_request.json /"
@@ -575,7 +588,9 @@ def _best_rows(pool: TrajectoryPool, top_n: int) -> list[dict]:
     ]
 
 
-def _make_on_event(args: Any, llm: Any) -> Callable[[dict], None]:
+def _make_on_event(
+    args: Any, llm: Any, llm_errors_start: int = 0
+) -> Callable[[dict], None]:
     """进度打印 + token 预算闸（超支 raise _BudgetExceeded 让循环提前收敛）。
 
     附职责：LLM 级错误计数——decision=="llm_error" 的候选（契约重试耗尽/
@@ -616,7 +631,7 @@ def _make_on_event(args: Any, llm: Any) -> Callable[[dict], None]:
                 f"token 预算 {args.max_tokens_budget} 已超（累计 {used}），提前收敛"
             )
 
-    _on_event.llm_errors = 0  # type: ignore[attr-defined]
+    _on_event.llm_errors = int(llm_errors_start)  # type: ignore[attr-defined]  # relay 续跑接续断点累计
     return _on_event
 
 
@@ -1064,6 +1079,7 @@ class _ExecCtx:
     cell_runner: Any  # joint 的循环内三轴适应度执行器（非 joint 为 None）
     marks_bars_provider: Any = None  # marks 全历史 loader（None → excerpt 回退）
     resume: relay.ResumeState | None = None  # --agent-relay 断点续跑位标
+    llm_errors_start: int = 0  # --agent-relay 续跑：断点里的 LLM 级错误累计（v0.449）
 
 
 def _execute(ctx: _ExecCtx) -> int:
@@ -1072,7 +1088,9 @@ def _execute(ctx: _ExecCtx) -> int:
     返回 LLM 级错误计数（llm_error 事件数——未产出候选，不进轨迹池）。
     RelayPause（--agent-relay 待答）不在此捕获，直接透传给 main 落断点。
     """
-    handler = _make_on_event(ctx.args, ctx.llm)
+    handler = _make_on_event(ctx.args, ctx.llm, ctx.llm_errors_start)
+    if hasattr(ctx.llm, "error_count_fn"):  # RelayLLM：落断点时取当前累计
+        ctx.llm.error_count_fn = lambda: int(getattr(handler, "llm_errors", 0))
     try:
         run_loop(
             ctx.cfg,
@@ -1115,11 +1133,67 @@ def _relay_resume(
     content = relay.read_response(rdir, ck["pending"])
     transcript = [*ck["transcript"], {**ck["pending"], "response": content}]
     llm.load_transcript(transcript)
+    llm.resumed_llm_errors = int(ck.get("llm_errors", 0) or 0)
     pos = ck["position"]
     print(f"[RELAY] 续跑：位标 {pos}，已应答 {len(transcript)} 次", flush=True)
     return relay.ResumeState(
         position=(pos[0], pos[1], pos[2]), rng_state=ck["rng_state"]
     )
+
+
+def _relay_errors(llm: Any) -> int:
+    fn = getattr(llm, "error_count_fn", None)
+    return int(fn()) if fn is not None else int(getattr(llm, "resumed_llm_errors", 0))
+
+
+def make_relay_waiter(
+    args: Any, cfg: LoopConfig, out_dir: Path, tag: str, llm: Any
+) -> Callable[[dict[str, Any]], str]:
+    """常驻模式（--relay-wait，v0.449）：每个新请求先落断点 + 待答文件（崩溃 / 超时可按退出模式续跑），
+    再原地轮询 response.json；超时 ⇒ raise RelayPause（main 照退出模式收尾，退出码 3）。"""
+    import time as _time  # noqa: PLC0415
+
+    rdir = relay.relay_dir_for(out_dir, args.relay_dir)
+    ck_path = relay.checkpoint_path(out_dir)
+    poll = max(0.05, float(getattr(args, "relay_poll", 2.0) or 2.0))
+
+    def waiter(request: dict[str, Any]) -> str:
+        assert llm.position is not None  # run_loop 每候选起步已 mark_candidate
+        relay.save_checkpoint(
+            ck_path,
+            tag=tag,
+            cfg_fp=relay.cfg_fingerprint(asdict(cfg)),
+            position=llm.position,
+            rng_state=llm.rng_state,
+            transcript=list(llm.transcript),
+            pending=request,
+            llm_errors=_relay_errors(llm),
+        )
+        req_path = relay.write_pending(rdir, request)
+        print(
+            json.dumps(
+                {
+                    "relay": "waiting",
+                    "request_file": str(req_path),
+                    "request_id": request["request_id"],
+                    "timeout_s": args.relay_wait,
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        deadline = _time.monotonic() + float(args.relay_wait)
+        resp = rdir / relay.RESPONSE_NAME
+        while not resp.exists():
+            if _time.monotonic() >= deadline:
+                raise relay.RelayPause(request)  # 回落退出模式：断点已落，同命令行续跑
+            _time.sleep(poll)
+        _time.sleep(min(poll, 0.2))  # 给 agent 的原子写一点落定时间
+        content = relay.read_response(rdir, request)
+        relay.clear_pending(rdir)
+        return content
+
+    return waiter
 
 
 def _relay_pause_exit(
@@ -1142,6 +1216,7 @@ def _relay_pause_exit(
         rng_state=pause.rng_state,
         transcript=list(llm.transcript),
         pending=pause.request,
+        llm_errors=_relay_errors(llm),
     )
     req_path = relay.write_pending(rdir, pause.request)
     print(f"\n[RELAY] 暂停待答（退出码 {relay.EXIT_PAUSE}）", flush=True)
@@ -1256,6 +1331,11 @@ def main(
         except relay.RelayError as exc:
             print(f"[ERR] {exc}", file=sys.stderr)
             return 2
+        if args.relay_wait > 0:
+            prep.llm.waiter = make_relay_waiter(args, cfg, out_dir, tag, prep.llm)
+            print(
+                f"[RELAY] 常驻模式：每个请求原地等待 ≤{args.relay_wait:g}s", flush=True
+            )
     pool_size_before = len(pool)  # 本 run 新增轨迹数的基线（空结果护栏用）
     try:
         llm_errors = _execute(
@@ -1268,6 +1348,7 @@ def main(
                 cell_runner,
                 marks_bars_provider,
                 resume,
+                int(getattr(prep.llm, "resumed_llm_errors", 0) or 0),
             )
         )
     except relay.RelayPause as pause:

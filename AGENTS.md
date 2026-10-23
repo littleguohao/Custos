@@ -195,7 +195,7 @@ uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 �
   （`--ic-gate` / `--gate-order`）须已在研究单元预注册。提案双通道（v0.448）：
   API 直连（CUSTOS_LLM_*）/ `--agent-relay` 文件中继（agent 提案、脚本决策，
   退出码 3 握手 + 断点续跑，协议见 `evolution/relay.py` docstring；与
-  --mock-llm/--plan 互斥）。
+  --mock-llm/--plan 互斥）；`--relay-wait N`（v0.449）常驻轮询，进程与 K 线不退出，超时回落退出码 3。
 - **因子 IC 画像**（`factor_ic_profile`）是分诊镜，不是晋级判据（晋级永远走双窗 + 三轴
   交易语义）。
 - **V0 分落盘缓存**（`research/score_pool.py`，v0.447）：只服务研究；键 = 三层 as-of 帧内容摘要，版本目录 = 打分源码 +

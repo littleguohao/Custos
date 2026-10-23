@@ -644,6 +644,9 @@ def run_loop(
                 if not is_resume_target and begin_candidate is not None:
                     begin_candidate()
                 snapshot = snapshot_rng(rng)
+                mark = getattr(llm, "mark_candidate", None)  # RelayLLM 常驻模式落断点用
+                if mark is not None:
+                    mark((d_i, round_i, cand_i), snapshot)
                 try:
                     _step(ctx, direction, phase, round_i, cand_i)
                 except RelayPause as pause:

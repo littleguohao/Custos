@@ -396,3 +396,140 @@ class TestRelayCLI:
         argv = self._argv(tmp_path, codes_file, "--plan", "2")
         with pytest.raises(SystemExit):
             el.main(argv, loader=self._loader(bars))
+
+
+# ---------- v0.449：崩溃窗口自愈 / 错误累计 / 常驻模式 ----------
+
+
+class TestArchivedFallback:
+    def test_reuse_archived_when_response_consumed(self, tmp_path):
+        pend = {"request_id": "00000_ab", "request_hash": "h"}
+        (tmp_path / "response.json").write_text(
+            json.dumps({"request_id": "00000_ab", "content": "提案"}), encoding="utf-8"
+        )
+        assert relay.read_response(tmp_path, pend) == "提案"  # 消费 + 归档
+        # 模拟：续跑进程消费后、落新断点前崩溃 ⇒ 断点 pending 仍是它
+        assert relay.read_response(tmp_path, pend) == "提案"
+
+    def test_corrupt_archive_refused(self, tmp_path):
+        (tmp_path / "answered").mkdir()
+        (tmp_path / "answered" / "00000_ab.json").write_text("{bad", encoding="utf-8")
+        with pytest.raises(RelayError):
+            relay.read_response(tmp_path, {"request_id": "00000_ab"})
+
+
+class TestRelayV449(TestRelayCLI):
+    def _single_mode_pool(self, tmp_path, bars, codes_file, extra=()):
+        """退出模式跑完（对照）。"""
+        out_dir = tmp_path / "out" / "relay_t"
+        argv = self._argv(tmp_path, codes_file, *extra)
+        cands = iter(
+            [_cand("ROC(CLOSE,5)", "动量5日"), _cand("DELTA(CLOSE,3)", "价差3日")]
+        )
+        for _ in range(20):
+            rc = el.main(argv, loader=self._loader(bars))
+            if rc != relay.EXIT_PAUSE:
+                break
+            self._answer_pending(out_dir, cands)
+        assert rc == 0
+        return loop_mod.TrajectoryPool.load(out_dir / "trajectory_pool.json")
+
+    def test_wait_mode_single_process_matches_exit_mode(self, tmp_path):
+        import threading
+        import time
+
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        bars, codes_file = self._setup(tmp_path / "a")
+        ref = self._single_mode_pool(tmp_path / "a", bars, codes_file)
+
+        root = tmp_path / "b"
+        bars, codes_file = self._setup(root)
+        out_dir = root / "out" / "relay_t"
+        loads = []
+        base = self._loader(bars)
+
+        def counting_loader(codes, count):
+            loads.append(1)
+            return base(codes, count)
+
+        cands = iter(
+            [_cand("ROC(CLOSE,5)", "动量5日"), _cand("DELTA(CLOSE,3)", "价差3日")]
+        )
+        stop = threading.Event()
+        answered = []
+
+        def agent():
+            rdir = out_dir / "relay"
+            seen = set()
+            while not stop.is_set():
+                p = rdir / "pending_request.json"
+                if p.exists() and not (rdir / "response.json").exists():
+                    rid = json.loads(p.read_text("utf-8"))["request_id"]
+                    if rid not in seen:
+                        seen.add(rid)
+                        answered.append(self._answer_pending(out_dir, cands))
+                time.sleep(0.01)
+
+        th = threading.Thread(target=agent, daemon=True)
+        th.start()
+        try:
+            argv = self._argv(
+                root, codes_file, "--relay-wait", "30", "--relay-poll", "0.02"
+            )
+            assert el.main(argv, loader=counting_loader) == 0
+        finally:
+            stop.set()
+            th.join(2)
+        assert len(answered) == 4 and len(loads) == 1, (
+            "4 次往返、K 线只加载一次（进程不退出）"
+        )
+        got = loop_mod.TrajectoryPool.load(out_dir / "trajectory_pool.json")
+        assert [(t.expression, t.decision) for t in got.all()] == [
+            (t.expression, t.decision) for t in ref.all()
+        ]
+        assert relay.load_checkpoint(relay.checkpoint_path(out_dir)) is None
+
+    def test_wait_timeout_falls_back_and_resumes(self, tmp_path):
+        bars, codes_file = self._setup(tmp_path)
+        out_dir = tmp_path / "out" / "relay_t"
+        argv = self._argv(
+            tmp_path, codes_file, "--relay-wait", "0.05", "--relay-poll", "0.01"
+        )
+        cands = iter(
+            [_cand("ROC(CLOSE,5)", "动量5日"), _cand("DELTA(CLOSE,3)", "价差3日")]
+        )
+        pauses = 0
+        for _ in range(20):
+            rc = el.main(argv, loader=self._loader(bars))
+            if rc != relay.EXIT_PAUSE:
+                break
+            pauses += 1
+            self._answer_pending(out_dir, cands)
+        assert rc == 0 and pauses == 4  # 每次都超时 ⇒ 退化为退出模式，结果照常闭环
+
+    def test_llm_errors_carried_across_pauses(self, tmp_path):
+        """断点带 LLM 级错误累计；续跑 handler 从它起算。"""
+        ck = tmp_path / "ck.json"
+        relay.save_checkpoint(
+            ck,
+            tag="t",
+            cfg_fp="f",
+            position=(0, 0, 1),
+            rng_state=None,
+            transcript=[],
+            pending={"request_id": "x"},
+            llm_errors=3,
+        )
+        assert relay.load_checkpoint(ck)["llm_errors"] == 3
+        h = el._make_on_event(type("A", (), {"max_tokens_budget": 0})(), object(), 3)
+        h(
+            {
+                "decision": "llm_error",
+                "round_i": 0,
+                "cand_i": 1,
+                "direction": "d",
+                "phase": "p",
+            }
+        )
+        assert h.llm_errors == 4
