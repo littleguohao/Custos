@@ -133,6 +133,10 @@ uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 �
 **CHANGELOG.md**：每行 ≤400 字符；版本号只增不复用（撞号时后手顺延，已发生过两次）；
 只记「已改的规则/行为」，不记待办。
 
+**产物落盘**（v0.451）：临时/中间数据文件落 `artifacts/cache/`（gitignored），日志落
+`artifacts/logs/`，正式报告落 `artifacts/reports/`；**严禁直接落在 `artifacts/` 根目录**
+（技能与脚本生成物同样约束；`tests/test_repo_hygiene.py` 钉死）。
+
 **研究单元**（`governance/research/`）：判据跑数前写死、推翻标 🔄 不删、每条结论带
 证据等级、判毕后头部/结论段同步、新单元带功效节与三栏结论模板、预注册修订留注记。
 双窗 / pre2019 / **前向 holdout（≥2026-09-05 禁用）**/ 窗口使用台账的完整规则见

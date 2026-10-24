@@ -99,6 +99,29 @@ def test_no_stray_date_named_dirs_at_root():
     )
 
 
+# artifacts/ 根只许三个子目录：cache（临时/中间数据，gitignored）、logs、reports。
+# 技能/脚本生成的临时与数据文件直接落在根下 = 卫生事故（2026-10-24 实况：
+# ifind_*.csv / p_*.json / log_*.txt 散在根目录，owner 要求约束）。
+ARTIFACTS_SUBDIRS = {"cache", "logs", "reports"}
+
+
+def test_artifacts_root_only_has_known_subdirs():
+    """⚠️ artifacts/ 根目录只允许 cache/ logs/ reports/ 三个子目录，禁止散落文件。"""
+    root = ROOT / "artifacts"
+    if not root.is_dir():  # CI 干净克隆可能整个不存在
+        return
+    stray = sorted(
+        p.name
+        for p in root.iterdir()
+        if not (p.is_dir() and p.name in ARTIFACTS_SUBDIRS)
+    )
+    assert not stray, (
+        f"artifacts/ 根目录有散落文件/未知目录：{stray}\n"
+        "临时与数据文件请落 artifacts/cache/，日志落 artifacts/logs/，"
+        "正式报告落 artifacts/reports/"
+    )
+
+
 def test_gitignore_runtime_patterns_have_recursive_form():
     """gitignore 里运行时数据的模式必须有 `**/` 递归形式。
 
