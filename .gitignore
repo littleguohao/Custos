@@ -35,6 +35,8 @@ artifacts/reports/monthly/**
 
 # Pipeline logs and transient output
 artifacts/logs/
+# 研究 V0 分落盘缓存（score_pool v0.447；可再生，且不入库防 git_dirty 污染产物 provenance）
+artifacts/cache/
 # 日报按日期目录归档（2026-08-12 起，废除 _supporting 双套结构）：
 # 日期目录的**内容**不入库、目录本身保留（同 weekly/ 的「keep directories only」）；
 # 旧平铺命名（迁移期残留/旧代码产物）同样不入库。
