@@ -468,7 +468,13 @@ class TestNoStaleScriptPaths:
             # ① Path 构造形式：X / "dir" / "name.py"（允许中间多层）
             for m in re.finditer(r'/\s*"([a-z_0-9]+)"\s*/\s*"([a-z_0-9]+\.py)"', src):
                 d, name = m.group(1), m.group(2)
-                if (d, name) not in existing and not (ROOT / d / name).exists():
+                # scripts/<dir>/<name>.py 也是合法引用位（运维/开发脚本，如
+                # run_1800 的影子对照 scripts/dev/shadow_1800_compare.py）
+                if (
+                    (d, name) not in existing
+                    and not (ROOT / d / name).exists()
+                    and not (ROOT / "scripts" / d / name).exists()
+                ):
                     bad.append(f"{p.relative_to(TOOLS)}: {d}/{name}")
             # ② 字符串路径形式：src/.../name.py（任意层数）
             for m in re.finditer(r"src/((?:[a-z_0-9]+/)+)([a-z_0-9]+\.py)", src):

@@ -113,7 +113,7 @@ class TestSharedImplBehavior:
         import sys
         from custos.core import pipeline_kit
 
-        def fake(cmd, name, required=False):
+        def fake(cmd, name, required=False, timeout=600):
             print("[RUN] 这行不该出现在 runner stdout 里")
             return {"stdout": "o", "stderr": "e", "ok": True}
 

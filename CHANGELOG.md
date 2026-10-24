@@ -452,6 +452,7 @@
 | 2026-10-23 | v0.447 | **warm 打分提速（逐位不变）**：生产机 profile 显示 warm 99% 耗时在信号日 V0 分。新 `score_pool`：先扫信号后批量打分，`--score-workers` 多进程（spawn 可用，本机 8 路 4.2×）+ 跨研究落盘缓存（键 = as-of 帧内容摘要，版本 = 源码哈希，命中 ~25×）；R40/R45/R44/R47~R49 warm 与随机臂共用；conftest 关缓存 | owner 2026-10-23 | 钉测 +8 |
 | 2026-10-23 | v0.448 | **进化引擎双提案通道**：新增 `--agent-relay`（agent 提案、脚本决策）——`evolution/relay.py` 文件中继：请求落盘→退出码 3 暂停→agent 写 response.json→同命令行断点续跑（位标 + rng 快照 + 当前候选段 transcript 重放，哈希不符 fail-closed）；判定链/DSL 门/双窗逐位不动；与 --mock-llm/--plan 互斥；interpret 透出 RelayPause；summary config 标注 `llm_source` | owner 2026-10-23（Kimi Work 迁移：无 LLM key 也能跑进化，提案可切 API/agent 两通道） | 钉测 +21（含分段续跑≡单进程逐位一致） |
 | 2026-10-23 | v0.449 | **relay review 修正 + 常驻模式**：`--relay-wait N` 每个请求原地轮询 response.json（进程与已加载 K 线不退出；每次仍先落断点，超时 / 被杀照退出模式续跑）；应答已归档但新断点未落的崩溃窗口自愈（复用 answered/ 同 id 应答）；LLM 级错误计数入断点跨暂停累加 | owner 2026-10-23 | 钉测 +5 |
+| 2026-10-24 | v0.450 | **1800 末尾挂影子对照**（TODO #76 自动化）：`run_1800` 第 7 步调 `scripts/dev/shadow_1800_compare.py --date 当日`，WARN-only 不阻断选股、exit≠0 只落 diff 日志；`pipeline_kit.run_stage_quiet` 透传 `timeout` 参数（该步给 1800s，旁路需整跑计算段四脚本） | 影子对照断跑一个月（09-24 后无人执行，进度停 3/10），挂进 1800 末尾后任何触发方式都自动带上 | 每交易日攒「非 BJ 逐位一致」计数，攒满 10 闭环 #76 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

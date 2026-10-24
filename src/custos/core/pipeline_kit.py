@@ -209,7 +209,7 @@ def propagate_gate_code(r: dict, default: int = 1) -> int:
     return rc if rc in GATE_EXIT_CODES else default
 
 
-def run_stage_quiet(cmd: list[str], name: str) -> dict:
+def run_stage_quiet(cmd: list[str], name: str, timeout: int = 600) -> dict:
     """静默跑一个 stage，把 stdout+stderr 合并进 `r["out"]`。
 
     **为什么要静默**：runner 的 stdout 是**给机器消费的协议**（cron / 上游解析它），
@@ -222,7 +222,7 @@ def run_stage_quiet(cmd: list[str], name: str) -> dict:
     由 runner 汇总成 `status="degraded"`。
     """
     with contextlib.redirect_stdout(io.StringIO()):
-        r = run_stage(cmd, name, required=False)
+        r = run_stage(cmd, name, required=False, timeout=timeout)
     r["out"] = (r["stdout"] + r["stderr"]).strip()
     return r
 

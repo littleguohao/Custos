@@ -250,10 +250,10 @@ def main(argv=None) -> int:
     t0 = time.time()
     stages_log: list[dict] = []
 
-    def _run_stage(cmd: list[str], name: str, note: str = "") -> dict:
+    def _run_stage(cmd: list[str], name: str, note: str = "", timeout: int = 600) -> dict:
         s_started = _now_iso()
         s_t0 = time.time()
-        r = _stage(cmd, name)
+        r = _stage(cmd, name, timeout=timeout)
         stages_log.append(
             _log_stage(name, r, s_started, _now_iso(), time.time() - s_t0, note=note)
         )
@@ -312,6 +312,28 @@ def main(argv=None) -> int:
 
     # 6. Digest of the candidate table (may be absent when the chain degraded early)
     digest = _append_candidate_digest(target, stages_log)
+
+    # 7. TODO #76 影子对照（现行 vs #67 迁移前钉点 b35e97b 的标注列逐位 diff）。
+    #    WARN-only：不一致=fail-closed 收集机制（exit≠0 落 diff 日志），
+    #    不阻断选股、不改 status——它是审计旁路，不是生产环节。
+    #    超时给足 1800s：旁路要把 1800 计算段四脚本整跑一遍，且可能与研究跑数抢 CPU；
+    #    被超时杀掉时旁路来不及恢复共享 stock_pool（脚本内快照/恢复），
+    #    次日 1800 会重生成，风险可接受。
+    r = _run_stage(
+        [
+            "uv",
+            "run",
+            "python",
+            str(BASE / "scripts" / "dev" / "shadow_1800_compare.py"),
+            "--date",
+            target,
+        ],
+        "shadow_1800_compare",
+        note="#76 影子对照：不一致只落 diff 日志，WARN-only 不阻断",
+        timeout=1800,
+    )
+    if not r["ok"]:
+        print(f"[WARN] shadow_1800_compare: {r['out'][:200]}")
 
     status = "completed" if not degraded else "degraded"
     _write_run_log(target, status, run_started, t0, stages_log)

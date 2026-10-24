@@ -23,7 +23,7 @@
 | 108 | R37 r37_b1 已实现口径复核（判定窗 +0.0034 贴零，open_end 污染量级可能更大；exit_campaign 产物无逐笔需重跑读数） | P3 | 生产机 | 重跑 r37_b1 读数段 | R37 头部审计注记 |
 | 109 | R40 v2 重跑：按 R40「v2 重跑修订」节在挖掘 A∪B 选型（代码口径 v0.382~0.387），过 C1~C4 再入判定段批次 | P2 | 生产机 | 等 #91/#92 后发车 | R40 v2 重跑修订节 |
 | 60 | plan 信号并入 SIGNAL_ORDER 与否。判据（两条同时成立）：①实现一致性——影子台账非 default 事件 ≥5 个交易日无异常；②规则有效性——R41 已判 falsified（v0.351）路径关闭，只剩 `plan_shadow_review` 累计 K=20 个独立事件（段头计、≥5 只持仓）均值 Δret₅ ≥ 0（凑不满 K ⇒ ②不成立 ⇒ 不并轨）。default 来源永不出 plan 信号；并轨=独立提交、只改 SIGNAL_ORDER | P2 | 观察中 | 影子事件持续累计，攒满或 60 交易日到期后 owner 定夺 | [R41](governance/research/R41_position_plan_rules_replay.md)；owner 2026-10-09 判据；v0.310/0.311/0.314/0.351 |
-| 76 | #67 接口收敛的最后保险：1800 候选表标注列影子对照，非 BJ 宇宙逐位一致攒满 10 个交易日即闭环（进度 3/10，09-24 为止） | P3 | 生产机 | 继续跑 `scripts/dev/shadow_1800_compare.sh` 并记进度 | [设计稿](governance/strategy/_factors/interface_unification_plan.md)；v0.239 / v0.295 |
+| 76 | #67 接口收敛的最后保险：1800 候选表标注列影子对照，非 BJ 宇宙逐位一致攒满 10 个交易日即闭环（进度 3/10，09-24 为止） | P3 | 生产机 | v0.450 起挂进 run_1800 末尾自动跑（WARN-only），无需手工；攒满即闭环 | [设计稿](governance/strategy/_factors/interface_unification_plan.md)；v0.239 / v0.295 / v0.450 |
 | 80 | LLM 转岗：从「提数值表达式」改为「读失败模式、提机制假设」（证据：表达式提案不比随机好，Phase 1 诊断是机制级洞察）。原落地形态 R37 Phase 3 已随 R37 收口失效，需重定落点 | P3 | 挂起 | 落点定为 R43（owner 2026-10-14）：风格规律出来后由 LLM 读失败区间段提机制假设、不碰数值 | owner 方法论 review 2026-09-23 ③（①②④ 已闭环 v0.267/0.286/0.296） |
 | 86 | R36 后续维度剩余三项：③条件化/regime（0AMV 作因子条件变量）④盈亏比排序（服务仓位）⑤horizon 与出场轴对齐；另「结构因子基准臂」待打分侧重开时议 | P3 | 挂起 | 判据新建成本高，排在 #81 之后 | owner 2026-09-23 五维度③④⑤；原 #81/#80① |
 | 114 | R47 挖掘段扫描：工具已落地 v0.434（`plan_rules_replay --scan-protect`）；第一批判定段读完后跑，命令见 runbook「第二批预告」 | P2 | 生产机 | 第一批读完后跑 r47_scan + 摘要入库 | [R47](governance/research/R47_profit_protection_breakeven_trail.md) |
