@@ -1,0 +1,289 @@
+{
+  "digest_version": 1,
+  "fields": {
+    "criteria.C1": {
+      "judgment": {
+        "n_taken": 315,
+        "ok": true
+      },
+      "min_n_taken": 100,
+      "mining": {
+        "n_taken": 1070,
+        "ok": true
+      },
+      "ok": true
+    },
+    "criteria.C2": {
+      "beats_no_trade": false,
+      "margin_judgment": 0.0014402025710947286,
+      "margin_mining": 0.05904700036805299,
+      "ok": false,
+      "pool_ok_judgment": true,
+      "pool_ok_mining": true,
+      "pools_available": true,
+      "pos_ok": true,
+      "q95_judgment": -0.008156862745098081,
+      "q95_mining": 0.019888514777403665,
+      "rule": "margin 双窗同向为正 且 双窗>随机臂对应窗池 q95（基准=随机臂非空仓）"
+    },
+    "criteria.C3": {
+      "best_tp_by_window": {
+        "judgment": "T1",
+        "mining": "T3"
+      },
+      "neighbors": [
+        "x12_T3"
+      ],
+      "neighbors_positive": false,
+      "ok": false,
+      "rule": "止损邻档两窗 margin>0 且两窗各自最优格止盈方案与 top 相同（R45 预注册）",
+      "tp_consistent": false
+    },
+    "criteria.C4": {
+      "evaluated": 50,
+      "gate_pass": 50,
+      "gate_pass_rate": 1.0,
+      "min_pool": 50,
+      "note": "与 C2 挖掘半窗同池（重合是设计使然——R40 量级线与选择效应对的是同一个零假设）",
+      "pool_size": 50,
+      "q95": 0.019888514777403665,
+      "state": "confirmed_pass"
+    },
+    "criteria.r45": {
+      "exit_grid": [
+        "x5_T1",
+        "x5_T2",
+        "x5_T3",
+        "x5_T4",
+        "x8_T1",
+        "x8_T2",
+        "x8_T3",
+        "x8_T4",
+        "x12_T1",
+        "x12_T2",
+        "x12_T3",
+        "x12_T4",
+        "x15_T1",
+        "x15_T2",
+        "x15_T3",
+        "x15_T4"
+      ],
+      "note": "R45 模式（v0.397）：j_low 单门 × 4 止损（信号日低点锚定）× 4 止盈；C2 另须两窗组合收益>0（打过不交易）；C3=止损邻档平滑+最优止盈一致",
+      "portfolio": {
+        "max_concurrent": 3,
+        "max_pos_frac": 0.1,
+        "risk_pct": 0.01
+      },
+      "ref_cell": "x8_T1",
+      "unit": "R45"
+    },
+    "n_signals_by_gate": {
+      "judgment": {
+        "j_low": 905702
+      },
+      "mining": {
+        "j_low": 962306
+      }
+    },
+    "pools.entry_accounting": {
+      "judgment": {
+        "requested": 45285100,
+        "returned": 45259222
+      },
+      "mining": {
+        "requested": 48115300,
+        "returned": 48056125
+      }
+    },
+    "pools.q95_judgment": -0.008156862745098081,
+    "pools.q95_mining": 0.019888514777403665,
+    "provenance.cmdline": "--r45 --tag r45_v2_pre --load-workers 4 --score-workers 8 --mining-start 2000-01-01 --mining-end 2016-12-31 --judgment-start 2022-01-01 --judgment-end 2026-09-04",
+    "provenance.data_last_date": "2026-09-04",
+    "provenance.git_dirty": false,
+    "provenance.git_sha": "5fc6d0b90e",
+    "provenance.n_codes": 5579,
+    "provenance.universe_rule": "ashare_full_asof",
+    "provenance.universe_sha256": "6a24a9f13ee5ee1b",
+    "top.exit": "x15_T3",
+    "top.extended.judgment.dist.by_reason": [
+      {
+        "avg_holding": 13.43,
+        "avg_ret": 0.051,
+        "n": 452432,
+        "reason": "bbi_exit",
+        "share": 0.5044,
+        "win_rate": 0.7043
+      },
+      {
+        "avg_holding": 4.55,
+        "avg_ret": -0.040595,
+        "n": 408517,
+        "reason": "cost_zone_stop",
+        "share": 0.4555,
+        "win_rate": 0.0762
+      },
+      {
+        "avg_holding": 7.57,
+        "avg_ret": -0.194036,
+        "n": 23678,
+        "reason": "stop",
+        "share": 0.0264,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 5.92,
+        "avg_ret": -0.202791,
+        "n": 7005,
+        "reason": "stop_delayed",
+        "share": 0.0078,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 16.66,
+        "avg_ret": 0.026866,
+        "n": 2687,
+        "reason": "bbi_exit_delayed",
+        "share": 0.003,
+        "win_rate": 0.3238
+      },
+      {
+        "avg_holding": 5.71,
+        "avg_ret": -0.129986,
+        "n": 2622,
+        "reason": "cost_zone_stop_delayed",
+        "share": 0.0029,
+        "win_rate": 0.0027
+      }
+    ],
+    "top.extended.judgment.dist.expectancy": 0.00023,
+    "top.extended.judgment.dist.holding": {
+      "avg_loss": 5.811977,
+      "avg_win": 14.378315
+    },
+    "top.extended.judgment.n_unfillable": 15,
+    "top.extended.judgment.portfolio": {
+      "cagr": -0.0469,
+      "max_drawdown": 0.2641,
+      "n_taken": 315,
+      "return_over_maxdd": -0.74,
+      "total_return": -0.1956
+    },
+    "top.extended.mining.dist.by_reason": [
+      {
+        "avg_holding": 14.59,
+        "avg_ret": 0.065604,
+        "n": 514473,
+        "reason": "bbi_exit",
+        "share": 0.5364,
+        "win_rate": 0.7242
+      },
+      {
+        "avg_holding": 4.6,
+        "avg_ret": -0.043875,
+        "n": 388264,
+        "reason": "cost_zone_stop",
+        "share": 0.4048,
+        "win_rate": 0.0836
+      },
+      {
+        "avg_holding": 7.75,
+        "avg_ret": -0.184237,
+        "n": 23729,
+        "reason": "stop",
+        "share": 0.0247,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 5.72,
+        "avg_ret": -0.212265,
+        "n": 17456,
+        "reason": "stop_delayed",
+        "share": 0.0182,
+        "win_rate": 0.0
+      },
+      {
+        "avg_holding": 19.45,
+        "avg_ret": 0.079136,
+        "n": 9822,
+        "reason": "bbi_exit_delayed",
+        "share": 0.0102,
+        "win_rate": 0.4696
+      },
+      {
+        "avg_holding": 5.92,
+        "avg_ret": -0.138691,
+        "n": 5381,
+        "reason": "cost_zone_stop_delayed",
+        "share": 0.0056,
+        "win_rate": 0.0013
+      }
+    ],
+    "top.extended.mining.dist.expectancy": 0.009039,
+    "top.extended.mining.dist.holding": {
+      "avg_loss": 6.223375,
+      "avg_win": 15.582984
+    },
+    "top.extended.mining.n_unfillable": 199,
+    "top.extended.mining.portfolio": {
+      "cagr": -0.0241,
+      "max_drawdown": 0.5266,
+      "n_taken": 1070,
+      "return_over_maxdd": -0.64,
+      "total_return": -0.337
+    },
+    "top.judgment": {
+      "expectancy_R": 0.003,
+      "margin": 0.0014402025710947286,
+      "n": 896941,
+      "n_taken": 315,
+      "n_unrealized": 8761,
+      "objective": 0.0014402025710947286,
+      "objective_version": "v2.1-margin-rddref",
+      "payoff_ratio": 1.567,
+      "rdd_gate": true,
+      "ret_over_dd": -0.051657959999999996,
+      "total_return": -0.1956,
+      "trade_set_note": "margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）",
+      "win_rate": 0.391
+    },
+    "top.mining": {
+      "expectancy_R": 0.055,
+      "margin": 0.05904700036805299,
+      "n": 959125,
+      "n_taken": 1070,
+      "n_unrealized": 3181,
+      "objective": 0.05904700036805299,
+      "objective_version": "v2.1-margin-rddref",
+      "payoff_ratio": 1.717,
+      "rdd_gate": true,
+      "ret_over_dd": -0.1774642,
+      "total_return": -0.337,
+      "trade_set_note": "margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）",
+      "win_rate": 0.4271
+    },
+    "verdict": "falsified",
+    "window_usage": {
+      "k": null,
+      "note": "判定窗在挖掘段内（非受保护段 2017~2021）——读挖掘段不入台账（v2 口径）",
+      "window": "mining_segment"
+    },
+    "windows": {
+      "judgment": {
+        "end": "2026-09-04",
+        "start": "2022-01-01"
+      },
+      "mining": {
+        "end": "2016-12-31",
+        "start": "2000-01-01"
+      }
+    }
+  },
+  "kind": "r45",
+  "missing": [],
+  "path": "results/R45/r45_v2_pre.json",
+  "schema": "result_digest/v1",
+  "source_name": "_bear_regime__r45_v2_pre.json",
+  "source_sha256": "bbe1af7dd86823f15146a4682d5247772e8a7ab22eca8e2f8df7cd7f644cb3e5",
+  "tag": "r45_v2_pre",
+  "unit": "R45"
+}
