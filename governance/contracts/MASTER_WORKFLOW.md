@@ -256,6 +256,11 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 > （换手率资金基数、板块归因、版本归因等）按 fail-closed 惯例如实报 unavailable。
 > 调度需在 OpenClaw cron 加一条（建议每月 1 日上午复盘上月）。
 > **v0.424**：报告末尾默认附操作反事实小节（同周报，期间=本月）。
+> **v0.455（TODO #120）**：反事实小节后再附 holdout 跟踪节
+> （`close_review/holdout_tracking.py`）：汇总实盘平仓 FIFO / 选股练习台账 /
+> plan 影子台账 / trade_cf 同次产物，按月 + holdout 累计（2026-09-05 起）报
+> 大单率 / 大亏率 / 胜率 / 盈亏比，并对照 R44 参照档冻结基线；**纯描述、不作
+> 判据、不改规则**，伴生 JSON 落 `artifacts/reports/monthly/YYYY-MM_holdout_tracking.json`。
 
 ### 时间范围
 

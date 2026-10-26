@@ -127,6 +127,9 @@ def _skip_trade_counterfactual_subprocess(monkeypatch):
     """周报/月报的操作反事实小节走子进程跑研究 CLI（v0.424）——测试默认跳过，
     专测 ``trade_cf_section`` 的用例自行 delenv。"""
     monkeypatch.setenv("CUSTOS_SKIP_TRADE_CF", "1")
+    # v0.455（TODO #120）：月报 holdout 跟踪节同样子进程跑研究 CLI，测试默认跳过；
+    # 专测 holdout_tracking 的用例自行 delenv + 注入假 runner
+    monkeypatch.setenv("CUSTOS_SKIP_HOLDOUT_TRACKING", "1")
     # v0.447：V0 分落盘缓存测试中默认关（monkeypatch 的假打分不得写进 / 读出真缓存）
     monkeypatch.setenv("CUSTOS_V0_SCORE_CACHE", "off")
 

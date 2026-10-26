@@ -457,6 +457,7 @@
 | 2026-10-26 | v0.452 | **R45 判毕 falsified**（r45_v2_pre 复核）：margin 两窗正但 30% 敞口组合两窗总收益为负（A −33.7% / B −19.6%），打不过不交易；邻档与最优止盈不稳；V0 选中子集差于全候选（同 R42/R46）；不入第一批，空头期维持空仓；头部 / 结论 / README 同步 | 生产机 2026-10-24 | 治理 |
 | 2026-10-26 | v0.453 | **挖掘段数据快照落地**（TODO #116）：`export_mining_snapshot.py`（生产机导出镜像目录 + MANIFEST，`--verify`/`--tar`，vipdoc 字节切片保真）＋ `CUSTOS_DATA_SNAPSHOT` 快照模式（paths 单点改道、banner、provenance 记 sha）＋三道硬闸（台账/批次门拒写、live 入口拒跑、禁带日期报错）＋ load_amv_regime 快照分支（缺序列 fail-closed）＋ review 修补（conftest 挡快照环境变量、PIT/xdxr/股本禁带闸）；细节见设计稿 | owner 2026-10-26 同意设计稿 | 钉测 57+16 例；生产机验收 = 真实 vs 快照 R44 抽样逐位一致 |
 | 2026-10-26 | v0.454 | `_CAND_CACHE` 字典操作进锁（--load-workers 并发逐出不再抛 KeyError 丢样本）；板块指数 CSV 快照禁带检查（sector_phase / R48 板块腿）；测试分层：Calibration/Sentinel 类自动打 `slow`，`test_affected` 默认跳过（`--with-slow`/`--full`/CI 照跑），research/ 改动恒带 TOOLS 注册表守卫；TODO #80 落点改 R49/R50、#86 关闭、新增 #120 holdout 月报 | owner 2026-10-26 | 钉测 +7 |
+| 2026-10-26 | v0.455 | **holdout 跟踪月报节**（TODO #120）：新模块 `close_review/holdout_tracking`（挂月报附录，trade_cf 节后）——实盘平仓 FIFO / 选股练习 / plan 影子 / trade_cf 同次产物四源聚合，本月 + holdout 累计（2026-09-05 起）报大单率 / 大亏率 / 胜率 / 盈亏比，对照 R44 参照档冻结基线；大单 ≥+20% / 大亏 ≤−10% 沿用 R48/R49 写死口径；纯描述不作判据；伴生 JSON 落 artifacts/reports/monthly/ 并入契约 | owner 2026-10-26 | 钉测 +16 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

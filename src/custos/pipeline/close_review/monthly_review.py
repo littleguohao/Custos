@@ -660,7 +660,11 @@ def main(argv=None) -> int:
     cf = trade_cf_section.section(
         base, review["start"], review["end"], stem
     )  # v0.424，fail-soft
-    md_path.write_text(render_markdown(review) + cf, encoding="utf-8")
+    from custos.pipeline.close_review import holdout_tracking  # noqa: PLC0415
+
+    # v0.455（TODO #120）：holdout 跟踪节排在 trade_cf 之后（它读 trade_cf 同次产物），fail-soft
+    ht = holdout_tracking.section(base, review["month"])
+    md_path.write_text(render_markdown(review) + cf + ht, encoding="utf-8")
     print(f"monthly review written: {json_path}")
     print(f"monthly review written: {md_path}")
     return 0

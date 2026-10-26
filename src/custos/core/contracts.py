@@ -1020,6 +1020,28 @@ SPECS: dict[str, dict] = {
             "recorded_at": {"type": str, "required": True, "non_empty": True},
         },
     },
+    # holdout_tracking.section（TODO #120，v0.455）—— holdout 跟踪月报节伴生 JSON
+    # （artifacts/reports/monthly/<month>_holdout_tracking.json；月报附录，纯描述）
+    "holdout_tracking_monthly": {
+        "kind": "object",
+        "fields": {
+            "schema": {"type": str, "required": True, "non_empty": True},
+            "month": {"type": str, "required": True, "non_empty": True},
+            "generated_at": {"type": str, "required": True, "non_empty": True},
+            "holdout_start": {"type": str, "required": True, "non_empty": True},
+            "period": {"type": dict, "required": True},
+            "thresholds": {"type": dict, "required": True},
+            "actual_trades": {"type": dict, "required": True},
+            "pick_practice": {"type": dict, "required": True},
+            "plan_shadow": {"type": dict, "required": True},
+            "trade_cf": {"type": dict, "required": True},
+            "baseline": {"type": dict, "required": True},
+            "sample_notes": {"type": list, "required": True},
+            "unavailable": {"type": list, "required": True},
+            # ⚠️ 纯描述读数，纪律声明必须在产物里（同复盘层 permission_rule 惯例）
+            "permission_rule": {"type": str, "required": True, "non_empty": True},
+        },
+    },
 }
 
 
