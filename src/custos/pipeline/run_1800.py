@@ -250,7 +250,9 @@ def main(argv=None) -> int:
     t0 = time.time()
     stages_log: list[dict] = []
 
-    def _run_stage(cmd: list[str], name: str, note: str = "", timeout: int = 600) -> dict:
+    def _run_stage(
+        cmd: list[str], name: str, note: str = "", timeout: int = 600
+    ) -> dict:
         s_started = _now_iso()
         s_t0 = time.time()
         r = _stage(cmd, name, timeout=timeout)
