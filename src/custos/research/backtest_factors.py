@@ -69,6 +69,7 @@ from custos.core.indicators import (
 from custos.core.indicators import dmi_arrays  # noqa: E402  DMI/ADX 唯一实现
 from custos.core.indicators import amplitude_pct as amplitude_pct_of  # noqa: E402  振幅唯一实现
 from custos.core.code_utils import price_limit_pct  # noqa: E402
+from custos.core.paths import MARKET_DIR, is_snapshot_mode  # noqa: E402
 
 
 def _bbi_series_from(df: pd.DataFrame) -> np.ndarray:
@@ -4466,7 +4467,30 @@ def load_amv_regime(
     兜底：台账空/缺失/异常时才回落旧路径（指南针 day.vdat 主序列 + 台账尾部
     拼接）——vdat 停更于 2026-07-17，兜底只为防台账丢失，正常不该走到。
     best-effort：都缺返回 {}。
+
+    **快照模式（TODO #116）**：快照不导 0AMV 原始台账（状态机须从台账首日重放，
+    截断台账会算错——设计稿定的就是这个理由），只导生产机重放好的
+    ``data/market/amv_regime_series.json``（{"schema","series":{date: regime}}）。
+    DATA 根已被 paths 单点改道 ⇒ 本模块的 MARKET_DIR 即快照内目录。
+    fail-closed：文件缺失/损坏/缺 series 键 ⇒ raise——0AMV 是方向主过滤器，
+    静默退 {} 会让回测在**无方向过滤**下照常跑出假读数（best-effort 惯例在这里
+    反而是坑：非快照的「台账丢失兜底」与快照的「快照不完整」是两回事）。
     """
+    if is_snapshot_mode():
+        series = None
+        try:
+            obj = json.loads(
+                (MARKET_DIR / "amv_regime_series.json").read_text(encoding="utf-8")
+            )
+            if isinstance(obj, dict) and isinstance(obj.get("series"), dict):
+                series = obj["series"]
+        except Exception:  # noqa: BLE001 — 统一走下方 fail-closed
+            series = None
+        if series is None:
+            raise ValueError(
+                "快照模式缺 amv_regime_series.json（快照不完整，重新导出）"
+            )
+        return {str(d)[:10]: str(v) for d, v in series.items() if str(d)[:10] >= since}
     # 状态机从台账**首日**起重放再截到 since（v0.386 审计 recent#7）：原从 since 起
     # 重放 ⇒ 起点重置为「中性」，同一天的 regime 随窗口起点而变（锁定的空头被清掉），
     # 跨单元/跨窗口的信号集不可比。

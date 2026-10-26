@@ -348,6 +348,14 @@ def load_ledger(path: str | Path = LEDGER) -> list[dict]:
                 out.append(json.loads(line))
             except ValueError:
                 continue
+    # 快照污染兜底（TODO #116 review #2）：PIT 的禁带比 K 线多一段
+    # （增量只从 2020-01-01 起）；快照里出现禁带 notice_date ⇒ 快照被污染，当场炸。
+    from custos.core import paths as _paths  # noqa: PLC0415
+
+    if _paths.is_snapshot_mode():
+        v = _paths.snapshot_pit_violation(r.get("notice_date") for r in out)
+        if v:
+            raise ValueError(f"快照数据污染（PIT {path.name}）：{v}")
     return out
 
 

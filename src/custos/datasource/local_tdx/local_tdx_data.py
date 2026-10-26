@@ -31,7 +31,13 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-from custos.core.paths import TDX_ROOT, cn_today, CACHE_DIR  # noqa: E402
+from custos.core.paths import (
+    TDX_ROOT,
+    cn_today,
+    CACHE_DIR,
+    is_snapshot_mode,
+    snapshot_bar_violation,
+)  # noqa: E402
 from custos.core.code_utils import (
     ASHARE_STOCK_PREFIXES,
     SH_INDEX_BARE,
@@ -137,6 +143,20 @@ def _with_client_retry(fn, *, tries: int = 2, what: str = "tdx"):
 
 class LocalTdxError(RuntimeError):
     pass
+
+
+def _snapshot_gate_dates(df: pd.DataFrame, code: str) -> None:
+    """快照污染兜底（TODO #116）：快照模式下 df 含禁带日期的 bar ⇒ 硬报错。
+
+    快照物理上不含判定段（2017~2020-09）与前向 holdout（≥2026-09-05）的数据；
+    读到了只能说明快照被污染（如把完整 vipdoc 目录误当快照用）——静默放行会让
+    研究在开发机「读到判定段」而无人察觉，必须当场炸停。非快照模式零开销直返。
+    """
+    if not is_snapshot_mode():
+        return
+    violation = snapshot_bar_violation(df["date"])
+    if violation:
+        raise LocalTdxError(f"快照数据污染：{code} {violation}")
 
 
 # 已校验通过的 TDX_ROOT（按路径字符串缓存：校验只做一次，但改了 TDX_ROOT 会重新校验）
@@ -334,6 +354,7 @@ def read_vipdoc_daily(code: str, strict: bool = False) -> pd.DataFrame:
             return df
         df["code"] = normalize_code(code)
         df["source"] = "vipdoc_bj_direct"
+        _snapshot_gate_dates(df, code)
         return df[
             [
                 "date",
@@ -359,6 +380,7 @@ def read_vipdoc_daily(code: str, strict: bool = False) -> pd.DataFrame:
             return df
         df["code"] = normalize_code(code)
         df["source"] = "vipdoc_sh_index_direct"
+        _snapshot_gate_dates(df, code)
         return df[
             [
                 "date",
@@ -388,6 +410,7 @@ def read_vipdoc_daily(code: str, strict: bool = False) -> pd.DataFrame:
     df["source"] = "mootdx_reader"
     df.index.name = "date"
     df = df.reset_index()
+    _snapshot_gate_dates(df, code)
     return df[
         ["date", "code", "open", "high", "low", "close", "amount", "volume", "source"]
     ]

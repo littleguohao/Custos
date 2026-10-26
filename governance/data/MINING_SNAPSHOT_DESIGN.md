@@ -45,6 +45,30 @@
      预热段 [2020-10-01, 2021-12-31] 读到可以，但 `load_window.mining_violation` 照常拒绝把它当信号窗。
 4. **测试**：合成迷你快照（2 票 × 三段）走全链——导出 → 快照模式加载 → 段外日期拒读 → 批次门 / 台账拒写 → live 入口拒跑。
 
+## 落地偏差同步（v0.453 实现后回填，以代码为准）
+
+- **live 拒跑落点**：改在 `pipeline_kit.calendar_gate`（五时点入口共用的第一步，exit 2）——实现时发现
+  run_1800 的 runtime_gate 本就「只落盘、不阻断」，拦不住；`runtime_gate` 另加退出码 6 作补充闸（先于 3/4/5）。
+- **K 线闸门落点**：`read_vipdoc_daily` 三条非空返回路径（BJ 直读 / SH 指数直读 / mootdx reader）统一调
+  `paths.snapshot_bar_violation`——该谓词在 L0 的 paths.py，禁带边界是 `load_window` 段常量的同值镜像
+  （paths 不许 import research，两边相等由 `tests/test_snapshot_mode.py` 钉住）。
+- **导出清单补一项**：`data/fundamentals/share_changes.jsonl`（mcap 因子的 as-of 股本来源，
+  `observed_on ≤ 2026-09-04` 全保留、**含判定段年份**——as-of 只可能 stale，缺了挖掘 B 的股本会错）。
+- **快照模式 `load_amv_regime` 缺序列文件 ⇒ fail-closed raise**（不是 best-effort {}）——0AMV 是方向
+  主过滤器，静默退 {} 会让回测在无方向过滤下跑出假读数。
+- 导出侧两个实现细节：过滤后 0 条的 `.day` / 板块 CSV **不写出**（宇宙枚举自动跟着缩）；
+  vipdoc 保留记录按**原样 32 字节切片**写回（不 unpack/repack，保验收 1 的逐位一致）；
+  `--out` 守卫口径 = 位于仓库内且不在 `artifacts/cache/` 之下 ⇒ 拒；另有只读的 `--verify <dir>`
+  （逐文件重算 sha256 比对 MANIFEST）。
+- **review 修补（2026-10-26，合入前）**：① `tests/conftest.py` 顶部在任何 custos import 之前
+  `pop("CUSTOS_DATA_SNAPSHOT")`——SNAPSHOT_ROOT 在 import paths 时定死，带着它跑 pytest 会让
+  整个套件在快照模式下跑（台账测试被硬闸拦、加载测试读真实快照），报错难懂；专项测试走
+  monkeypatch，不受影响。② 禁带检查从「只覆盖日线」扩到 PIT / xdxr / share_changes 三个单一
+  读取点（`snapshot_pit_violation` 禁带多一段 2017~2019——PIT 增量从 2020-01-01 起；
+  `snapshot_event_violation` 只禁 > 2026-09-04——判定段事件是前复权与 as-of 股本的合法输入）。
+  板块指数 CSV 无单一读取点、且污染场景下 vipdoc 闸必先触发，不补（在案决策）。
+  ③ 日期比较统一走 `_d8n` 数字归一——横杠/纯数字混比会把边界日误判进禁带。
+
 ## 验收（缺一不合）
 
 1. **一致性（最重要）**：生产机上同一 commit，真实数据 vs 快照各跑一次 R44 `--scan-widths --universe-sample 300`（固定种子），

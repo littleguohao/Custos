@@ -1,6 +1,20 @@
 # -*- coding: utf-8 -*-
 """Pytest configuration：custos 包已可编辑安装，import 无需任何 sys.path 注入。"""
 
+# 快照环境变量防呆（TODO #116 review）：``paths.SNAPSHOT_ROOT`` 在 import
+# custos.core.paths 时按 ``CUSTOS_DATA_SNAPSHOT`` 定死——shell 里 export 了它
+# 再跑 pytest，整个套件会在快照模式下跑：台账类测试被硬闸拦、加载类测试读到
+# 真实快照，报错难懂。conftest 是 pytest 最先加载的点（本文件顶层不 import
+# 任何 custos 模块，pop 一定先于全会话内任何 custos import）。快照模式的专项
+# 测试用 monkeypatch 切 ``paths.SNAPSHOT_ROOT``，不经环境变量，不受影响。
+import os as _os
+
+if _os.environ.pop("CUSTOS_DATA_SNAPSHOT", None) is not None:
+    print(
+        "[conftest] 检测到 CUSTOS_DATA_SNAPSHOT，已从测试环境移除"
+        "（快照专项测试走 monkeypatch，见 tests/test_snapshot_mode.py）"
+    )
+
 import pytest
 
 

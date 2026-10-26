@@ -6,7 +6,9 @@
   3 --require-trading-day 且非交易日
   4 --require-quality 且 market_quality=blocked(核心市场数据大面积缺失/陈旧)
   5 --require-position-gate 且 position_gate=blocked(持仓基线或当日行情不可用)
-多个条件同时不满足时,按 3 > 4 > 5 的优先级返回(先报最根本的原因)。
+  6 快照模式(CUSTOS_DATA_SNAPSHOT 已设)——只供研究,live 链路拒跑(TODO #116)
+多个条件同时不满足时,按 3 > 4 > 5 的优先级返回(先报最根本的原因);
+快照检查(6)先于一切——快照里根本没有「今天」的数据,门控无从判定。
 """
 
 from __future__ import annotations
@@ -15,11 +17,13 @@ import argparse
 import json
 import sys
 
+from custos.core.paths import is_snapshot_mode, snapshot_root
 from custos.core.runtime_guards import write_runtime_gate
 
 EXIT_NOT_TRADING_DAY = 3
 EXIT_QUALITY_BLOCKED = 4
 EXIT_POSITION_BLOCKED = 5
+EXIT_SNAPSHOT_MODE = 6
 
 # 放行白名单。**不能写成 `== "blocked"`**:gate 为空、字段拼错、JSON 截断时
 # `status` 是 None,`None == "blocked"` 为假 ⇒ 门控自身坏掉却返回 0 放行(fail-open)。
@@ -84,6 +88,15 @@ def main(argv=None) -> int:
         help=f"position_gate=blocked 时 exit {EXIT_POSITION_BLOCKED}",
     )
     a = p.parse_args(argv)
+    if is_snapshot_mode():
+        # 快照硬闸（TODO #116）：先于 3/4/5 判定——快照数据止于挖掘 B 段末，
+        # 「今日」门控在快照上没有意义；不写 gate JSON（避免把假状态落盘）。
+        print(
+            f"快照模式（CUSTOS_DATA_SNAPSHOT={snapshot_root()}）只供研究"
+            "——live 五时点入口拒跑（TODO #116）",
+            file=sys.stderr,
+        )
+        return EXIT_SNAPSHOT_MODE
     expected = None
     if (
         a.data_session == "preclose"

@@ -32,7 +32,7 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-from custos.core.paths import RESEARCH_DIR, cn_now  # noqa: E402
+from custos.core.paths import RESEARCH_DIR, cn_now, is_snapshot_mode  # noqa: E402
 
 #: 台账路径（治理数据；测试由 conftest autouse 改道 tmp）
 LEDGER = RESEARCH_DIR / "window_usage.jsonl"
@@ -114,7 +114,14 @@ def record_use(
     2026-10-10 事故的根因就是 pytest 外直跑注入路径绕过了 conftest
     重定向，修写入路径而不是放弃入库。空数据的生产路径另由研究工具
     的空结果护栏在上游拦住（到不了这里）。
+
+    **快照硬闸（TODO #116）**：快照模式（CUSTOS_DATA_SNAPSHOT）物理上不含
+    判定段数据，读到这里的写请求一定是配置错误——fail-closed raise。
     """
+    if is_snapshot_mode():
+        raise ValueError(
+            "快照模式禁止写判定窗使用台账——判定段只在生产机读（TODO #116）"
+        )
     if synthetic:
         return None
     if window in FROZEN_WINDOWS:

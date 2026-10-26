@@ -89,6 +89,17 @@ def load_xdxr_cache(code: str) -> Optional[list[dict[str, Any]]]:
             file=sys.stderr,
         )
         return None
+    # 快照污染兜底（TODO #116 review #2）：权息/股本事件日晚于快照截止
+    # （2026-09-04）⇒ holdout 泄漏进了快照，当场炸（判定段年份合法，只禁 holdout）。
+    from custos.core import paths as _paths  # noqa: PLC0415
+
+    if _paths.is_snapshot_mode():
+        shares = d.get("shares") if isinstance(d.get("shares"), list) else []
+        v = _paths.snapshot_event_violation(
+            [e.get("date") for e in ev] + [s.get("date") for s in shares]
+        )
+        if v:
+            raise ValueError(f"快照数据污染（xdxr {code}）：{v}")
     return ev
 
 

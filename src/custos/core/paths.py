@@ -9,8 +9,9 @@ Also the single source of truth for "what day is it" — see cn_now/cn_today.
 
 from __future__ import annotations
 import os
+import sys
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Optional
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -38,8 +39,35 @@ def cn_today() -> date:
 # Project root: strategy_team/（paths.py 在 src/custos/core/ 下，向上三级）
 BASE = Path(__file__).resolve().parents[3]
 
+# ---------------------------------------------------------------------------
+# 开发机挖掘段数据快照（TODO #116，设计稿 governance/data/MINING_SNAPSHOT_DESIGN.md）
+#
+# 设了 `CUSTOS_DATA_SNAPSHOT=<dir>` 即进入**快照模式**：DATA 与 TDX_ROOT 单点
+# 改道到快照目录（镜像生产机的 data/ 与 vipdoc/ 布局），其余模块零感知。
+# 快照只含 挖掘A（≤2016-12-31）∪ 预热（2020-10-01~2021-12-31）∪ 挖掘B
+# （≤2026-09-04）——判定段（2017~2021）与前向 holdout（≥2026-09-05）**物理上
+# 不出生产机**。配套硬闸：record_use / judgment_batch / live 五入口在快照模式
+# 一律拒（见各模块顶部 TODO #116 注记），加载器读到禁带日期 ⇒ 报错
+# （snapshot_bar_violation，防「把完整 vipdoc 误当快照用」的污染）。
+#
+# ⚠️ 只对**读**改道；写方（write_json 等）不特殊处理——live 写链已被硬闸拦在入口。
+# ⚠️ L0 约束：SNAPSHOT_GAP/SNAPSHOT_BAR_MAX 是 research/load_window 的
+#    SEG_MINING_A[1]/SEG_MINING_B[1] 的同值**镜像**（本模块不许 import research），
+#    两边相等由 tests/test_snapshot_mode.py 钉住。
+# ---------------------------------------------------------------------------
+SNAPSHOT_ROOT: Optional[Path] = (
+    Path(os.environ["CUSTOS_DATA_SNAPSHOT"].strip()).resolve()
+    if os.environ.get("CUSTOS_DATA_SNAPSHOT", "").strip()
+    else None
+)
+
+#: 快照禁带（双开端点）：判定段 + 判定段至预热段之间的断口。
+SNAPSHOT_GAP = ("2016-12-31", "2020-10-01")
+#: 快照允许的最后 bar 日期（= 挖掘 B 段末）；≥ 2026-09-05 是前向 holdout。
+SNAPSHOT_BAR_MAX = "2026-09-04"
+
 # Data directories
-DATA = BASE / "data"
+DATA = SNAPSHOT_ROOT / "data" if SNAPSHOT_ROOT else BASE / "data"
 GOVERNANCE = BASE / "governance"
 TOOLS = BASE / "src" / "custos"
 
@@ -141,7 +169,12 @@ FACTORS_DIR = STRATEGY_DIR / "_factors"  # 跨策略可复用因子
 STRATEGY_REGISTRY_FILE = STRATEGY_DIR / "STRATEGY_REGISTRY.json"
 
 # TongDaXin installation root (overridable via env)
-TDX_ROOT = Path(os.environ.get("TDX_ROOT", r"E:\new_tdx64"))
+# 快照模式（TODO #116）下指向快照根（vipdoc/ 镜像在其下）；否则取 TDX_ROOT 环境变量。
+TDX_ROOT = (
+    SNAPSHOT_ROOT
+    if SNAPSHOT_ROOT
+    else Path(os.environ.get("TDX_ROOT", r"E:\new_tdx64"))
+)
 
 # TDX sub-paths
 TDX_PYPLUGINS = TDX_ROOT / "PYPlugins" / "user"
@@ -240,3 +273,151 @@ def write_json_atomic(path, obj, *, indent: int = 2) -> None:
         encoding="utf-8",
     )
     _os.replace(tmp, path)
+
+
+# ---------------------------------------------------------------------------
+# 快照模式运行时查询（TODO #116）
+#
+# 下面这些 helper **都读模块全局 SNAPSHOT_ROOT**（而不是缓存 bool）——测试靠
+# ``monkeypatch.setattr(paths, "SNAPSHOT_ROOT", tmp)`` 就地切换模式。
+# ---------------------------------------------------------------------------
+
+
+def snapshot_root() -> Optional[Path]:
+    """快照根目录；非快照模式 ⇒ None。"""
+    return SNAPSHOT_ROOT
+
+
+def _d8n(d: object) -> str:
+    """日期归一为 8 位数字串（剥掉非数字）——"2016-12-31" 与 "20161231" 同值。
+
+    为什么不用 ``str(d)[:10]``：带横杠与不带横杠混比时边界日会错——
+    "20161231" > "2016-12-31"（"1" 的码点大于 "-"），挖掘 A 最末日会被误判进
+    禁带。数字串比较无此问题。
+    """
+    return "".join(ch for ch in str(d) if ch.isdigit())[:8]
+
+
+def is_snapshot_mode() -> bool:
+    """是否处于快照模式（CUSTOS_DATA_SNAPSHOT 已设置）。"""
+    return SNAPSHOT_ROOT is not None
+
+
+# MANIFEST 读取缓存（键 = str(root)；测试换 root 时键不同 ⇒ 缓存自然失效）
+# 与 WARN 去重集（同一 root 缺清单只告警一次，不淹没日志）。
+_MANIFEST_CACHE: dict[str, dict] = {}
+_MANIFEST_WARNED: set[str] = set()
+
+
+def snapshot_manifest() -> dict:
+    """读 ``<root>/MANIFEST.json``；缺失/损坏 ⇒ {}（stderr WARN 一次）。"""
+    root = SNAPSHOT_ROOT
+    if root is None:
+        return {}
+    key = str(root)
+    if key in _MANIFEST_CACHE:
+        return _MANIFEST_CACHE[key]
+    import json as _json
+
+    manifest: dict = {}
+    ok = False
+    path = root / "MANIFEST.json"
+    try:
+        obj = _json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(obj, dict):
+            manifest, ok = obj, True
+    except Exception:  # noqa: BLE001 — 缺失/损坏按「无清单」处理（fail-soft：banner 已标 无MANIFEST）
+        pass
+    if not ok and key not in _MANIFEST_WARNED:
+        _MANIFEST_WARNED.add(key)
+        print(f"[WARN] 快照 MANIFEST.json 缺失或损坏: {path}", file=sys.stderr)
+    _MANIFEST_CACHE[key] = manifest
+    return manifest
+
+
+def snapshot_manifest_sha() -> Optional[str]:
+    """MANIFEST 顶层的 ``manifest_sha``（导出侧算好的全量指纹；不重算）。"""
+    sha = snapshot_manifest().get("manifest_sha")
+    return str(sha) if sha else None
+
+
+def snapshot_banner() -> str:
+    """快照模式启动横幅（纯函数，文案由测试钉住）；非快照模式 ⇒ 空串。"""
+    root = SNAPSHOT_ROOT
+    if root is None:
+        return ""
+    sha = snapshot_manifest_sha() or "无MANIFEST"
+    line = (
+        f"[SNAPSHOT] {root} sha={sha} 段=挖掘A∪预热∪挖掘B（判定段/holdout 不在快照内）"
+    )
+    if not root.is_dir():
+        line += "（⚠️ 目录不存在）"
+    return line
+
+
+def snapshot_bar_violation(dates) -> Optional[str]:
+    """K 线日期禁带检查（快照污染兜底）：任一日期落禁带 ⇒ 错误文案，否则 None。
+
+    禁带 = (2016-12-31, 2020-10-01) ∪ ≥ 2026-09-05（判定段/holdout 不在快照内）。
+    预热段 [2020-10-01, 2021-12-31] 是定案豁免——读到合法（挖掘 B 起点的指标
+    预热只读价格），把它当信号窗由 load_window.mining_violation 另闸拒绝。
+    日期经 ``_d8n`` 归一为数字串再比（横杠/纯数字两种形态边界日都精确）。
+    """
+    gap0, gap1, vmax = (
+        _d8n(SNAPSHOT_GAP[0]),
+        _d8n(SNAPSHOT_GAP[1]),
+        _d8n(SNAPSHOT_BAR_MAX),
+    )
+    for d in dates:
+        s = _d8n(d)
+        if gap0 < s < gap1 or s > vmax:
+            return (
+                f"含禁带日期 {str(d)[:10]}"
+                f"（快照只含 挖掘A≤{SNAPSHOT_GAP[0]}"
+                f" ∪ 预热{SNAPSHOT_GAP[1]}~2021-12-31 ∪ 挖掘B≤{SNAPSHOT_BAR_MAX}；"
+                "禁带=[2017-01-01,2020-09-30]∪≥2026-09-05）"
+            )
+    return None
+
+
+#: PIT 快照禁带（review #2）：PIT 增量从 2020-01-01 起（挖掘 B 起点 as-of TTM
+#: 需前两期公告），比 K 线预热段（2020-10-01）更早——与导出侧 ``_keep_pit``
+#: 同值的镜像（tests/test_snapshot_mode.py 钉住）。
+SNAPSHOT_PIT_GAP = ("2016-12-31", "2020-01-01")
+
+
+def snapshot_pit_violation(dates) -> Optional[str]:
+    """PIT notice_date 禁带检查：(2016-12-31, 2020-01-01) ∪ ≥ 2026-09-05 ⇒ 文案。"""
+    gap0, gap1, vmax = (
+        _d8n(SNAPSHOT_PIT_GAP[0]),
+        _d8n(SNAPSHOT_PIT_GAP[1]),
+        _d8n(SNAPSHOT_BAR_MAX),
+    )
+    for d in dates:
+        s = _d8n(d)
+        if s and (gap0 < s < gap1 or s > vmax):
+            return (
+                f"PIT 含禁带 notice_date {str(d)[:10]}（快照只含 ≤{SNAPSHOT_PIT_GAP[0]}"
+                f" ∪ {SNAPSHOT_PIT_GAP[1]}~{SNAPSHOT_BAR_MAX}）"
+            )
+    return None
+
+
+def snapshot_event_violation(dates) -> Optional[str]:
+    """事件日上限检查（xdxr 权息 / share_changes 股本）：事件日 > 2026-09-04 ⇒
+    文案。判定段年份的事件**合法**（前复权与 as-of 股本都需要它们），只禁
+    holdout。空/无日期字段的记录不参与（``_d8n`` 归一出空串即跳过）。"""
+    vmax = _d8n(SNAPSHOT_BAR_MAX)
+    for d in dates:
+        s = _d8n(d)
+        if s and s > vmax:
+            return (
+                f"事件日晚于快照截止 {str(d)[:10]}"
+                f"（> {SNAPSHOT_BAR_MAX}，holdout 泄漏）"
+            )
+    return None
+
+
+# import 时打一行横幅（仅快照模式）——让任何进程一启动就知道自己读的是快照。
+if SNAPSHOT_ROOT is not None:
+    print(snapshot_banner(), file=sys.stderr)

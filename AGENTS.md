@@ -122,6 +122,10 @@ uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 �
   （向量化用 numpy 等 pandas 自带物；DSL 解析用 stdlib ast，**禁止 eval/exec**）。
 - 本机（dev）**无网络、无通达信数据**：测试一律合成数据注入（loader= / monkeypatch），
   conftest 已 block 部分网络、并把各台账改道 tmp。真实数据跑数只在生产机。
+  有快照时 `CUSTOS_DATA_SNAPSHOT=<dir>` 进**快照模式**（v0.453，TODO #116）：paths 单点
+  改道 TDX_ROOT/DATA 读挖掘段镜像；判定窗台账/批次门拒写、live 五入口拒跑（exit 2/6）、
+  加载器读到禁带日期报错（判定段/holdout 物理不在快照内，详见
+  `governance/data/MINING_SNAPSHOT_DESIGN.md`）。
 
 ## 4. 治理纪律（全部有测试钉着，违反必红）
 

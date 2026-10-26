@@ -40,7 +40,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-from custos.core.paths import RESEARCH_DIR, cn_now  # noqa: E402
+from custos.core.paths import RESEARCH_DIR, cn_now, is_snapshot_mode  # noqa: E402
 
 #: 批次登记文件（治理数据，**入库**；测试由 conftest autouse 改道 tmp）
 REGISTRY = RESEARCH_DIR / "judgment_batches.jsonl"
@@ -96,6 +96,12 @@ def _load_events(path: Optional[Path]) -> list[dict]:
 
 
 def _append(ev: dict[str, Any], path: Optional[Path]) -> None:
+    if is_snapshot_mode():
+        # 快照硬闸（TODO #116）：判定段批次登记文件**入库**且只由生产机写——
+        # 快照模式物理上不含判定段数据，走到写入口一定是配置错误，fail-closed。
+        raise ValueError(
+            "快照模式禁止写判定段批次登记——判定段只在生产机读（TODO #116）"
+        )
     p = Path(path) if path else REGISTRY
     if p.is_file():  # 每日首写前快照（0AMV 事故纪律，同 window_usage）
         bak = p.with_name(f"{p.name}.bak_{cn_now().strftime('%Y%m%d')}")
@@ -415,6 +421,10 @@ def gate_judgment_read(
 
     ``synthetic`` 必须在**函数入口快照**（任何注入件非 None ⇒ 合成 ⇒ 不查批
     也不写台账，同 record_use 的合成守卫语义）。"""
+    if is_snapshot_mode():
+        # 快照硬闸（TODO #116）：快照物理上不含判定段数据，批次门无从谈起——
+        # 开发机上出现判定段读取意图即配置错误，ap.error（exit 2）当场拦下。
+        ap.error("快照模式禁止判定段批次门——判定段只在生产机读（TODO #116）")
     from custos.research import load_window as lw  # noqa: PLC0415
 
     if synthetic:

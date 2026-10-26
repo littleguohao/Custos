@@ -455,6 +455,7 @@
 | 2026-10-24 | v0.450 | **1800 末尾挂影子对照**（TODO #76 自动化）：`run_1800` 第 7 步调 `scripts/dev/shadow_1800_compare.py --date 当日`，WARN-only 不阻断选股、exit≠0 只落 diff 日志；`pipeline_kit.run_stage_quiet` 透传 `timeout` 参数（该步给 1800s，旁路需整跑计算段四脚本） | 影子对照断跑一个月（09-24 后无人执行，进度停 3/10），挂进 1800 末尾后任何触发方式都自动带上 | 每交易日攒「非 BJ 逐位一致」计数，攒满 10 闭环 #76 |
 | 2026-10-24 | v0.451 | **产物落盘纪律**：技能/脚本的临时与数据文件禁落 `artifacts/` 根目录——临时数据落 `artifacts/cache/`（gitignored）、日志落 `artifacts/logs/`、正式报告落 `artifacts/reports/`；存量散文件（ifind_*.csv、p_*.json、log_*.txt）已归位 | owner 2026-10-24 | `test_repo_hygiene.py` 新增钉测（根目录只许三个子目录） |
 | 2026-10-26 | v0.452 | **R45 判毕 falsified**（r45_v2_pre 复核）：margin 两窗正但 30% 敞口组合两窗总收益为负（A −33.7% / B −19.6%），打不过不交易；邻档与最优止盈不稳；V0 选中子集差于全候选（同 R42/R46）；不入第一批，空头期维持空仓；头部 / 结论 / README 同步 | 生产机 2026-10-24 | 治理 |
+| 2026-10-26 | v0.453 | **挖掘段数据快照落地**（TODO #116）：`export_mining_snapshot.py`（生产机导出镜像目录 + MANIFEST，`--verify`/`--tar`，vipdoc 字节切片保真）＋ `CUSTOS_DATA_SNAPSHOT` 快照模式（paths 单点改道、banner、provenance 记 sha）＋三道硬闸（台账/批次门拒写、live 入口拒跑、禁带日期报错）＋ load_amv_regime 快照分支（缺序列 fail-closed）＋ review 修补（conftest 挡快照环境变量、PIT/xdxr/股本禁带闸）；细节见设计稿 | owner 2026-10-26 同意设计稿 | 钉测 57+16 例；生产机验收 = 真实 vs 快照 R44 抽样逐位一致 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

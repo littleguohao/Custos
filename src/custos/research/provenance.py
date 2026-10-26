@@ -16,6 +16,8 @@
 - ``universe_sha256``：宇宙文件（--codes-file）内容 hash——「同宇宙」
   不再是口头对齐；
 - ``data_last_date``：加载数据的最后日期（数据新鲜度自证）；
+- ``data_source`` / ``snapshot_sha``（TODO #116）：快照模式 ⇒ "snapshot" +
+  MANIFEST 的 manifest_sha；非快照运行两者皆 None（既有产物零漂移）；
 - ``cmdline``：完整命令行（R13 可复现的落点）。
 
 铁律：**溯源失败绝不炸研究**——git 不可用/文件缺失 ⇒ 对应字段 None +
@@ -30,7 +32,7 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-from custos.core.paths import BASE  # noqa: E402
+from custos.core.paths import BASE, is_snapshot_mode, snapshot_manifest_sha  # noqa: E402
 from custos.research import strategy_grid as sg  # noqa: E402
 
 
@@ -149,6 +151,8 @@ def build(
         "n_codes": u_n,
         "universe_sha256": u_sha,
         "data_last_date": data_last_date,
+        "data_source": "snapshot" if is_snapshot_mode() else None,
+        "snapshot_sha": snapshot_manifest_sha(),
         "cmdline": getattr(args, "cmdline", None),
     }
 

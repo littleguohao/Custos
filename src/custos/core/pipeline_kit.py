@@ -33,7 +33,7 @@ import sys
 import time
 from pathlib import Path
 
-from custos.core.paths import TOOLS, cn_now
+from custos.core.paths import TOOLS, cn_now, is_snapshot_mode, snapshot_root
 
 
 def _as_text(data) -> str:
@@ -135,7 +135,18 @@ def calendar_gate(
     日历检查的回显会污染它。捕获到的内容进 stage 日志，不丢。
 
     `fail_msg` / `closed_msg` 支持 `{target}` 与 `{err}` 占位。
+
+    快照硬闸（TODO #116）：快照模式（CUSTOS_DATA_SNAPSHOT）只供研究——快照里
+    没有「今天」的数据（数据止于挖掘 B 段末），live 五时点入口跑起来只会产出
+    垃圾报告。exit 2 立即返回（在 check_trading_day 之前，不查日历、不落 run_log）。
     """
+    if is_snapshot_mode():
+        print(
+            f"快照模式（CUSTOS_DATA_SNAPSHOT={snapshot_root()}）只供研究"
+            "——live 五时点入口拒跑（TODO #116）",
+            file=sys.stderr,
+        )
+        return CalendarGate({}, 2)
     c_started = now_iso()
     c_t0 = time.time()
     cal_buf = io.StringIO()

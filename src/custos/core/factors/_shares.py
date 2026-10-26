@@ -50,18 +50,29 @@ def shares_idx() -> dict:
     global _SHARE_IDX
     if _SHARE_IDX is None:
         idx: dict[str, list] = {}
+        rows: Optional[list] = None
         try:
             from custos.core.paths import DATA  # noqa: PLC0415
 
             p = DATA / "fundamentals" / "share_changes.jsonl"
             if p.is_file():
-                idx = events_to_idx(
+                rows = [
                     json.loads(line)
                     for line in p.read_text(encoding="utf-8").splitlines()
                     if line.strip()
-                )
+                ]
+                idx = events_to_idx(rows)
         except Exception:  # noqa: BLE001
             idx = {}
+            rows = None
+        # 快照污染兜底（TODO #116 review #2）：observed_on 晚于快照截止 ⇒ 当场炸。
+        # ⚠️ 必须在 try 之外抛——上面「失败 → {}」的兜底会把 ValueError 吞掉。
+        from custos.core import paths as _paths  # noqa: PLC0415
+
+        if rows is not None and _paths.is_snapshot_mode():
+            v = _paths.snapshot_event_violation(r.get("observed_on") for r in rows)
+            if v:
+                raise ValueError(f"快照数据污染（share_changes.jsonl）：{v}")
         _SHARE_IDX = idx
     return _SHARE_IDX
 
