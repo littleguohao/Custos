@@ -949,3 +949,71 @@ class TestSentinelR46IidPermutation:
                 "r46[逐候选置换哨兵]",
                 _r46_run(r46_small, tmp_path, lambda s: _r46_clustered_world(900 + s)),
             )
+
+
+# ---------------------------------------------------------------------------
+# swing_recall_study（R50，v0.456，TODO #119）：16 对象 × 精度 lift 的簇级置换
+# ---------------------------------------------------------------------------
+
+
+def _r50_run(edge: bool, clustered: bool = True, **kw):
+    def run(seed):
+        from test_swing_recall_study import _unit_c4, _world_run
+
+        return _unit_c4(_world_run(seed, edge=edge, clustered=clustered, **kw))
+
+    return run
+
+
+#: R50 校准口径（max-of-16 的 q95 尾部分辨力需要放大池——照 R48 的 20 种子 × 50 臂）
+R50_SEEDS = tuple(range(20))
+R50_KW = {"min_n": 50, "n_random": 50, "c4_min_pool": 40}
+
+
+class TestSwingRecallCalibration:
+    """R50 零假设两连测 + 成簇用例：信号位置与波段窗口无关（纯块标签、簇结局相关）
+    ⇒ 20 种子 lead_robust 0/20；逐 bar iid 世界 0/20；植入「b1 热概率 0.18→0.85」
+    真 edge ⇒ b1_l1 lead_robust 可识别。
+
+    实测定稿（v0.456，合成世界逐种子实测）：成簇零假设 0/20、iid 世界 0/20、
+    edge 种子 0/1/2 全过、逐笔置换哨兵 6/20（30% > 10% 帽 ⇒ 决定性）。
+    夹具设计纪律（簇必须同长且冷热不合并）见 test_swing_recall_study._world docstring。
+    """
+
+    def test_noise(self):
+        hn.assert_noise_calibration(
+            "swing_recall[成簇]", _r50_run(False, **R50_KW), seeds=R50_SEEDS
+        )
+
+    def test_iid_world_noise(self):
+        hn.assert_noise_calibration(
+            "swing_recall[逐bar世界]",
+            _r50_run(False, clustered=False, **R50_KW),
+            seeds=R50_SEEDS,
+        )
+
+    def test_edge_detected(self):
+        hn.assert_edge_detected("swing_recall", _r50_run(True, **R50_KW), seed=0)
+
+
+class TestSentinelSwingIidPermutation:
+    """回归哨兵（照 R48 逐笔哨兵模式）：monkeypatch 把 ``sr.cluster_perm`` 换回逐笔
+    置换（拆散簇）⇒ 成簇零假设校准**必须失败**（事件位置的「∈起涨窗口」标签成簇
+    相关；拆散后逐对象精度 concentrate、q95 系统性偏低——实测 6/20=30% 假过线，
+    超过 10% 帽）。"""
+
+    def test_calibration_catches_iid(self, monkeypatch):
+        import numpy as np
+
+        from custos.research import swing_recall_study as sr
+
+        def _iid_perm(items, rng):
+            idx = list(range(len(items)))
+            rng.shuffle(idx)
+            return np.array(idx)
+
+        monkeypatch.setattr(sr, "cluster_perm", _iid_perm)
+        with pytest.raises(AssertionError, match="零假设校准失败"):
+            hn.assert_noise_calibration(
+                "swing_recall[逐笔置换哨兵]", _r50_run(False, **R50_KW), seeds=R50_SEEDS
+            )

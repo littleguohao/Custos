@@ -84,7 +84,7 @@ owner 2026-10-23 新主线：从涨得好的标的**逆向**看 B1 与 QN 公式
 4. **0AMV 层的混杂**：L2 漏斗流失多半来自空头期——与 R40 / R45（空头区间做多）读数交叉看，不单独下结论；
 5. **幸存者宇宙**（R14）、**板块成分前视**（如用到）同 R48 注记。
 
-### 工程落点（TODO #119，未实现）
+### 工程落点（TODO #119，已实现，v0.456）
 
 - 新工具 `swing_recall_study`（研究侧，study 类）：波段识别纯函数（ZigZag，合成钉测）+ 信号 / 门 as-of 扫描复用 `exit_campaign.warm_v0_signals`
   与 `core/factors/qn_*` 规范入口 + `select_daily_topn` + `plan_rules_replay.LIVE_PARAMS` 重放；簇级置换复用 R48 `cluster_perm`；

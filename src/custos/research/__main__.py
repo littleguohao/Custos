@@ -196,6 +196,13 @@ TOOLS: dict[str, tuple[str, str]] = {
         "R48 B1 大单入场特征（v0.439）：0AMV 做多 + J<13 × 现行出场交易集，7 个 as-of 特征（小盘/深回撤/涨停活跃/"
         "基本面优/技术分≥60/三面共振/四面共振腿数 + v0.443 超卖 4 项）逐个检验大单命中率 lift，簇级置换 max-of-11，只读挖掘段",
     ),
+    "swing_recall_study": (
+        "study",
+        "R50 ≥20% 波段逆向匹配（v0.456，探索）：ZigZag 双阈值波段（+20% 成立/−10% 确认 T1，前复权收盘，"
+        "挖掘 A∪B）× B1 漏斗 L1~L4（J<13→0AMV 做多→V0 分过 1800 观察线→当日 top-20）与 QN 12 门 as-of 信号"
+        "的召回/精度 lift（年×市值五分位分层随机 bar 基线）/提前量/兑现（LIVE_PARAMS 重放）/年月分组；"
+        "16 对象 × min(lift_A, lift_B) 簇级置换 N=200 定标尺 ⇒ lead_robust；只读挖掘段不登记台账",
+    ),
     "trade_counterfactual": (
         "diagnostic",
         "实盘操作反事实复盘（v0.424，live 跟踪）：同一笔买入严格按现行出场规则 / 买入计划止损推演 vs 实际，"

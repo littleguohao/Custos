@@ -276,3 +276,10 @@ def test_r47_scan(tmp_path):
     import test_protect_scan as tps
 
     _assert_complete("r47_scan", _dump(tmp_path, "r47", tps._run(0)))
+
+
+def test_r50(tmp_path):
+    import test_swing_recall_study as tsr
+
+    rep = tsr._world_run(0, min_n=50, n_random=6, c4_min_pool=3)
+    _assert_complete("r50", _dump(tmp_path, "r50", rep))

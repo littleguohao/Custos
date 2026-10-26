@@ -41,6 +41,16 @@ def test_r39_detail(tmp_path, monkeypatch):
     assert "映射矩阵" in md and "桶0 \\ 桶1" in md and md.count("| P") >= 4
 
 
+def test_r50(tmp_path):
+    import test_swing_recall_study as tsr
+
+    rep = tsr._world_run(0, min_n=50, n_random=6, c4_min_pool=3)
+    d = rd.build_digest("r50", _dump(tmp_path, "r50", rep), "t")
+    assert d["missing"] == []
+    md = rr.render(d)
+    assert "线索判决" in md and "拦截漏斗" in md and "兑现" in md
+
+
 def test_auto_fallback_on_every_repo_digest():
     """无规格的 kind 走自动兜底：仓库里每份摘要都能渲染（判决 / 标量表 / 同构族透视）。"""
     n = 0
