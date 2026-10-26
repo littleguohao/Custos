@@ -213,3 +213,69 @@ class TestRealTreeSmoke:
         mode, files, _ = ta.select(["scripts/dev/test_affected.py"])
         assert mode == "guard-only"
         assert "test_architecture_layers.py" in _names(files)
+
+
+class TestV454Layering:
+    """v0.454：research/ 改动追加 TOOLS 注册表守卫；默认跳过 slow。"""
+
+    def test_research_change_adds_registry_guard(self, tree):
+        src, tests = tree
+        (tests / "test_research_entry.py").write_text(
+            "def test_x():\n    pass\n", encoding="utf-8"
+        )
+        _, files, why = ta.select(["src/custos/research/foo.py"], src, tests)
+        assert "test_research_entry.py" in _names(files)
+        assert any("TOOLS" in w for w in why)
+
+    def test_non_research_change_no_registry_guard(self, tree):
+        src, tests = tree
+        (tests / "test_research_entry.py").write_text(
+            "def test_x():\n    pass\n", encoding="utf-8"
+        )
+        _, files, _ = ta.select(["tests/test_unrelated.py"], src, tests)
+        assert "test_research_entry.py" not in _names(files)
+
+    def test_default_skips_slow(self, monkeypatch, capsys):
+        seen = {}
+        monkeypatch.setattr(
+            ta, "changed_files", lambda since: ["tests/test_test_affected.py"]
+        )
+        import pytest as _pt
+
+        monkeypatch.setattr(_pt, "main", lambda a: seen.setdefault("a", a) and 0)
+        ta.main([])
+        assert "-m" in seen["a"] and "not slow" in seen["a"]
+        seen.clear()
+        ta.main(["--with-slow"])
+        assert "not slow" not in seen["a"]
+        seen.clear()
+        ta.main(["--full"])
+        assert "not slow" not in seen["a"]
+
+
+def test_calibration_tests_marked_slow(request):
+    """conftest 按类名自动打标：Calibration / Sentinel 类与 test_null_calibration 模块 = slow。"""
+    import subprocess
+    import sys
+
+    r = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--collect-only",
+            "-q",
+            "-m",
+            "slow",
+            "tests/test_tail_feature_study.py",
+            "tests/test_protect_scan.py",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=Path(__file__).resolve().parents[1],
+    )
+    out = r.stdout
+    assert (
+        "TestTailFeatureCalibration" in out and "TestSentinelTailIidPermutation" in out
+    )
+    assert "test_derive_rules" not in out

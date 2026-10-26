@@ -156,6 +156,8 @@ def load_sector_gate(
     import bisect
     from pathlib import Path as _P
 
+    from custos.core import paths as _paths  # noqa: PLC0415
+
     idx = _P(index_dir)
     fav_by_sec: dict[str, tuple[list, dict]] = {}
     for sec in members:
@@ -164,6 +166,13 @@ def load_sector_gate(
             continue
         try:
             df = pd.read_csv(p)
+        except Exception:  # noqa: BLE001
+            continue
+        # 快照污染兜底（v0.454，TODO #116 review）：在吞异常的 try 之外
+        _paths.snapshot_gate_dates(
+            df["date"] if "date" in df else [], f"板块指数 {p.name}"
+        )
+        try:
             fav = favorable_series(
                 df["date"].tolist(), df["close"].tolist(), lookback=lookback
             )

@@ -50,6 +50,7 @@ from __future__ import annotations
 import argparse
 import bisect
 import hashlib
+import threading
 import json
 import math
 import statistics
@@ -307,6 +308,10 @@ def half_window_check(trades: list[dict[str, Any]]) -> dict[str, Any]:
 _IDX_DATE_CACHE_MAX = 8
 _IDX_DATE_CACHE: dict[int, tuple[list[str], bool, pd.DataFrame]] = {}
 _CAND_CACHE_MAX = 2048
+# v0.454：--load-workers 线程并行下 OrderedDict 的 get→move_to_end / set→popitem 不是原子的
+# （并发逐出后 move_to_end 抛 KeyError，被上层 except 吞成「样本静默丢失」）——字典操作全部进锁，
+# compute 在锁外（不串行化打分；同键并发最多重复算一次，结果相同）。
+_CAND_LOCK = threading.Lock()
 _CAND_CACHE: OrderedDict[tuple[str, Any, bytes, bytes, bytes], dict[str, Any]] = (
     OrderedDict()
 )
@@ -437,14 +442,16 @@ def asof_candidate(
         _frame_digest(df_long),
         _frame_digest(index_asof),
     )
-    cand = _CAND_CACHE.get(key)
-    if cand is not None:
-        _CAND_CACHE.move_to_end(key)
-        return cand
+    with _CAND_LOCK:
+        cand = _CAND_CACHE.get(key)
+        if cand is not None:
+            _CAND_CACHE.move_to_end(key)
+            return cand
     cand = compute(df, index_asof, code=code, df_long=df_long)
-    _CAND_CACHE[key] = cand
-    while len(_CAND_CACHE) > _CAND_CACHE_MAX:
-        _CAND_CACHE.popitem(last=False)  # LRU 逐出最久未用
+    with _CAND_LOCK:
+        _CAND_CACHE[key] = cand
+        while len(_CAND_CACHE) > _CAND_CACHE_MAX:
+            _CAND_CACHE.popitem(last=False)  # LRU 逐出最久未用
     return cand
 
 

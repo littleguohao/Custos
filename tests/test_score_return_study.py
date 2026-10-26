@@ -370,3 +370,40 @@ class TestRunStudyPassthrough:
         assert captured["scale_out_frac"] == 0.5
         assert captured["bbi_exit_consec"] == 2
         assert trades and trades[0]["tech_score"] == 50
+
+
+def test_cand_cache_thread_safe_under_eviction(monkeypatch):
+    """v0.454：--load-workers 线程并行 + 小封顶频繁逐出时，asof_candidate 不抛 KeyError、结果正确。"""
+    import threading
+
+    import pandas as pd
+
+    from custos.research import score_return_study as srs
+
+    monkeypatch.setattr(srs, "_CAND_CACHE_MAX", 2)
+    monkeypatch.setattr(srs, "_CAND_CACHE", srs.OrderedDict())
+    monkeypatch.setattr(
+        srs,
+        "asof_frames",
+        lambda df, idx, i: (df.iloc[[i]], df.iloc[[i]], df.iloc[[i]]),
+    )
+    monkeypatch.setattr(
+        srs.ec,
+        "compute_metrics",
+        lambda d, x, code, df_long: {"v": float(d["c"].iloc[0])},
+    )
+    df = pd.DataFrame({"c": [float(k) for k in range(6)]})
+    errs: list = []
+
+    def work(t):
+        try:
+            for n in range(3000):
+                i = (n * 7 + t) % 6
+                assert srs.asof_candidate(df, df, i, "x")["v"] == float(i)
+        except Exception as e:  # noqa: BLE001
+            errs.append(repr(e))
+
+    ths = [threading.Thread(target=work, args=(t,)) for t in range(8)]
+    [h.start() for h in ths]
+    [h.join() for h in ths]
+    assert not errs, errs[:3]

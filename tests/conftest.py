@@ -240,3 +240,19 @@ def reversal_thresholds():
         else:
             os.environ[k] = v
     _apply()  # 还原
+
+
+def pytest_collection_modifyitems(config, items):
+    """测试分层（v0.454）：零假设校准两连测与回归哨兵（类名含 Calibration / Sentinel，及
+    test_null_calibration 全模块）自动打 ``slow``——单例 20~100s，合计约 10 分钟。
+    本地 ``test_affected`` 默认 ``-m "not slow"``；CI / ``--full`` / ``--with-slow`` 照跑。"""
+    slow = pytest.mark.slow
+    for it in items:
+        cls = getattr(it, "cls", None)
+        name = cls.__name__ if cls is not None else ""
+        if (
+            "Calibration" in name
+            or "Sentinel" in name
+            or it.module.__name__.endswith("test_null_calibration")
+        ):
+            it.add_marker(slow)

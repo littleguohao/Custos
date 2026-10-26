@@ -226,7 +226,16 @@ def select(
                 if hit.exists():
                     selected.add(hit)
                     why.append(f"{p} 已删除 ⇒ 命名直配 {hit.name}")
-        elif p.startswith("tests/") and p.endswith(".py"):
+        if p.startswith("src/custos/research/") and p.endswith(".py"):
+            # v0.454：TOOLS 注册表守卫——研究脚本增删改都要过 test_research_entry
+            # （它按磁盘扫描不 import 具体模块，import 闭包选不中；漏选过一次）
+            hit = tests_root / "test_research_entry.py"
+            if hit.exists() and hit not in selected:
+                selected.add(hit)
+                why.append(
+                    f"{p} 在 research/ ⇒ 追加 TOOLS 注册表守卫 test_research_entry.py"
+                )
+        if p.startswith("tests/") and p.endswith(".py"):
             fp = tests_root / Path(p).relative_to("tests")
             if fp.exists():
                 selected.add(fp)
@@ -297,6 +306,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--module", default=None, help="模块划分模式（如 custos.research）")
     ap.add_argument("--full", action="store_true", help="全量（推送前可选；CI 必跑）")
     ap.add_argument("--dry-run", action="store_true", help="只打印选择不跑")
+    ap.add_argument(
+        "--with-slow",
+        action="store_true",
+        help="连 slow 标记（零假设校准 / 哨兵）一起跑（默认跳过；--full 恒含）",
+    )
     ap.add_argument("pytest_args", nargs=argparse.REMAINDER, help="原样传给 pytest")
     args = ap.parse_args(argv)
 
@@ -331,7 +345,13 @@ def main(argv: list[str] | None = None) -> int:
 
     import pytest
 
-    return pytest.main(["-q", *[str(f) for f in files], *args.pytest_args])
+    extra: list[str] = []
+    if mode != "full" and not args.with_slow:
+        extra = ["-m", "not slow"]
+        print(
+            "[select] 跳过 slow（零假设校准 / 哨兵，CI 全量照跑；--with-slow 可带上）"
+        )
+    return pytest.main(["-q", *[str(f) for f in files], *extra, *args.pytest_args])
 
 
 if __name__ == "__main__":

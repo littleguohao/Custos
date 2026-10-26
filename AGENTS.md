@@ -107,7 +107,7 @@ schema 并在生产者落盘前 `require()`（豁免要登记理由），否则�
 ## 3. 命令与环境
 
 ```bash
-uv run python scripts/dev/test_affected.py   # 本地迭代默认：受影响模块 + 守卫集（--dry-run 看选择，--full 转全量）
+uv run python scripts/dev/test_affected.py   # 本地迭代默认：受影响模块 + 守卫集，跳过 slow（--with-slow 带上校准，--full 转全量）
 uv run pytest -q                             # 全量（~6 分钟 / ~6600 例）；GitHub CI 双平台每个 push/PR 必跑
 bash scripts/audit.sh                        # 六件套；第 0 件 ruff format --check 是唯一硬门槛
 uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 错基线；CI 有同名 job（ubuntu），版本与 audit.sh/ps1 三处互锚

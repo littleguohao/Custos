@@ -418,6 +418,16 @@ def snapshot_event_violation(dates) -> Optional[str]:
     return None
 
 
+def snapshot_gate_dates(dates, what: str) -> None:
+    """快照模式下日期序列含禁带 ⇒ raise ValueError（板块指数 CSV 等非 vipdoc 的 K 线源用，v0.454）。
+    非快照模式零开销直返。调用方须在吞异常的 try **之外**调用。"""
+    if SNAPSHOT_ROOT is None:
+        return
+    v = snapshot_bar_violation(dates)
+    if v:
+        raise ValueError(f"快照数据污染（{what}）：{v}")
+
+
 # import 时打一行横幅（仅快照模式）——让任何进程一启动就知道自己读的是快照。
 if SNAPSHOT_ROOT is not None:
     print(snapshot_banner(), file=sys.stderr)

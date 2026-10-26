@@ -200,6 +200,7 @@ def default_sector_fn() -> Callable[[str, str], Optional[bool]]:
 
     from custos.core.factors import sector_phase as sp  # noqa: PLC0415
     from custos.core.paths import SECTOR_INDEX_DIR, SECTOR_MEMBERS_FILE  # noqa: PLC0415
+    from custos.core import paths as paths_mod  # noqa: PLC0415
 
     try:
         members = json.loads(Path(SECTOR_MEMBERS_FILE).read_text(encoding="utf-8"))
@@ -224,6 +225,8 @@ def default_sector_fn() -> Callable[[str, str], Optional[bool]]:
                 )
             except (OSError, KeyError, ValueError):
                 series[sec] = ([], [])
+            # 快照污染兜底（v0.454）：在吞异常的 try 之外
+            paths_mod.snapshot_gate_dates(series[sec][0], f"板块指数 {p.name}")
         return series[sec] if series[sec][0] else None
 
     def fn(code: str, d: str) -> Optional[bool]:

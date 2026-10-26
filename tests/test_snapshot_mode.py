@@ -500,3 +500,53 @@ class TestSnapshotContaminationGates:
             encoding="utf-8",
         )
         assert _shares.shares_idx() == {"600000": [("2018-05-01", 100)]}
+
+
+class TestSectorCsvGate:
+    """v0.454：板块指数 CSV（sector_phase.load_sector_gate / R48 板块腿）快照禁带检查。"""
+
+    def _csv(self, tmp_path, dates):
+        import pandas as pd
+
+        d = tmp_path / "idx"
+        d.mkdir(exist_ok=True)
+        pd.DataFrame(
+            {"date": dates, "close": [1.0 + i * 0.01 for i in range(len(dates))]}
+        ).to_csv(d / "880001.csv", index=False)
+        return d
+
+    def test_gate_rejects_gap_rows(self, tmp_path, monkeypatch):
+        from custos.core import paths
+        from custos.core.factors import sector_phase as sp
+
+        monkeypatch.setattr(paths, "SNAPSHOT_ROOT", tmp_path)
+        d = self._csv(tmp_path, ["2016-12-30", "2018-05-02"])
+        with pytest.raises(ValueError, match="快照数据污染"):
+            sp.load_sector_gate(d, {"880001": ["600000"]})
+
+    def test_gate_legal_rows_pass_and_off_mode_noop(self, tmp_path, monkeypatch):
+        from custos.core import paths
+        from custos.core.factors import sector_phase as sp
+
+        d = self._csv(tmp_path, ["2016-12-30", "2020-10-09"])
+        monkeypatch.setattr(paths, "SNAPSHOT_ROOT", tmp_path)
+        sp.load_sector_gate(d, {"880001": ["600000"]})
+        d2 = self._csv(tmp_path, ["2018-05-02"])
+        monkeypatch.setattr(paths, "SNAPSHOT_ROOT", None)
+        sp.load_sector_gate(d2, {"880001": ["600000"]})  # 非快照不检查
+
+    def test_tail_feature_sector_leg_rejects(self, tmp_path, monkeypatch):
+        import json
+
+        from custos.core import paths
+        from custos.research import tail_feature_study as tf
+
+        d = self._csv(tmp_path, ["2016-12-30", "2018-05-02"])
+        mf = tmp_path / "members.json"
+        mf.write_text(json.dumps({"880001": ["600000"]}), encoding="utf-8")
+        monkeypatch.setattr(paths, "SECTOR_INDEX_DIR", d)
+        monkeypatch.setattr(paths, "SECTOR_MEMBERS_FILE", mf)
+        monkeypatch.setattr(paths, "SNAPSHOT_ROOT", tmp_path)
+        fn = tf.default_sector_fn()
+        with pytest.raises(ValueError, match="快照数据污染"):
+            fn("600000", "2016-12-30")

@@ -28,6 +28,9 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: 零假设校准两连测 / 回归哨兵等重测试（conftest 按类名 Calibration/Sentinel 自动打标；test_affected 默认跳过，CI 全量照跑）",
+]
 
 [dependency-groups]
 dev = [
