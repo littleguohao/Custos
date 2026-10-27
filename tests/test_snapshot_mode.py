@@ -59,6 +59,9 @@ def _probe_paths(env_extra: dict) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env.pop("CUSTOS_DATA_SNAPSHOT", None)
     env.update(env_extra)
+    # 子进程 I/O 固定 UTF-8：探针要把含中文的路径打到 stdout 管道——Windows 下管道默认
+    # 走系统代码页（cp1252/cp936），stdout 是 strict ⇒ UnicodeEncodeError 退出 1（生产机实红）
+    env["PYTHONIOENCODING"] = "utf-8"
     return subprocess.run(
         [
             sys.executable,
@@ -67,6 +70,8 @@ def _probe_paths(env_extra: dict) -> subprocess.CompletedProcess:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         env=env,
         check=True,
     )
