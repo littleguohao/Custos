@@ -4573,6 +4573,45 @@ def _topn_rank(t: dict[str, Any], tie_seed: int) -> tuple:
     return (1, 0.0, _tie_key(t, tie_seed))
 
 
+def scan_portfolio_grid(
+    candidates: list[dict[str, Any]],
+    grid: list[dict[str, Any]],
+    tie_seeds: tuple[int, ...] = (0,),
+) -> list[dict[str, Any]]:
+    """组合层参数网格（v0.460，TODO #117 准备）：同一候选交易集 × 每格组合参数 × 多个平分种子，
+    报每格 total_return / max_drawdown / return_over_maxdd / n_taken 的种子区间（min / p50 / max）。
+
+    ``grid`` 每格是 ``simulate_portfolio_topn`` 的关键字参数（可含 ``exposure_fn`` 与 ``name``）。
+    交易集只算一次、各格只重跑组合层（纯计算，无 IO）。平分噪声：R1/R2 审计显示单次抽签的 CAGR
+    区间可达 −16%~+21%，比较格子必须看区间而不是单值。"""
+    import statistics as _st
+
+    keys = ("total_return", "max_drawdown", "return_over_maxdd", "n_taken", "cagr")
+    out: list[dict[str, Any]] = []
+    for cell in grid:
+        kw = {k: v for k, v in cell.items() if k != "name"}
+        runs = [
+            simulate_portfolio_topn(candidates, tie_seed=s, **kw) for s in tie_seeds
+        ]
+        row: dict[str, Any] = {
+            "name": cell.get("name"),
+            "params": {k: v for k, v in kw.items() if k != "exposure_fn"},
+            "exposure_fn": kw.get("exposure_fn") is not None,
+            "n_seeds": len(tie_seeds),
+        }
+        for k in keys:
+            vals: list[float] = [
+                float(r[k]) for r in runs if isinstance(r.get(k), (int, float))
+            ]
+            row[k] = (
+                {"min": min(vals), "p50": _st.median(vals), "max": max(vals)}
+                if vals
+                else None
+            )
+        out.append(row)
+    return out
+
+
 def select_daily_topn(
     candidates: list[dict[str, Any]], top_n: int, tie_seed: int = 0
 ) -> list[dict[str, Any]]:
@@ -4770,6 +4809,7 @@ def simulate_portfolio_topn(
     max_gross: float = 1.0,
     taken_out: Optional[list] = None,
     tie_seed: int = 0,
+    exposure_fn: Optional[Callable[[str], float]] = None,
 ) -> dict[str, Any]:
     """组合级**横截面 top-N 择优**资金曲线：每个进场日在所有「可买」候选里按 score 降序取前 top_n
     (排除已持有该股、受并发/敞口上限约束)，固定风险仓位入场，事件驱动出资金曲线/CAGR/最大回撤。
@@ -4779,6 +4819,9 @@ def simulate_portfolio_topn(
     taken_out：提供 list 时把实际开仓的候选 dict 逐一追加进去（选中子集的交易级读数用，
       如 R36 Phase 3 调权路）；None = 不收集（旧行为逐位不变）。
     仓位同 simulate_portfolio(risk_frac 设 2% 地板);回撤=已实现权益口径(不含浮亏,真实回撤更大)。绝不 raise。
+    ``exposure_fn``（v0.460，TODO #117 组合层准备）：进场日 → 总敞口系数（0~1），当日开仓的
+    总敞口上限 = ``max_gross × exposure_fn(date)``（0AMV 状态化仓位用；只限新开仓，已持仓不强平）。
+    None = 恒 1（旧行为逐位不变）。等权配置 = ``risk_pct`` 取大（如 1.0）+ ``max_pos_frac=1/N``。
     """
     import collections as _c
 
@@ -4824,7 +4867,11 @@ def simulate_portfolio_topn(
             max_concurrent=max_concurrent,
             risk_pct=risk_pct,
             max_pos_frac=max_pos_frac,
-            max_gross=max_gross,
+            max_gross=(
+                max_gross
+                if exposure_fn is None
+                else max_gross * max(0.0, min(1.0, float(exposure_fn(date))))
+            ),
             equity=equity,
             gross=gross,
             seq=seq,
