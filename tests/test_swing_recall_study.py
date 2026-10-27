@@ -351,7 +351,7 @@ def _mk_df(days, closes):
     )
 
 
-def _world(seed=0, edge=False, clustered=True, n_codes=12):
+def _world(seed=0, edge=False, clustered=True, n_codes=12, mix_len=False):
     """两挖掘段合成世界：每码 300 根预热 + 12 周期波段（每周期 1 个 ≥20% 波段；
     挖掘 B 末周期 T0 落段末隔离带被剔——双窗构造同构，读数自查即可）。
 
@@ -363,6 +363,8 @@ def _world(seed=0, edge=False, clustered=True, n_codes=12):
     臂轻易复现）；QN 12 门各 1 簇/码（热概率恒 0.20）。簇级置换下块标签整体换位 ⇒
     方差按簇数算；逐笔置换拆簇 ⇒ q95 系统性偏低（哨兵据此必须失败）。
     clustered=False ⇒ 全部逐 bar iid（密度 0.10，随机放置 ⇒ 精度期望=覆盖率）。
+    mix_len=True ⇒ B1 簇长奇偶交替 16/3（3 根块仍落在窗口本体/槽 X/Y 内、间隔不变
+    ⇒ 不越界不合并）——混合簇长校准用例（臂按簇形状分层抽样，簇长混合时同样须过帽）。
     """
     out: dict = {"warm": {}, "bars": {}, "qn": {}, "regime": {"2000-01-01": "做多"}}
     codes = [f"{k:06d}" for k in range(n_codes)]
@@ -378,7 +380,8 @@ def _world(seed=0, edge=False, clustered=True, n_codes=12):
                 st = base + 5  # 窗口 [t0−10, t0+5] = 周期 +5 起 16 根
             else:
                 st = base + (27 if _u("slot", key, seed, ki, b, w) < 0.5 else 49)
-            bursts[st] = list(range(st, st + 16))
+            ln = 3 if (mix_len and b % 2) else 16
+            bursts[st] = list(range(st, st + ln))
         return bursts
 
     for w, (seg, d0) in enumerate(SEG_BARS.items()):
@@ -497,8 +500,8 @@ def _run_spec(spec, seed=0, **kw):
     )
 
 
-def _world_run(seed, edge=False, clustered=True, **kw):
-    return _run_spec(_world(seed, edge, clustered), seed, **kw)
+def _world_run(seed, edge=False, clustered=True, mix_len=False, **kw):
+    return _run_spec(_world(seed, edge, clustered, mix_len=mix_len), seed, **kw)
 
 
 def _unit_c4(rep):
@@ -712,3 +715,42 @@ def test_main_writes_report(tmp_path):
     assert rep["unit"] == "R50"
     # mcap 全缺 ⇒ 分层落 na 桶，基线仍出
     assert rep["objects"]["b1_l1"]["windows"]["mining_a"]["baseline"] is not None
+
+
+def _norm(o):
+    """逐位一致比对归一：dict 键序化、ndarray→list、NaN 归一（其余原样）。"""
+    if isinstance(o, dict):
+        return {str(k): _norm(o[k]) for k in sorted(o, key=str)}
+    if isinstance(o, (list, tuple)):
+        return [_norm(v) for v in o]
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    if isinstance(o, float) and o != o:
+        return "nan"
+    return o
+
+
+def test_scan_workers_bit_identical():
+    """_build_window scan_workers=1 vs 2 产物逐位一致（``bt.run_codes_parallel``
+    按提交序装配；R46 -j / test_load_workers 先例）。"""
+    spec = _world(0)
+    seg = "mining_a"
+    span = SPANS[seg]
+    bars = spec["bars"][span]
+    layers = sr.collect_b1_layers(spec["warm"][span], spec["regime"], 20)
+
+    def qn_scan(code, df, start, end):
+        return spec["qn"][seg][code]
+
+    def mcap(code, df):
+        base = 1e8 * (2 ** (int(code) % 12))
+        return {
+            str(d)[:10]: base * (1 + 0.1 * _u("mc", code, str(d)[:7]))
+            for d in df["date"]
+        }
+
+    kw = dict(bars=bars, b1_layers=layers, qn_scan_fn=qn_scan, mcap_fn=mcap)
+    a = sr._build_window(seg, *span, scan_workers=1, **kw)
+    b = sr._build_window(seg, *span, scan_workers=2, **kw)
+    assert list(a) == list(b)  # 顶层键序一致
+    assert _norm(a) == _norm(b)

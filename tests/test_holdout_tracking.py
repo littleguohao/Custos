@@ -320,7 +320,9 @@ def test_baseline_frozen_snapshot_and_contract(tmp_path):
     )
     bl = rep["baseline"]["r44_ref"]
     assert bl["n"] == 569861 and bl["win_rate"] == 0.43622
-    assert "缺精确基线" in bl["big_win_note"]
+    # 大单/大亏基线 = R44 buckets 子表两桶之和（桶粒度点估计，trade_dist.BINS 左开右闭）：
+    # ≥+20% =「20~30%」0.0277 +「>30%」0.0316 = 5.93%；≤−10% =「≤−15%」0.0119 +「−15~−10%」0.1678 = 17.97%
+    assert "5.93%" in bl["big_win_note"] and "17.97%" in bl["big_loss_note"]
     # 契约已登记且产物过 require（不红即过）
     assert "holdout_tracking_monthly" in contracts.SPECS
     contracts.require("holdout_tracking_monthly", rep)
@@ -431,3 +433,121 @@ def test_actual_trades_b1_split_from_trade_cf_flags(tmp_path):
     md = ht.render_markdown(rep) if hasattr(ht, "render_markdown") else ""
     if md:
         assert "本月 B1" in md and "非 B1 入场笔数" in md
+
+
+def test_b1_split_round_level_attribution(tmp_path):
+    """v0.459 回合级归属：09-01 买、09-05 加仓、09-10 卖半、09-12 卖半——第二笔卖单
+    FIFO 配平到 09-05 加仓 lot（桶级 first_buy_date=09-05，对不上回合键的旧缺陷
+    会落 unknown）；回合口径下同回合所有平仓单继承回合首笔买入日（09-01）的标记。
+    回合结束后的新一轮（09-20 买 / 09-25 卖）无标记仍落 unknown。"""
+    _write_ledger(
+        tmp_path,
+        [
+            _row("2026-09-01", "600001", "买入", 100, 10.0, 0),
+            _row("2026-09-05", "600001", "买入", 100, 11.0, 0),  # 加仓
+            _row("2026-09-10", "600001", "卖出", 100, 12.0, 0),  # 配平 09-01 lot
+            _row("2026-09-12", "600001", "卖出", 100, 12.5, 0),  # 配平 09-05 lot
+            _row("2026-09-20", "600001", "买入", 100, 12.0, 0),  # 新回合（无标记）
+            _row("2026-09-25", "600001", "卖出", 100, 12.6, 0),
+        ],
+    )
+    d = tmp_path / "artifacts" / "logs" / "trade_counterfactual"
+    d.mkdir(parents=True)
+    (d / "2026-09_monthly_review.json").write_text(
+        json.dumps(
+            {
+                "episodes": [
+                    {
+                        "code": "600001",
+                        "entry_date": "2026-09-01",  # 回合键 = 首笔买入日
+                        "b1_entry": True,
+                        "instrument": "stock",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    rep = ht.build_report(
+        tmp_path, "2026-09", pick_runner=_none_runner, shadow_runner=_none_runner
+    )
+    sp = rep["actual_trades"]["b1_split"]["since_holdout"]
+    assert sp["b1"]["n"] == 2 and sp["b1"]["win_rate"] == 1.0  # 两笔卖单都归 B1 回合
+    assert sp["n_unknown"] == 1  # 只有新回合那笔落 unknown（不错位虚高）
+
+
+# ── 透传标量 isfinite 防护（上游 allow_nan=True 产物带 NaN/Inf）─────────────
+
+
+def test_shadow_review_nan_passthrough_guarded(tmp_path):
+    """plan_shadow 子进程产物带 NaN/Inf ⇒ 透传字段 None、子块不降级、整节不崩
+    （本模块 write_json allow_nan=False，一个 NaN 曾会把整节打成 unavailable）。"""
+    _write_ledger(tmp_path, [])
+
+    def nan_review(base, workdir):
+        return {
+            "n_events": 2,
+            "n_distinct_codes": 2,
+            "n_continuation_rows": 1,
+            "summary": {
+                "5": {
+                    "n": 1,
+                    "mean": float("nan"),
+                    "median": 0.01,
+                    "win_rate": float("inf"),
+                    "n_pending": 0,
+                }
+            },
+        }, None
+
+    rep = ht.build_report(
+        tmp_path, "2026-10", pick_runner=_none_runner, shadow_runner=nan_review
+    )
+    rv = rep["plan_shadow"]["review"]
+    assert rv["available"] and rv["n_events"] == 2
+    assert rv["delta5"]["mean"] is None and rv["delta5"]["win_rate"] is None
+    assert rv["delta5"]["median"] == 0.01 and rv["delta5"]["n"] == 1
+    json.dumps(rep, allow_nan=False)  # 产物不含非有限值（不炸即过）
+    assert "—" in ht.render_markdown(rep)  # None 渲染为占位，不炸
+
+
+def test_trade_cf_nan_delta_guarded(tmp_path):
+    """trade_cf 产物 total_delta_amount = NaN ⇒ None 透传，其余字段不受影响。"""
+    _write_ledger(tmp_path, [])
+    p = _write_trade_cf(tmp_path)
+    p.write_text(
+        p.read_text(encoding="utf-8").replace("-1234.5", "NaN"), encoding="utf-8"
+    )
+    rep = ht.build_report(
+        tmp_path, "2026-10", pick_runner=_none_runner, shadow_runner=_none_runner
+    )
+    cf = rep["trade_cf"]
+    assert cf["available"] and cf["total_delta_amount"] is None
+    assert cf["n_closed"] == 2 and cf["actual_first_lot"]["n"] == 2
+    json.dumps(rep, allow_nan=False)
+    assert "Δ 合计 — 元" in ht.render_markdown(rep)
+
+
+def test_section_require_systemexit_fail_soft(tmp_path, monkeypatch):
+    """require 抛 SystemExit（schema 漂移硬失败形态）⇒ 本节一行 unavailable，
+    月报主体照常跑完（现有 fail-soft 只注入 RuntimeError，SystemExit 单列）。"""
+    monkeypatch.delenv("CUSTOS_SKIP_HOLDOUT_TRACKING", raising=False)
+    monkeypatch.setattr(ht, "_run_pick_practice", _none_runner)
+    monkeypatch.setattr(ht, "_run_plan_shadow_review", _none_runner)
+    _write_ledger(tmp_path, [])
+
+    def boom(name, rep):
+        raise SystemExit(f"schema {name} 不合")
+
+    monkeypatch.setattr(ht, "require", boom)
+    md = ht.section(tmp_path, "2026-10")
+    assert "unavailable" in md and ht.HEADER in md and "SystemExit" in md
+    # 月报主体接线：section 的 SystemExit 不外溢，main 照常 rc=0
+    json_dir = tmp_path / "data" / "review" / "monthly"
+    monkeypatch.setattr(mr, "MONTHLY_JSON_DIR", json_dir)
+    rc = mr.main(["--month", "2026-07", "--base", str(tmp_path)])
+    assert rc == 0
+    body = (
+        tmp_path / "artifacts" / "reports" / "monthly" / "2026-07_monthly_review.md"
+    ).read_text(encoding="utf-8")
+    assert "unavailable" in body

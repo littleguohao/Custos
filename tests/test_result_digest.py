@@ -282,4 +282,8 @@ def test_r50(tmp_path):
     import test_swing_recall_study as tsr
 
     rep = tsr._world_run(0, min_n=50, n_random=6, c4_min_pool=3)
-    _assert_complete("r50", _dump(tmp_path, "r50", rep))
+    d = _assert_complete("r50", _dump(tmp_path, "r50", rep))
+    # 判据量（v0.458）：逐窗 lift_low / baseline_low 必填在案（objects.*.windows.* 全覆盖）
+    low_keys = [k for k in d["fields"] if k.endswith(".lift_low")]
+    assert len(low_keys) == len(rep["objects"]) * 2
+    assert any(k.endswith(".baseline_low") for k in d["fields"])

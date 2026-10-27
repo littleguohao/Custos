@@ -87,7 +87,8 @@ owner 2026-10-23 新主线：从涨得好的标的**逆向**看 B1 与 QN 公式
 ### 工程落点（TODO #119，已实现，v0.456）
 
 - 新工具 `swing_recall_study`（研究侧，study 类）：波段识别纯函数（ZigZag，合成钉测）+ 信号 / 门 as-of 扫描复用 `exit_campaign.warm_v0_signals`
-  与 `core/factors/qn_*` 规范入口 + `select_daily_topn` + `plan_rules_replay.LIVE_PARAMS` 重放；簇级置换复用 R48 `cluster_perm`；
+  与 `core/factors/qn_*` 规范入口 + `select_daily_topn` + `plan_rules_replay.LIVE_PARAMS` 重放；簇级置换复用 R48 `cluster_perm`
+  （🔄 v0.458：零假设已改为保簇随机局部低点入场，`cluster_perm` 转包退役删除，见下节修订）；
   零假设校准两连测 + 成簇零假设 + 逐笔置换哨兵；`result_digest` / `result_report` 登记；`--load-workers`。
 - **排期（owner 2026-10-23）**：第一批（R40 / R45）判定段读完、第二批（R47 / R48 / R49）挖掘段跑完之后最后跑。
 

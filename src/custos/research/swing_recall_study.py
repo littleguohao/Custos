@@ -18,10 +18,11 @@
   样本量 = 该对象信号数。
 - 读数：召回 / 精度 / lift / 提前量分位 / 涨幅分带召回 / 漏斗 / 兑现（LIVE_PARAMS 重放：
   已实现收益、捕获率 ret/amp、出场原因分布）/ 年·月分组。
-- 线索筛选（v0.458 修订）：16 对象（B1 L1~L4 + QN 12 门）× 对**局部低点**基线的精度 lift_low；A 合格 n≥1000 ∧ lift>1.2；
-  B 同门槛复现；统计量 min(lift_A, lift_B)；簇级置换（同票相邻信号成簇，
-  R48 ``cluster_perm`` 同款）N=200 每臂取 16 对象 max；复现且 > ``kit.q95`` ⇒
-  ``lead_robust``。
+- 线索筛选（v0.458 修订）：16 对象（B1 L1~L4 + QN 12 门）× 对**局部低点**基线的精度 lift_low；A 合格 n≥1000 ∧ lift_low>1.2；
+  B 同门槛复现；统计量 min(lift_low_A, lift_low_B)；零假设 = **保簇形状的随机局部低点入场**
+  （每对象按自身簇形状，逐簇抽同层随机局部低点锚点、整簇取锚点命中；基线 = 局部低点
+  精确命中率，不抽样）N=200 每臂取 16 对象 max；复现且 > ``kit.q95`` ⇒
+  ``lead_robust``。原 lift（对分层随机 bar 基线）只作描述性副读数。
 
 as-of 纪律（R50 风险注记 1）：波段标注用未来价格**只允许在标签侧**——信号采集
 （warm_v0_signals / QN 门）全部是前缀 as-of 判定，钉测在案（tests/test_swing_recall_study.py）。
@@ -60,7 +61,7 @@ LIFT_MIN = 1.2
 N_RANDOM = 200
 #: 跑数前修订（v0.458，owner 2026-10-27）：局部低点对照——收盘为近 LOCAL_LOW_N 根（含当日）最低的 bar。
 #: 波段起点 T0 按定义是局部低点，超卖类信号天然贴近低点 ⇒ 对「任意 bar」的 lift 近乎白送；
-#: 线索筛选 / 置换统计量改用对局部低点基线的 ``lift_low``，原 ``lift`` 只作描述。
+#: 线索筛选 / 零假设统计量改用对局部低点基线的 ``lift_low``，原 ``lift`` 只作描述。
 LOCAL_LOW_N = 10
 C4_MIN_POOL = 50
 #: B1 漏斗 L3 的「1800 观察线」= live 技术分层强档阈（钉测对齐
@@ -86,14 +87,6 @@ QN_GATES = (
 B1_OBJECTS = ("b1_l1", "b1_l2", "b1_l3", "b1_l4")
 #: 16 个匹配对象（B1 主链 4 层 + QN 12 门）
 OBJECTS = (*B1_OBJECTS, *QN_GATES)
-
-
-def cluster_perm(items: list[dict], rng: random.Random) -> np.ndarray:
-    """簇级置换（R48 ``tail_feature_study.cluster_perm`` 单源——同票相邻信号成簇、
-    按簇长分层整体换位；回归哨兵 monkeypatch 点：换成逐笔置换 ⇒ 成簇校准必须失败）。"""
-    from custos.research import tail_feature_study as tf  # noqa: PLC0415
-
-    return tf.cluster_perm(items, rng)
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +169,9 @@ def identify_swings(
     剔除（计数进返回值第二项）：T0 出段 / T0 在段末隔离带（``entry_deadline``）/
     T0 前不足 ``min_prior_bars`` 根 / （T0, T1] 内相邻 bar 日历跨越 > ``max_gap_days``
     （停牌跨越）。``dates`` 接受 datetime/字符串（一律截到 YYYY-MM-DD）。
+
+    ``truncated``（段尾未确认）波段的 ``amp`` 用**数据末根**而非回撤确认峰值计算
+    （zigzag 截断时 T1=末根），幅度系统性低估——如实注记，口径不改。
     """
     import datetime as _dt  # noqa: PLC0415
 
@@ -323,7 +319,12 @@ def default_qn_scan_fn() -> Callable[[str, Any, str, str], dict[str, list[int]]]
 
 def default_mcap_fn() -> Callable[[str, Any], dict[str, float]]:
     """流通市值 as-of（R43 ``_shares_series`` 同源：raw_close × 流通股本事件；
-    读不到 ⇒ 全 NaN，分层落入 "na" 桶）。返回 {date: mcap}。"""
+    读不到 ⇒ 全 NaN，分层落入 "na" 桶）。返回 {date: mcap}。
+
+    ⚠️ 分层偏差注记：df 缺 ``raw_close`` 列时**静默回退前复权 close**——qfq 价 ×
+    当前流通股本会把早年市值系统性压低（除权因子 <1 压缩历史价格），五分位分层
+    落位有偏；生产加载链（``bt._load_one_bars``）带 raw_close，回退只是合成注入
+    件/缺列时的兜底，不另行 WARN。"""
     from custos.research import regime_style_study as rs  # noqa: PLC0415
 
     def fn(code: str, df: Any) -> dict[str, float]:
@@ -393,7 +394,7 @@ def _quantiles(xs: list[float]) -> Optional[dict[str, float]]:
 
 
 # ---------------------------------------------------------------------------
-# 窗内装配：读数 + 分层随机 bar 对照 + 簇级置换原料
+# 窗内装配：读数 + 分层随机 bar 对照 + 局部低点精确基线
 # ---------------------------------------------------------------------------
 
 
@@ -473,7 +474,7 @@ def _build_window(
                 year_lowbars.setdefault((code, y), []).append(i)
             mcap_rep[(code, y)] = mc.get(d, float("nan"))  # 年内末根覆盖前值
 
-    # 排序（同码按 bar）——簇划分与二分匹配的前提；摊平 rows 供簇级置换
+    # 排序（同码按 bar）——簇划分与二分匹配的前提；摊平 rows 供簇形状统计（零假设臂用）
     sig_rows: dict[str, list[dict[str, Any]]] = {}
     for o in OBJECTS:
         flat: list[dict[str, Any]] = []
@@ -613,16 +614,15 @@ def _baseline_low_exact(win: dict[str, Any], obj: str) -> Optional[float]:
 def window_readings(
     win: dict[str, Any], *, seed: int
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """窗内 16 对象读数 + 置换原料（events/hit/obj_idx/baseline）。
+    """窗内 16 对象读数 + aux（各对象信号数，主流程臂资格判定用）。
 
-    读数（R50 写死）：召回率、信号精度 P(信号日 ∈ 起涨窗口)、精度 lift（÷ 分层
-    随机 bar 基线）、提前天数分位、按涨幅分带的召回、宽窗召回（只描述）。
+    读数（R50 写死）：召回率、信号精度 P(信号日 ∈ 起涨窗口)、精度 lift_low（÷ 局部
+    低点精确基线——v0.458 起为判据量）与 lift（÷ 分层随机 bar 基线，只作描述）、
+    提前天数分位、按涨幅分带的召回、宽窗召回（只描述）。
 
-    置换宇宙 = **事件**（跨 16 对象去重的 (code, bar) 信号位置），标签 = 该位置
-    是否落在某波段起涨窗口（对象无关的位置属性）——「信号与波段标签按簇整体换位」
-    的落点。⚠️ 不能按对象各自成行后再换位：B1 四层嵌套（L4⊆L3⊆L2⊆L1）会让同一
-    位置聚成「同长簇」，而簇级置换按簇长分层换签——嵌套层就成了封闭层，edge 世界
-    里臂把 edge 原样复现（合成实测 q95==stat）。事件口径下同位置只占一行，无封闭层。
+    零假设原料不在此处组装：v0.458 起为「保簇形状的随机局部低点入场」——
+    ``low_null_material``（局部低点命中前缀和 + 分层下标池）× ``cluster_lengths``
+    （对象簇形状）在主流程组装（口径见 R50 文档「跑数前修订 v0.458」节）。
     """
     n_swings = sum(len(v) for v in win["swings_of"].values())
     # 分带分母 = 全部波段（含无信号代码——它们的波段本来就不可能匹配）
@@ -631,33 +631,22 @@ def window_readings(
         for sw in swings:
             band_totals[sw["band"]] += 1
 
-    # ── 事件层：全部对象的信号位置去重 → 每位置一个「∈起涨窗口」标签 ──
-    ev_of: dict[tuple[str, int], int] = {}
-    events: list[dict[str, Any]] = []
+    # ── 事件层：全部对象的信号位置去重 → 每位置一个「∈起涨窗口」标签
+    #    （逐对象精度与年/月分组复用同一份判定，同位置不重复算）──
+    seen: set[tuple[str, int]] = set()
+    ev_by_code: dict[str, list[int]] = {}
     for o in OBJECTS:
         for r in win["sig_rows"][o]:
             key = (r["code"], int(r["i"]))
-            if key not in ev_of:
-                ev_of[key] = len(events)
-                events.append(
-                    {
-                        "code": r["code"],
-                        "i": int(r["i"]),
-                        "date": r["date"],
-                        "_seg": win["name"],
-                    }
-                )
+            if key not in seen:
+                seen.add(key)
+                ev_by_code.setdefault(r["code"], []).append(int(r["i"]))
     ev_hits: dict[tuple[str, int], bool] = {}
-    ev_by_code: dict[str, list[int]] = {}
-    for ev in events:
-        ev_by_code.setdefault(ev["code"], []).append(ev["i"])
     for code, idxs in ev_by_code.items():
         wins = _code_windows(win["swings_of"].get(code, []), WIN_LO, WIN_HI)
         for i, h in zip(idxs, _signal_hits(wins, idxs)):
             ev_hits[(code, i)] = h
-    hit = np.array([ev_hits[(e["code"], e["i"])] for e in events], dtype=bool)
 
-    obj_idx: dict[str, np.ndarray] = {}
     readings: dict[str, Any] = {}
     for obj in OBJECTS:
         flat = win["sig_rows"][obj]
@@ -682,9 +671,6 @@ def window_readings(
                     offsets.append(float(first[k] - sw["t0"]))
                 if first_wide[k] is not None:
                     wide_matched += 1
-        obj_idx[obj] = np.array(
-            [ev_of[(r["code"], int(r["i"]))] for r in flat], dtype=int
-        )
         n_sig = len(flat)
         n_hit = sum(bool(r.get("_hit")) for r in flat)
         base, base_grp = _baseline(win, obj, n_sig, seed)
@@ -715,13 +701,7 @@ def window_readings(
             "baseline_by_year": base_grp["by_year"],
             "baseline_by_month": base_grp["by_month"],
         }
-    aux = {
-        "rows": events,
-        "hit": hit,
-        "obj_idx": obj_idx,
-        "baseline": {o: readings[o]["baseline_low"] for o in OBJECTS},  # 置换用判据基线
-        "n_signals": {o: readings[o]["n_signals"] for o in OBJECTS},
-    }
+    aux = {"n_signals": {o: readings[o]["n_signals"] for o in OBJECTS}}
     return readings, aux
 
 
@@ -883,7 +863,7 @@ def _realization(
 
 
 # ---------------------------------------------------------------------------
-# 线索筛选（16 对象 × 精度 lift；簇级置换定标尺）
+# 线索筛选（16 对象 × 精度 lift_low；保簇随机局部低点零假设定标尺）
 # ---------------------------------------------------------------------------
 
 
@@ -906,12 +886,11 @@ def cluster_lengths(rows: list[dict[str, Any]]) -> list[tuple[int, dict[str, Any
 
 
 def low_null_material(win: dict[str, Any]) -> dict[str, Any]:
-    """零假设原料（v0.458）：全部局部低点 bar 按 (code, bar) 排成全局数组 + 命中前缀和 + 每码末端，
-    以及各分层的全局下标池。臂 = 每对象按其簇形状，逐簇抽同层随机局部低点锚点、整簇取锚点命中。"""
+    """零假设原料（v0.458）：全部局部低点 bar 按 (code, bar) 排成全局命中数组的
+    前缀和 + 各分层的全局下标池。臂 = 每对象按其簇形状，逐簇抽同层随机局部低点
+    锚点、整簇取锚点命中。"""
     codes = sorted({c for (c, _y) in win["year_lowbars"]})
     hit_list: list[int] = []
-    end_list: list[int] = []
-    pos_of: dict[tuple[str, int], int] = {}
     strata: dict[tuple[str, Any], list[int]] = {}
     for c in codes:
         idx = sorted(
@@ -924,16 +903,12 @@ def low_null_material(win: dict[str, Any]) -> dict[str, Any]:
         )
         g0 = len(hit_list)
         hit_list.extend(int(bool(h)) for h in hs)
-        g1 = len(hit_list)
-        end_list.extend([g1] * (g1 - g0))
         for k, i in enumerate(idx):
-            pos_of[(c, i)] = g0 + k
             y = win["dates_of"][c][i][:4]
             strata.setdefault(_stratum_of(win, c, y), []).append(g0 + k)
     cum = np.concatenate([[0], np.cumsum(np.asarray(hit_list, dtype=np.int64))])
     return {
         "cum": cum,
-        "end": np.asarray(end_list, dtype=np.int64),
         "strata": {k: np.asarray(v, dtype=np.int64) for k, v in strata.items()},
         "all": np.arange(len(hit_list), dtype=np.int64),
     }
@@ -972,28 +947,12 @@ def _null_lifts(
 
 
 def _qualifies(rd: dict[str, Any], min_n: int) -> bool:
-    """A 合格 / B 复现同门槛（R50 写死）：信号数 ≥ min_n ∧ 精度 lift > LIFT_MIN。"""
+    """A 合格 / B 复现同门槛（R50 写死）：信号数 ≥ min_n ∧ 精度 lift_low > LIFT_MIN。"""
     return bool(
         rd.get("n_signals", 0) >= min_n
         and rd.get("lift_low") is not None
         and rd["lift_low"] > LIFT_MIN
     )
-
-
-def _perm_lifts(
-    win_aux: dict[str, Any], perm: np.ndarray
-) -> dict[str, Optional[float]]:
-    """置换下逐对象精度 lift：hit 标签按簇整体换位（基线不动——对照集是宇宙属性）。"""
-    hp = win_aux["hit"][perm]
-    out: dict[str, Optional[float]] = {}
-    for o in OBJECTS:
-        idx = win_aux["obj_idx"][o]
-        base = win_aux["baseline"][o]
-        if not len(idx) or not base:
-            out[o] = None
-            continue
-        out[o] = float(hp[idx].mean()) / base
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1065,7 +1024,7 @@ def run_study(
         readings[w], aux[w] = window_readings(wins[w], seed=args.seed)
     wa, wb = segs[0][0], segs[1][0]
 
-    # ── 线索筛选：A 合格 → B 复现 → min(lift_A, lift_B) vs 簇级置换 q95 ──
+    # ── 线索筛选：A 合格 → B 复现 → min(lift_low_A, lift_low_B) vs 保簇随机局部低点 q95 ──
     objs: dict[str, Any] = {}
     for o in OBJECTS:
         ra, rb = readings[wa][o], readings[wb][o]
@@ -1322,7 +1281,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--cost-bps", type=float, default=25.0)
     ap.add_argument("--top-n", type=int, default=20, help="B1 漏斗 L4 当日 top-N")
-    ap.add_argument("--n-random", type=int, default=N_RANDOM, help="簇级置换臂数")
+    ap.add_argument(
+        "--n-random", type=int, default=N_RANDOM, help="零假设臂数（保簇随机局部低点）"
+    )
     ap.add_argument("--c4-min-pool", type=int, default=C4_MIN_POOL)
     ap.add_argument(
         "--min-n",

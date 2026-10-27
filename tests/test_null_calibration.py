@@ -952,15 +952,18 @@ class TestSentinelR46IidPermutation:
 
 
 # ---------------------------------------------------------------------------
-# swing_recall_study（R50，v0.456，TODO #119）：16 对象 × 精度 lift 的簇级置换
+# swing_recall_study（R50，v0.458 修订，TODO #119）：16 对象 × 精度 lift_low 的
+# 保簇随机局部低点零假设
 # ---------------------------------------------------------------------------
 
 
-def _r50_run(edge: bool, clustered: bool = True, **kw):
+def _r50_run(edge: bool, clustered: bool = True, mix_len: bool = False, **kw):
     def run(seed):
         from test_swing_recall_study import _unit_c4, _world_run
 
-        return _unit_c4(_world_run(seed, edge=edge, clustered=clustered, **kw))
+        return _unit_c4(
+            _world_run(seed, edge=edge, clustered=clustered, mix_len=mix_len, **kw)
+        )
 
     return run
 
@@ -972,11 +975,12 @@ R50_KW = {"min_n": 50, "n_random": 50, "c4_min_pool": 40}
 
 class TestSwingRecallCalibration:
     """R50 零假设两连测 + 成簇用例：信号位置与波段窗口无关（纯块标签、簇结局相关）
-    ⇒ 20 种子 lead_robust 0/20；逐 bar iid 世界 0/20；植入「b1 热概率 0.18→0.85」
+    ⇒ 20 种子 lead_robust ≤10% 帽；逐 bar iid 世界 0/20；植入「b1 热概率 0.18→0.85」
     真 edge ⇒ b1_l1 lead_robust 可识别。
 
-    实测定稿（v0.456，合成世界逐种子实测）：成簇零假设 0/20、iid 世界 0/20、
-    edge 种子 0/1/2 全过、逐笔置换哨兵 6/20（30% > 10% 帽 ⇒ 决定性）。
+    实测定稿（v0.458 修订口径，合成世界逐种子实测，以 R50 文档「跑数前修订 v0.458」节
+    为准）：成簇零假设 2/20（50 臂）/ 1/20（200 臂，生产口径）、逐 bar iid 世界 0/20、
+    植入 edge 可识别、逐笔哨兵（簇形状拆成全 1）19/20。
     夹具设计纪律（簇必须同长且冷热不合并）见 test_swing_recall_study._world docstring。
     """
 
@@ -995,12 +999,26 @@ class TestSwingRecallCalibration:
     def test_edge_detected(self):
         hn.assert_edge_detected("swing_recall", _r50_run(True, **R50_KW), seed=0)
 
+    def test_mixed_cluster_len_noise(self):
+        """簇长混合（B1 簇 16/3 交替）零假设：臂按簇形状分层抽样，混合簇长下
+        同样 ≤10% 帽（簇长分层不再恒 16——长度分层假设的稳健性用例）。"""
+        hn.assert_noise_calibration(
+            "swing_recall[成簇·混合簇长]",
+            _r50_run(False, mix_len=True, **R50_KW),
+            seeds=R50_SEEDS,
+        )
+
+    def test_mixed_cluster_len_edge_detected(self):
+        hn.assert_edge_detected(
+            "swing_recall[混合簇长]", _r50_run(True, mix_len=True, **R50_KW), seed=0
+        )
+
 
 class TestSentinelSwingIidPermutation:
     """回归哨兵（照 R48 逐笔哨兵模式）：monkeypatch 把 ``sr.cluster_lengths`` 拆成全 1
     （随机局部低点逐笔抽、不保簇形状，v0.458）⇒ 成簇零假设校准**必须失败**（事件位置的「∈起涨窗口」标签成簇
-    相关；拆散后逐对象精度 concentrate、q95 系统性偏低——实测 6/20=30% 假过线，
-    超过 10% 帽）。"""
+    相关；拆散后逐对象精度 concentrate、q95 系统性偏低——v0.458 口径实测 19/20=95% 假过线，
+    远超 10% 帽）。"""
 
     def test_calibration_catches_iid(self, monkeypatch):
         import numpy as np

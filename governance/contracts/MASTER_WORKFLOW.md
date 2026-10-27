@@ -261,6 +261,8 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 > plan 影子台账 / trade_cf 同次产物，按月 + holdout 累计（2026-09-05 起）报
 > 大单率 / 大亏率 / 胜率 / 盈亏比，并对照 R44 参照档冻结基线；**纯描述、不作
 > 判据、不改规则**，伴生 JSON 落 `artifacts/reports/monthly/YYYY-MM_holdout_tracking.json`。
+> **v0.458**：实盘平仓块按 B1 合规入场拆分——R44 基线是 B1 交易集，只有 B1 组
+> 与之对照，非 B1 / 无法判定另列不对照；收益为毛利口径（pnl_pct，费用不进分子分母）。
 
 ### 时间范围
 

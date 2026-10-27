@@ -49,6 +49,8 @@ def test_r50(tmp_path):
     assert d["missing"] == []
     md = rr.render(d)
     assert "线索判决" in md and "拦截漏斗" in md and "兑现" in md
+    # 判据量列（v0.458）：lift_low 进逐窗 pivot，note 为 lift_low 口径
+    assert "lift_low" in md and "保簇随机局部低点" in md
 
 
 def test_auto_fallback_on_every_repo_digest():

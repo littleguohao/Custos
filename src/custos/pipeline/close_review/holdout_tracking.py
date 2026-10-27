@@ -16,7 +16,10 @@
 
 - **实盘平仓**（``data/trades/master_trade_ledger.csv``）：复用 weekly_review 的
   ``parse_ledger`` / ``fifo_pair``（月报同口径，单一来源），只信 ``match_status ==
-  "full"`` 的平仓单；收益 = ``pnl_pct``（毛利口径，费用不进分子分母）。
+  "full"`` 的平仓单；收益 = ``pnl_pct``（毛利口径，费用不进分子分母）；按平仓日切月。
+  B1 拆分按**回合级归属**（v0.459）：同一 code 的连续持仓回合（FIFO 队列从空到空）
+  内所有平仓单继承该回合首笔买入日的 B1 标记——桶级 ``first_buy_date`` 在加仓后
+  分批卖出时是加仓日（第二笔卖单配平到加仓 lot），直接对键会错位落 unknown。
 - **选股练习台账**（``data/trades/pick_practice.jsonl``）：子进程
   ``pick_practice report --out``（入场 T+1 开盘、B1 现行出场、成本 25bps 净口径——
   与主台账毛利口径不同，报告里注明）；台账 2026-10-15 才建，整体落在 holdout 期内。
@@ -92,10 +95,12 @@ BASELINE_R44_REF: dict[str, Any] = {
     "quantile_p10": -0.1121,
     "quantile_p90": 0.1245,
     "quantile_p95": 0.226,
-    # 大单/大亏无精确基线读数：只给已入库的分位数夹逼 / R48 预注册估算，如实标注
-    "big_win_note": "缺精确基线：R44 p90=+12.45% / p95=+22.60% ⇒ ≥+20% 约在 5%~10%；"
-    "R48 §量级按此估「约 4~6%」",
-    "big_loss_note": "缺精确基线：R44 p25=−5.22% / p10=−11.21% ⇒ ≤−10% 约在 10%~25%",
+    # 大单/大亏基线 = buckets 子表两桶之和（桶粒度点估计；trade_dist.BINS 左开右闭：
+    # 「20~30%」=(20%,30%] 不含恰 +20%，「-15~-10%」=(−15%,−10%] 含恰 −10%）
+    "big_win_note": "≈5.93%（buckets「20~30%」2.77% +「>30%」3.16%；桶粒度：左开，"
+    "恰 +20% 落入「10~20%」桶）",
+    "big_loss_note": "≈17.97%（buckets「≤−15%」1.19% +「−15~−10%」16.78%；"
+    "桶粒度：右闭，含恰 −10%）",
 }
 
 #: 纪律声明进产物（先例：复盘层契约 permission_rule——「是解释不是裁决」必须在产物里）
@@ -160,6 +165,15 @@ def _dist_stats(rets: list[float]) -> dict[str, Any]:
     }
 
 
+def _finite(v: Any) -> Any:
+    """透传标量防护：上游研究产物落盘 allow_nan=True，可能带 NaN/Inf——本模块产物
+    走 ``write_json``（allow_nan=False），一个非有限值会把整节打成 unavailable。
+    非有限浮点 ⇒ None（「没算出来」不冒充数）；int/str/None 等其余原样。"""
+    if isinstance(v, float) and not math.isfinite(v):
+        return None
+    return v
+
+
 def _month_index(month: str) -> int:
     """month（YYYY-MM）是 holdout 期第几个自然月；早于起点返回 0。"""
     y0, m0 = int(HOLDOUT_START[:4]), int(HOLDOUT_START[5:7])
@@ -194,22 +208,39 @@ def _month_window(month: str) -> dict[str, str]:
 def _closing_rows(
     base: Path, start: str, end: str
 ) -> tuple[list[tuple[float, str, str]], Optional[str]]:
-    """[start, end] 内 full 配平平仓单 (收益小数, code, 首笔买入日)；台账缺 → ([], 原因)。"""
+    """[start, end] 内 full 配平平仓单 (收益小数, code, 回合首笔买入日)；台账缺 → ([], 原因)。
+
+    回合级归属（v0.459）：第三元素 = 该笔平仓所属**持仓回合**的首笔买入日，不是本桶
+    自己 FIFO 配到的最早买入日——加仓后分批卖出时，后面的卖桶配到加仓 lot，桶级
+    first_buy_date 是加仓日，直接拿它对 ``_b1_flags`` 的键（回合首笔买入日）会错位
+    落 unknown。回合划分（fifo_pair 平仓单列，同 code 按卖出日序）：本桶最早配平
+    买入日 ≤ 上一桶卖出日 ⇒ 上一桶卖出时仍有 open lot（仓位未归零）⇒ 同回合延续；
+    反之 ⇒ 新回合开启，其首桶最早配平买入日即回合首笔买入日（FIFO 必配到回合最早
+    open lot）。first_buy_date 缺失的桶（match_status none）不切断回合。
+    """
     ledger_path = base / "data" / "trades" / "master_trade_ledger.csv"
     trades = parse_ledger(ledger_path)
     if trades is None:
         return [], f"成交台账缺失：{ledger_path}"
-    rows = [
-        (
-            c["pnl_pct"] / 100.0,
-            str(c.get("code") or "").zfill(6),
-            str(c.get("first_buy_date") or "")[:10],
-        )
-        for c in fifo_pair(trades)
-        if c["match_status"] == "full"
-        and c["pnl_pct"] is not None
-        and start <= c["sell_date"] <= end
-    ]
+    by_code: dict[str, list[dict]] = {}
+    for c in fifo_pair(trades):
+        by_code.setdefault(str(c.get("code") or "").zfill(6), []).append(c)
+    rows: list[tuple[float, str, str]] = []
+    for code, crows in by_code.items():
+        crows.sort(key=lambda c: c["sell_date"])
+        round_entry = ""
+        prev_sell: Optional[str] = None
+        for c in crows:
+            fb = str(c.get("first_buy_date") or "")[:10]
+            if fb and (prev_sell is None or fb > prev_sell):
+                round_entry = fb  # 新回合开启
+            prev_sell = c["sell_date"]
+            if (
+                c["match_status"] == "full"
+                and c["pnl_pct"] is not None
+                and start <= c["sell_date"] <= end
+            ):
+                rows.append((c["pnl_pct"] / 100.0, code, round_entry))
     return rows, None
 
 
@@ -224,7 +255,7 @@ def _closing_rets(
 def _b1_flags(base: Path) -> dict[tuple[str, str], Optional[bool]]:
     """逐笔 B1 合规入场标记（v0.458）：读 trade_counterfactual 历次产物的 episodes.b1_entry
     （0AMV 做多 ∧ J<13，研究侧判定；本模块不 import 研究——只读其落盘 JSON）。
-    键 = (code, 首笔买入日)；同键多文件以修改时间最新者为准。"""
+    键 = (code, 回合首笔买入日)；同键多文件以修改时间最新者为准。"""
     out: dict[tuple[str, str], Optional[bool]] = {}
     d = base / "artifacts" / "logs" / "trade_counterfactual"
     if not d.is_dir():
@@ -338,7 +369,8 @@ def _pick_block_from_report(rep: dict[str, Any], month: str) -> dict[str, Any]:
     return {
         "available": True,
         "basis": "T+1 开盘入场 × B1 现行出场模拟，净口径（25bps 已扣）；"
-        "open/pending 不进统计；台账 2026-10-15 起，整体在 holdout 期内",
+        "open/pending 不进统计；台账 2026-10-15 起，整体在 holdout 期内；"
+        "按**选股日**切月（实盘块按**平仓日**切月——两块切月口径不同，勿直接对读）",
         "month": _dist_stats(month_rets),
         "since_holdout": _dist_stats(cum_rets),
         "n_open": len(rep.get("open") or []),
@@ -445,15 +477,15 @@ def _plan_shadow_block(
         s5 = (rep.get("summary") or {}).get("5") or {}
         review = {
             "available": True,
-            "n_events": rep.get("n_events"),
-            "n_distinct_codes": rep.get("n_distinct_codes"),
-            "n_continuation_rows": rep.get("n_continuation_rows"),
+            "n_events": _finite(rep.get("n_events")),
+            "n_distinct_codes": _finite(rep.get("n_distinct_codes")),
+            "n_continuation_rows": _finite(rep.get("n_continuation_rows")),
             "delta5": {
-                "n": s5.get("n"),
-                "mean": s5.get("mean"),
-                "median": s5.get("median"),
-                "win_rate": s5.get("win_rate"),
-                "n_pending": s5.get("n_pending"),
+                "n": _finite(s5.get("n")),
+                "mean": _finite(s5.get("mean")),
+                "median": _finite(s5.get("median")),
+                "win_rate": _finite(s5.get("win_rate")),
+                "n_pending": _finite(s5.get("n_pending")),
             },
             "basis": "plan_shadow_review（stage=1700，独立事件=分歧段段头，"
             "Δret₅=plan−live，>0 = plan 更好）；#60 E 判据 K=20 + ≥5 只持仓",
@@ -502,13 +534,13 @@ def _trade_cf_block(base: Path, stem: str, unavailable: list[str]) -> dict[str, 
         "available": True,
         "basis": "本月口径（--period 本月）：出场对照只比首笔那手（FIFO 净收益，"
         "含 25bps 成本模型）；Δ = 首笔实际 − 首笔按规则",
-        "n_episodes": s.get("n_episodes"),
-        "n_closed": s.get("n_closed"),
-        "total_delta_amount": s.get("total_delta_amount"),
+        "n_episodes": _finite(s.get("n_episodes")),
+        "n_closed": _finite(s.get("n_closed")),
+        "total_delta_amount": _finite(s.get("total_delta_amount")),
         "actual_first_lot": _dist_stats(first_lot),
         "rule_first_lot": _dist_stats(rule_rets),
         "categories": {
-            c: (s.get("categories") or {}).get(c, {}).get("n")
+            c: _finite((s.get("categories") or {}).get(c, {}).get("n"))
             for c in (
                 "止损拖延",
                 "该清未清",
@@ -749,7 +781,7 @@ def render_markdown(rep: dict[str, Any]) -> str:
             f"| 首笔严格按规则 | {r['n']} | {_pct(r['win_rate'])} | "
             f"{_num(r['payoff_ratio'])} | {_pct(r['big_win_rate'])} | {_pct(r['big_loss_rate'])} |",
             "",
-            f"出场差 Δ 合计 {cf['total_delta_amount']} 元"
+            f"出场差 Δ 合计 {cf['total_delta_amount'] if cf['total_delta_amount'] is not None else '—'} 元"
             + (
                 "；分类："
                 + "；".join(f"{k} {v} 笔" for k, v in cf["categories"].items())

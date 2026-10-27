@@ -883,8 +883,9 @@ REPORTS: dict[str, dict[str, Any]] = {
     },
     "r50": {
         "title": "R50 ≥20% 波段逆向匹配 · 探索报告",
-        "note": "探索性：召回/精度 lift/时点/漏斗/兑现全为描述性读数；lead_robust = A 合格（n≥1000 ∧ lift>1.2）"
-        "且 B 同门槛复现，且 min(lift_A, lift_B) 过 16 对象 max 的簇级置换 q95。线索只供预注册，不是判决。",
+        "note": "探索性：召回/精度 lift/时点/漏斗/兑现全为描述性读数；lead_robust = A 合格（n≥1000 ∧ lift_low>1.2）"
+        "且 B 同门槛复现，且 min(lift_low_A, lift_low_B) 过 16 对象 max 的保簇随机局部低点零假设 q95（v0.458：判据量 lift_low"
+        " = 精度 ÷ 局部低点精确基线；lift 对分层随机 bar 基线，只作描述）。线索只供预注册，不是判决。",
         "sections": [
             {
                 "type": "kv",
@@ -905,9 +906,9 @@ REPORTS: dict[str, dict[str, Any]] = {
                 "row_title": "对象",
                 "cols": [
                     ("status", "状态"),
-                    ("stat", "min(liftA,liftB)", "num"),
-                    ("lift_a", "lift A", "num"),
-                    ("lift_b", "lift B", "num"),
+                    ("stat", "min(lift_low A,B)", "num"),
+                    ("lift_a", "lift_low A", "num"),
+                    ("lift_b", "lift_low B", "num"),
                 ],
             },
             {
@@ -919,7 +920,9 @@ REPORTS: dict[str, dict[str, Any]] = {
                     ("windows.mining_a.n_signals", "信号数", "int"),
                     ("windows.mining_a.precision", "精度", "pct"),
                     ("windows.mining_a.baseline", "随机基线", "pct"),
-                    ("windows.mining_a.lift", "lift", "num"),
+                    ("windows.mining_a.lift", "lift（描述）", "num"),
+                    ("windows.mining_a.baseline_low", "低点基线", "pct"),
+                    ("windows.mining_a.lift_low", "lift_low（判据）", "num"),
                     ("windows.mining_a.recall", "召回", "pct"),
                     ("windows.mining_a.recall_wide", "宽窗召回", "pct"),
                 ],
@@ -933,7 +936,9 @@ REPORTS: dict[str, dict[str, Any]] = {
                     ("windows.mining_b.n_signals", "信号数", "int"),
                     ("windows.mining_b.precision", "精度", "pct"),
                     ("windows.mining_b.baseline", "随机基线", "pct"),
-                    ("windows.mining_b.lift", "lift", "num"),
+                    ("windows.mining_b.lift", "lift（描述）", "num"),
+                    ("windows.mining_b.baseline_low", "低点基线", "pct"),
+                    ("windows.mining_b.lift_low", "lift_low（判据）", "num"),
                     ("windows.mining_b.recall", "召回", "pct"),
                     ("windows.mining_b.recall_wide", "宽窗召回", "pct"),
                 ],

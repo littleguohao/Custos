@@ -446,6 +446,8 @@ SPECS: dict[str, tuple[str, list[str]]] = {
             "objects.*.windows.*.precision",
             "objects.*.windows.*.baseline",
             "objects.*.windows.*.lift",
+            "objects.*.windows.*.baseline_low",
+            "objects.*.windows.*.lift_low",
             "objects.*.windows.*.recall",
             "objects.*.windows.*.lead_quantiles?",
             "objects.*.windows.*.recall_wide",
