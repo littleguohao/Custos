@@ -569,6 +569,7 @@ def test_matching_math_exact():
         "sig_rows": {o: (rows if o == "b1_l1" else []) for o in sr.OBJECTS},
         "rows_of": {o: ({"000001": rows} if o == "b1_l1" else {}) for o in sr.OBJECTS},
         "year_bars": {},
+        "year_lowbars": {},
         "mcap_rep": {},
         "q_edges": {},
         "strata_codes": {},

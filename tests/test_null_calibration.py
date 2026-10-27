@@ -997,8 +997,8 @@ class TestSwingRecallCalibration:
 
 
 class TestSentinelSwingIidPermutation:
-    """回归哨兵（照 R48 逐笔哨兵模式）：monkeypatch 把 ``sr.cluster_perm`` 换回逐笔
-    置换（拆散簇）⇒ 成簇零假设校准**必须失败**（事件位置的「∈起涨窗口」标签成簇
+    """回归哨兵（照 R48 逐笔哨兵模式）：monkeypatch 把 ``sr.cluster_lengths`` 拆成全 1
+    （随机局部低点逐笔抽、不保簇形状，v0.458）⇒ 成簇零假设校准**必须失败**（事件位置的「∈起涨窗口」标签成簇
     相关；拆散后逐对象精度 concentrate、q95 系统性偏低——实测 6/20=30% 假过线，
     超过 10% 帽）。"""
 
@@ -1007,12 +1007,8 @@ class TestSentinelSwingIidPermutation:
 
         from custos.research import swing_recall_study as sr
 
-        def _iid_perm(items, rng):
-            idx = list(range(len(items)))
-            rng.shuffle(idx)
-            return np.array(idx)
-
-        monkeypatch.setattr(sr, "cluster_perm", _iid_perm)
+        # v0.458：零假设改为「保簇形状的随机局部低点入场」——哨兵把簇形状拆成全 1（逐笔抽样）
+        monkeypatch.setattr(sr, "cluster_lengths", lambda rows: [(1, r) for r in rows])
         with pytest.raises(AssertionError, match="零假设校准失败"):
             hn.assert_noise_calibration(
                 "swing_recall[逐笔置换哨兵]", _r50_run(False, **R50_KW), seeds=R50_SEEDS

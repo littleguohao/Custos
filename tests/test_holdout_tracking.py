@@ -380,3 +380,54 @@ def test_monthly_main_appends_section(tmp_path, monkeypatch):
         tmp_path / "artifacts" / "reports" / "monthly" / "2026-07_monthly_review.md"
     ).read_text(encoding="utf-8")
     assert "HOLDOUT_MARKER" in md
+
+
+def test_actual_trades_b1_split_from_trade_cf_flags(tmp_path):
+    """v0.458：B1 标记取自 trade_cf 产物 episodes.b1_entry（键 = code + 首笔买入日）；
+    只有 B1 组进基线对照表，非 B1 / 无法判定另列。"""
+    import json
+
+    _write_ledger(
+        tmp_path,
+        [
+            _row("2026-09-03", "600001", "买入", 100, 10.0, 0),
+            _row("2026-09-10", "600001", "卖出", 100, 12.5, 0),  # B1，+25%
+            _row("2026-09-15", "600002", "买入", 100, 10.0, 0),
+            _row("2026-10-08", "600002", "卖出", 100, 8.8, 0),  # 非 B1，−12%
+            _row("2026-10-09", "600003", "买入", 100, 10.0, 0),
+            _row("2026-10-20", "600003", "卖出", 100, 10.5, 0),  # 无标记
+        ],
+    )
+    d = tmp_path / "artifacts" / "logs" / "trade_counterfactual"
+    d.mkdir(parents=True)
+    (d / "2026-09_monthly_review.json").write_text(
+        json.dumps(
+            {
+                "episodes": [
+                    {
+                        "code": "600001",
+                        "entry_date": "2026-09-03",
+                        "b1_entry": True,
+                        "instrument": "stock",
+                    },
+                    {
+                        "code": "600002",
+                        "entry_date": "2026-09-15",
+                        "b1_entry": False,
+                        "instrument": "stock",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    rep = ht.build_report(
+        tmp_path, "2026-10", pick_runner=_none_runner, shadow_runner=_none_runner
+    )
+    sp = rep["actual_trades"]["b1_split"]["since_holdout"]
+    assert sp["b1"]["n"] == 1 and sp["b1"]["big_win_rate"] == 1.0
+    assert sp["non_b1"]["n"] == 1 and sp["non_b1"]["big_loss_rate"] == 1.0
+    assert sp["n_unknown"] == 1
+    md = ht.render_markdown(rep) if hasattr(ht, "render_markdown") else ""
+    if md:
+        assert "本月 B1" in md and "非 B1 入场笔数" in md

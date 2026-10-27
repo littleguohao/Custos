@@ -191,39 +191,98 @@ def _month_window(month: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def _closing_rets(
+def _closing_rows(
     base: Path, start: str, end: str
-) -> tuple[list[float], Optional[str]]:
-    """[start, end] 内 full 配平平仓单的收益列（pnl_pct % → 小数）；台账缺 → ([], 原因)。"""
+) -> tuple[list[tuple[float, str, str]], Optional[str]]:
+    """[start, end] 内 full 配平平仓单 (收益小数, code, 首笔买入日)；台账缺 → ([], 原因)。"""
     ledger_path = base / "data" / "trades" / "master_trade_ledger.csv"
     trades = parse_ledger(ledger_path)
     if trades is None:
         return [], f"成交台账缺失：{ledger_path}"
-    rets = [
-        c["pnl_pct"] / 100.0
+    rows = [
+        (
+            c["pnl_pct"] / 100.0,
+            str(c.get("code") or "").zfill(6),
+            str(c.get("first_buy_date") or "")[:10],
+        )
         for c in fifo_pair(trades)
         if c["match_status"] == "full"
         and c["pnl_pct"] is not None
         and start <= c["sell_date"] <= end
     ]
-    return rets, None
+    return rows, None
+
+
+def _closing_rets(
+    base: Path, start: str, end: str
+) -> tuple[list[float], Optional[str]]:
+    """[start, end] 内 full 配平平仓单的收益列（pnl_pct % → 小数）；台账缺 → ([], 原因)。"""
+    rows, err = _closing_rows(base, start, end)
+    return [r for r, _c, _d in rows], err
+
+
+def _b1_flags(base: Path) -> dict[tuple[str, str], Optional[bool]]:
+    """逐笔 B1 合规入场标记（v0.458）：读 trade_counterfactual 历次产物的 episodes.b1_entry
+    （0AMV 做多 ∧ J<13，研究侧判定；本模块不 import 研究——只读其落盘 JSON）。
+    键 = (code, 首笔买入日)；同键多文件以修改时间最新者为准。"""
+    out: dict[tuple[str, str], Optional[bool]] = {}
+    d = base / "artifacts" / "logs" / "trade_counterfactual"
+    if not d.is_dir():
+        return out
+    for p in sorted(d.glob("*.json"), key=lambda q: q.stat().st_mtime):
+        try:
+            rep = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for e in rep.get("episodes") or []:
+            if e.get("instrument", "stock") != "stock":
+                continue
+            k = (str(e.get("code") or "").zfill(6), str(e.get("entry_date") or "")[:10])
+            b = e.get("b1_entry")
+            out[k] = b if isinstance(b, bool) else None
+    return out
+
+
+def _b1_split(
+    rows: list[tuple[float, str, str]], flags: dict[tuple[str, str], Optional[bool]]
+) -> dict[str, Any]:
+    g: dict[str, list[float]] = {"b1": [], "non_b1": [], "unknown": []}
+    for r, c, d in rows:
+        f = flags.get((c, d))
+        g["b1" if f is True else ("non_b1" if f is False else "unknown")].append(r)
+    return {
+        "b1": _dist_stats(g["b1"]),
+        "non_b1": _dist_stats(g["non_b1"]),
+        "n_unknown": len(g["unknown"]),
+    }
 
 
 def _actual_trades_block(
     base: Path, rng: dict, unavailable: list[str]
 ) -> dict[str, Any]:
-    month_rets, err = _closing_rets(base, rng["start"], rng["end"])
+    month_rows, err = _closing_rows(base, rng["start"], rng["end"])
     if err:
         unavailable.append(err)
         return {"available": False, "reason": err}
-    cum_rets, _ = _closing_rets(base, HOLDOUT_START, rng["end"])
+    cum_rows, _ = _closing_rows(base, HOLDOUT_START, rng["end"])
+    flags = _b1_flags(base)
     return {
         "available": True,
-        "basis": "主台账 FIFO 配平（只信 full 单），pnl_pct 毛利口径（费用不进分子分母）",
-        "month": {"window": [rng["start"], rng["end"]], **_dist_stats(month_rets)},
+        "basis": "主台账 FIFO 配平（只信 full 单），pnl_pct 毛利口径（费用不进分子分母）；"
+        "R44 基线是扣 25bps 的净口径",
+        "month": {
+            "window": [rng["start"], rng["end"]],
+            **_dist_stats([r for r, _c, _d in month_rows]),
+        },
         "since_holdout": {
             "window": [HOLDOUT_START, rng["end"]],
-            **_dist_stats(cum_rets),
+            **_dist_stats([r for r, _c, _d in cum_rows]),
+        },
+        # v0.458：R44 基线是 B1 交易集——只有 B1 合规入场组可与之对照（标记来自 trade_cf 产物）
+        "b1_split": {
+            "flag_source": "artifacts/logs/trade_counterfactual/*.json · episodes.b1_entry",
+            "month": _b1_split(month_rows, flags),
+            "since_holdout": _b1_split(cum_rows, flags),
         },
     }
 
@@ -586,11 +645,17 @@ def render_markdown(rep: dict[str, Any]) -> str:
     ]
     at = rep["actual_trades"]
     if at["available"]:
-        m, c = at["month"], at["since_holdout"]
+        sp = at.get("b1_split") or {}
+        m = (sp.get("month") or {}).get("b1") or at["month"]
+        c = (sp.get("since_holdout") or {}).get("b1") or at["since_holdout"]
+        mn = (sp.get("month") or {}).get("non_b1") or {}
+        cn = (sp.get("since_holdout") or {}).get("non_b1") or {}
         L += [
             f"> 口径：{at['basis']}",
+            "> R44 基线是 B1 交易集（0AMV 做多 + J<13）——下表只放 **B1 合规入场** 的平仓；"
+            "非 B1 与全部平仓另列，不与基线对照。",
             "",
-            "| 指标 | 本月 live | holdout 累计 live | R44 回测基线 |",
+            "| 指标 | 本月 B1 | holdout 累计 B1 | R44 回测基线 |",
             "|---|---:|---:|---|",
             f"| 笔数 | {m['n']} | {c['n']} | {bl['n']:,} |",
             _cmp_row("胜率", m, c, "win_rate", _pct, _pct(bl["win_rate"])),
@@ -600,6 +665,16 @@ def render_markdown(rep: dict[str, Any]) -> str:
             ),
             _cmp_row("大单率", m, c, "big_win_rate", _pct, bl["big_win_note"]),
             _cmp_row("大亏率", m, c, "big_loss_rate", _pct, bl["big_loss_note"]),
+            "",
+            "| 其余平仓（不对照基线） | 本月 | holdout 累计 |",
+            "|---|---:|---:|",
+            f"| 非 B1 入场笔数 / 胜率 | {mn.get('n', 0)} / {_pct(mn.get('win_rate'))} | "
+            f"{cn.get('n', 0)} / {_pct(cn.get('win_rate'))} |",
+            f"| 非 B1 平均每笔收益 | {_pct(mn.get('avg_ret'))} | {_pct(cn.get('avg_ret'))} |",
+            f"| 无法判定 B1（缺 trade_cf 标记） | {(sp.get('month') or {}).get('n_unknown', 0)} | "
+            f"{(sp.get('since_holdout') or {}).get('n_unknown', 0)} |",
+            f"| 全部平仓笔数 / 胜率 | {at['month']['n']} / {_pct(at['month']['win_rate'])} | "
+            f"{at['since_holdout']['n']} / {_pct(at['since_holdout']['win_rate'])} |",
             "",
         ]
     else:

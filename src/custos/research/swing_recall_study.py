@@ -18,7 +18,7 @@
   样本量 = 该对象信号数。
 - 读数：召回 / 精度 / lift / 提前量分位 / 涨幅分带召回 / 漏斗 / 兑现（LIVE_PARAMS 重放：
   已实现收益、捕获率 ret/amp、出场原因分布）/ 年·月分组。
-- 线索筛选：16 对象（B1 L1~L4 + QN 12 门）× 精度 lift；A 合格 n≥1000 ∧ lift>1.2；
+- 线索筛选（v0.458 修订）：16 对象（B1 L1~L4 + QN 12 门）× 对**局部低点**基线的精度 lift_low；A 合格 n≥1000 ∧ lift>1.2；
   B 同门槛复现；统计量 min(lift_A, lift_B)；簇级置换（同票相邻信号成簇，
   R48 ``cluster_perm`` 同款）N=200 每臂取 16 对象 max；复现且 > ``kit.q95`` ⇒
   ``lead_robust``。
@@ -58,6 +58,10 @@ AMP_BANDS = ("20_30", "30_50", "50_100", "100p")  # 涨幅分带 20~30/30~50/50~
 MIN_N = 1000  # A 合格信号数门槛（写死；--min-n 仅测试注入通道）
 LIFT_MIN = 1.2
 N_RANDOM = 200
+#: 跑数前修订（v0.458，owner 2026-10-27）：局部低点对照——收盘为近 LOCAL_LOW_N 根（含当日）最低的 bar。
+#: 波段起点 T0 按定义是局部低点，超卖类信号天然贴近低点 ⇒ 对「任意 bar」的 lift 近乎白送；
+#: 线索筛选 / 置换统计量改用对局部低点基线的 ``lift_low``，原 ``lift`` 只作描述。
+LOCAL_LOW_N = 10
 C4_MIN_POOL = 50
 #: B1 漏斗 L3 的「1800 观察线」= live 技术分层强档阈（钉测对齐
 #: ``score_candidates.TECH_STRONG_FALLBACK``，勿单独改）
@@ -136,6 +140,15 @@ def zigzag(
                         lo = j
     if riding:
         out.append({"t0": t0, "t1": n - 1, "truncated": True})
+    return out
+
+
+def local_low_mask(closes: list[float], n: int = LOCAL_LOW_N) -> list[bool]:
+    """as-of 局部低点：closes[i] ≤ min(closes[max(0,i-n+1) .. i])（只看过去，纯函数）。"""
+    out: list[bool] = []
+    for i, c in enumerate(closes):
+        lo = min(closes[max(0, i - n + 1) : i + 1])
+        out.append(bool(c <= lo))
     return out
 
 
@@ -412,6 +425,7 @@ def _build_window(
             "dropped": dr,
             "qn": qn_scan_fn(code, df, start, end),
             "mcap": mc,
+            "low": local_low_mask(closes),
         }
 
     codes = sorted(bars)
@@ -427,6 +441,9 @@ def _build_window(
     dropped: dict[str, int] = {}
     mcap_rep: dict[tuple[str, str], float] = {}  # (code, year) → 年内段内末根 mcap
     year_bars: dict[tuple[str, str], list[int]] = {}  # (code, year) → 段内 bar 序号
+    year_lowbars: dict[
+        tuple[str, str], list[int]
+    ] = {}  # 其中局部低点 bar（v0.458 对照）
     rows_of: dict[str, dict[str, list[dict[str, Any]]]] = {o: {} for o in OBJECTS}
     for o in B1_OBJECTS:
         for r in b1_layers[o]:
@@ -452,6 +469,8 @@ def _build_window(
                 continue  # 段前预热 bar 不进对照母体
             y = d[:4]
             year_bars.setdefault((code, y), []).append(i)
+            if r0["low"][i]:
+                year_lowbars.setdefault((code, y), []).append(i)
             mcap_rep[(code, y)] = mc.get(d, float("nan"))  # 年内末根覆盖前值
 
     # 排序（同码按 bar）——簇划分与二分匹配的前提；摊平 rows 供簇级置换
@@ -490,6 +509,7 @@ def _build_window(
         "sig_rows": sig_rows,
         "rows_of": rows_of,
         "year_bars": year_bars,
+        "year_lowbars": year_lowbars,
         "mcap_rep": mcap_rep,
         "q_edges": q_edges,
         "strata_codes": strata_codes,
@@ -506,7 +526,12 @@ def _stratum_of(win: dict[str, Any], code: str, year: str) -> tuple[str, Any]:
 
 
 def _baseline(
-    win: dict[str, Any], obj: str, n_signals: int, seed: int
+    win: dict[str, Any],
+    obj: str,
+    n_signals: int,
+    seed: int,
+    *,
+    pool_key: str = "year_bars",
 ) -> tuple[Optional[float], dict[str, dict[str, dict[str, int]]]]:
     """对照集（R50 写死）：同段同宇宙按 年×市值五分位 分层随机 bar，样本量 = 信号数。
 
@@ -515,7 +540,9 @@ def _baseline(
     """
     if n_signals <= 0:
         return None, {"by_year": {}, "by_month": {}}
-    rng = random.Random(f"{seed}|{win['name']}|{obj}|baseline")
+    tag = "baseline" if pool_key == "year_bars" else f"baseline|{pool_key}"
+    rng = random.Random(f"{seed}|{win['name']}|{obj}|{tag}")
+    bars_of = win[pool_key]
     counts: dict[tuple[str, Any], int] = {}
     for r in win["sig_rows"][obj]:
         k = _stratum_of(win, r["code"], r["date"][:4])
@@ -530,12 +557,12 @@ def _baseline(
     per_month: dict[str, dict[str, int]] = {}
     for (y, q), cnt in sorted(counts.items(), key=lambda kv: (kv[0][0], str(kv[0][1]))):
         pool = win["strata_codes"].get((y, q)) or win["codes_by_year"].get(y) or []
-        pool = [c for c in pool if win["year_bars"].get((c, y))]
+        pool = [c for c in pool if bars_of.get((c, y))]
         if not pool:
             continue
         for _ in range(cnt):
             c = rng.choice(pool)
-            i = rng.choice(win["year_bars"][(c, y)])
+            i = rng.choice(bars_of[(c, y)])
             total += 1
             h = bool(_signal_hits(wins_by_code.get(c, []), [i])[0])
             hit += int(h)
@@ -549,6 +576,38 @@ def _baseline(
         "by_year": per_year,
         "by_month": per_month,
     }
+
+
+def _baseline_low_exact(win: dict[str, Any], obj: str) -> Optional[float]:
+    """局部低点对照（v0.458）：按该对象信号的 (年, 市值五分位) 组成加权，各层取**全部**局部低点 bar
+    落在起涨窗口内的精确比例（不抽样——抽样基线在小样本对象上噪声大，max-of-16 置换会被噪声顶高）。"""
+    counts: dict[tuple[str, Any], int] = {}
+    for r in win["sig_rows"][obj]:
+        k = _stratum_of(win, r["code"], r["date"][:4])
+        counts[k] = counts.get(k, 0) + 1
+    if not counts:
+        return None
+    cache = win.setdefault("_low_rate_cache", {})
+    num = den = 0.0
+    for (y, q), cnt in counts.items():
+        if (y, q) not in cache:
+            pool = win["strata_codes"].get((y, q)) or win["codes_by_year"].get(y) or []
+            hit = tot = 0
+            for c in pool:
+                idx = win["year_lowbars"].get((c, y)) or []
+                if not idx:
+                    continue
+                ws = _code_windows(win["swings_of"].get(c, []), WIN_LO, WIN_HI)
+                hs = _signal_hits(ws, idx)
+                hit += sum(bool(h) for h in hs)
+                tot += len(idx)
+            cache[(y, q)] = (hit / tot) if tot else None
+        rate = cache[(y, q)]
+        if rate is None:
+            continue
+        num += cnt * rate
+        den += cnt
+    return (num / den) if den else None
 
 
 def window_readings(
@@ -629,6 +688,7 @@ def window_readings(
         n_sig = len(flat)
         n_hit = sum(bool(r.get("_hit")) for r in flat)
         base, base_grp = _baseline(win, obj, n_sig, seed)
+        base_low = _baseline_low_exact(win, obj)
         prec = (n_hit / n_sig) if n_sig else None
         readings[obj] = {
             "n_signals": n_sig,
@@ -636,6 +696,9 @@ def window_readings(
             "precision": prec,
             "baseline": base,
             "lift": (prec / base if prec is not None and base else None),
+            "baseline_low": base_low,
+            # 判据量（v0.458）：对局部低点基线的精度 lift
+            "lift_low": (prec / base_low if prec is not None and base_low else None),
             "recall": (matched_swings / n_swings if n_swings else None),
             "n_swings_matched": matched_swings,
             "lead_quantiles": _quantiles(offsets),
@@ -656,7 +719,7 @@ def window_readings(
         "rows": events,
         "hit": hit,
         "obj_idx": obj_idx,
-        "baseline": {o: readings[o]["baseline"] for o in OBJECTS},
+        "baseline": {o: readings[o]["baseline_low"] for o in OBJECTS},  # 置换用判据基线
         "n_signals": {o: readings[o]["n_signals"] for o in OBJECTS},
     }
     return readings, aux
@@ -824,12 +887,96 @@ def _realization(
 # ---------------------------------------------------------------------------
 
 
+def cluster_lengths(rows: list[dict[str, Any]]) -> list[tuple[int, dict[str, Any]]]:
+    """对象信号的簇形状（``kit.cluster_ids`` 单源）：[(簇长, 簇首行)]。回归哨兵 monkeypatch 成全 1。"""
+    from custos.research import criteria_kit as kit  # noqa: PLC0415
+
+    if not rows:
+        return []
+    cids = kit.cluster_ids(rows)
+    out: list[tuple[int, dict[str, Any]]] = []
+    prev = None
+    for cid, r in zip(cids, rows):
+        if cid != prev:
+            out.append((1, r))
+            prev = cid
+        else:
+            out[-1] = (out[-1][0] + 1, out[-1][1])
+    return out
+
+
+def low_null_material(win: dict[str, Any]) -> dict[str, Any]:
+    """零假设原料（v0.458）：全部局部低点 bar 按 (code, bar) 排成全局数组 + 命中前缀和 + 每码末端，
+    以及各分层的全局下标池。臂 = 每对象按其簇形状，逐簇抽同层随机局部低点锚点、整簇取锚点命中。"""
+    codes = sorted({c for (c, _y) in win["year_lowbars"]})
+    hit_list: list[int] = []
+    end_list: list[int] = []
+    pos_of: dict[tuple[str, int], int] = {}
+    strata: dict[tuple[str, Any], list[int]] = {}
+    for c in codes:
+        idx = sorted(
+            i for (cc, _y), ii in win["year_lowbars"].items() if cc == c for i in ii
+        )
+        if not idx:
+            continue
+        hs = _signal_hits(
+            _code_windows(win["swings_of"].get(c, []), WIN_LO, WIN_HI), idx
+        )
+        g0 = len(hit_list)
+        hit_list.extend(int(bool(h)) for h in hs)
+        g1 = len(hit_list)
+        end_list.extend([g1] * (g1 - g0))
+        for k, i in enumerate(idx):
+            pos_of[(c, i)] = g0 + k
+            y = win["dates_of"][c][i][:4]
+            strata.setdefault(_stratum_of(win, c, y), []).append(g0 + k)
+    cum = np.concatenate([[0], np.cumsum(np.asarray(hit_list, dtype=np.int64))])
+    return {
+        "cum": cum,
+        "end": np.asarray(end_list, dtype=np.int64),
+        "strata": {k: np.asarray(v, dtype=np.int64) for k, v in strata.items()},
+        "all": np.arange(len(hit_list), dtype=np.int64),
+    }
+
+
+def _null_lifts(
+    win: dict[str, Any],
+    mat: dict[str, Any],
+    shapes: dict[str, Any],
+    base_low: dict[str, Any],
+    rng: Any,
+) -> dict[str, Optional[float]]:
+    """单臂：每对象按簇形状逐簇抽同层随机局部低点作锚点，整簇取锚点命中；精度 ÷ 局部低点基线。"""
+    out: dict[str, Optional[float]] = {}
+    for o in OBJECTS:
+        sh = shapes[o]
+        b = base_low.get(o)
+        if not sh or not b or not len(mat["all"]):
+            out[o] = None
+            continue
+        hit = cnt = 0
+        for key, lens in sh.items():
+            pool = mat["strata"].get(key)
+            if pool is None or not len(pool):
+                pool = mat["all"]
+            g = pool[rng.integers(0, len(pool), size=len(lens))]
+            h = (
+                mat["cum"][g + 1] - mat["cum"][g]
+            )  # 锚点（随机局部低点）是否落在起涨窗口
+            # 整簇取锚点命中：簇内命中完全相关——真实信号簇（相邻 bar）与 16 根宽的起涨窗口
+            # 高度同进同出；取完全相关是保守端（零假设方差 ≥ 真实）
+            hit += int((h * lens).sum())
+            cnt += int(lens.sum())
+        out[o] = (hit / cnt / b) if cnt else None
+    return out
+
+
 def _qualifies(rd: dict[str, Any], min_n: int) -> bool:
     """A 合格 / B 复现同门槛（R50 写死）：信号数 ≥ min_n ∧ 精度 lift > LIFT_MIN。"""
     return bool(
         rd.get("n_signals", 0) >= min_n
-        and rd.get("lift") is not None
-        and rd["lift"] > LIFT_MIN
+        and rd.get("lift_low") is not None
+        and rd["lift_low"] > LIFT_MIN
     )
 
 
@@ -928,16 +1075,37 @@ def run_study(
             "windows": {wa: ra, wb: rb},
             "qualify_a": qa,
             "replicated": bool(qa and qb),
-            "lift_a": ra.get("lift"),
-            "lift_b": rb.get("lift"),
-            "stat": (min(ra["lift"], rb["lift"]) if (qa and qb) else None),
+            "lift_a": ra.get("lift_low"),
+            "lift_b": rb.get("lift_low"),
+            "lift_any_a": ra.get("lift"),  # 描述：对任意 bar
+            "lift_any_b": rb.get("lift"),
+            "stat": (min(ra["lift_low"], rb["lift_low"]) if (qa and qb) else None),
         }
 
+    # 零假设（v0.458 跑数前修订）：信号 = 同层随机局部低点、保持各对象簇形状 ⇒ 臂统计量与候选同口径
+    # （精度 ÷ 局部低点基线）；原「事件位置换签」实际比的是 16 对象信号并集的平均精度，语义不对。
+    mats = {w: low_null_material(wins[w]) for w in (wa, wb)}
+    shapes: dict[str, dict[str, dict[Any, np.ndarray]]] = {}
+    for w in (wa, wb):
+        shapes[w] = {}
+        for o in OBJECTS:
+            by: dict[Any, list[int]] = {}
+            for ln, r0 in cluster_lengths(wins[w]["sig_rows"][o]):
+                by.setdefault(
+                    _stratum_of(wins[w], r0["code"], r0["date"][:4]), []
+                ).append(ln)
+            shapes[w][o] = {k: np.asarray(v, dtype=np.int64) for k, v in by.items()}
+    base_low = {
+        w: {o: readings[w][o]["baseline_low"] for o in OBJECTS} for w in (wa, wb)
+    }
+
     def _arm(i: int) -> Optional[float]:
-        rng = random.Random(f"{args.seed}-r{i}")
+        rng = np.random.default_rng(
+            [int(args.seed), 50, i]
+        )  # 确定性（勿用 hash()：str 哈希随进程随机）
         lifts = {}
         for w in (wa, wb):
-            lifts[w] = _perm_lifts(aux[w], cluster_perm(aux[w]["rows"], rng))
+            lifts[w] = _null_lifts(wins[w], mats[w], shapes[w], base_low[w], rng)
         best = 0.0
         for o in OBJECTS:
             la, lb = lifts[wa][o], lifts[wb][o]
@@ -1054,7 +1222,7 @@ def run_study(
         "provenance": pv.build(
             args,
             unit="R50",
-            criteria_version="v0.456",
+            criteria_version="v0.458",
             pre_reg_doc=RESEARCH_DIR / "R50_swing_winner_recall.md",
             data_last_date=max(
                 filter(None, (pv.last_date_of(per_code_of[w]) for w in wins)),
