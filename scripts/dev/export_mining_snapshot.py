@@ -152,13 +152,64 @@ def filter_day_file(src: Path, dst: Path) -> tuple[int, int]:
     return n_kept, n_dropped
 
 
-def filter_xdxr(src: Path, dst: Path) -> tuple[int, int]:
+def attach_gap_ratios(
+    events: list[dict], bars: Optional[tuple[list[str], list[float]]]
+) -> int:
+    """对「真实前一根 K 线落在快照断口」的事件写入 ``qfq_ratio``（v0.457，验收①回修）。
+
+    ``bars`` = 生产机真实未复权 (dates YYYY-MM-DD 升序, closes)，与 ``compute_qfq_factors``
+    同口径定位：idx = 首个 ≥ 事件日的 bar，前收 = closes[idx-1]；该前收 bar 不在快照保留集
+    ⇒ 快照侧会取错前收 ⇒ 预先算好比例（``event_ratio`` 同函数；None 原样写 null = 生产机也跳过）。
+    事件落在样本外（idx ≤ 0 或越界）不处理。返回写入条数。"""
+    import bisect  # noqa: PLC0415
+
+    from custos.datasource.local_tdx.adjust_factors import event_ratio  # noqa: PLC0415
+
+    if not bars or not bars[0]:
+        return 0
+    dates, closes = bars
+    n = 0
+    for e in events:
+        # 与 compute_qfq_factors 完全同口径：原样 ev["date"] 与 str(date)[:10] 比较（不归一格式——
+        # 归一会让导出侧与复权侧定位到不同 bar）
+        idx = bisect.bisect_left(dates, e.get("date"))
+        if idx <= 0 or idx >= len(dates):
+            continue
+        if _keep_kline_d8(_d8(dates[idx - 1])):
+            continue  # 前收 bar 在快照里，快照侧算得与生产机一致
+        e["qfq_ratio"] = event_ratio(float(closes[idx - 1]), e)
+        n += 1
+    return n
+
+
+def _default_bars_provider(code: str) -> Optional[tuple[list[str], list[float]]]:
+    """生产机真实未复权日线（与研究加载链同一读取函数 ⇒ 前收浮点逐位一致）。"""
+    from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
+
+    try:
+        df = local_tdx_data.read_vipdoc_daily(code)
+    except Exception:  # noqa: BLE001 — 读不到 ⇒ 不加字段（与生产机该票无 K 线同况）
+        return None
+    if df is None or df.empty:
+        return None
+    return (
+        [str(x)[:10] for x in df["date"].tolist()],
+        df["close"].astype(float).tolist(),
+    )
+
+
+def filter_xdxr(
+    src: Path, dst: Path, bars: Optional[tuple[list[str], list[float]]] = None
+) -> tuple[int, int]:
     """xdxr 权息 JSON：事件日 ≤ 2026-09-04 全保留（含判定段）；date 兼容
     "YYYY-MM-DD"/"YYYYMMDD"（str 化取数字比对）。过滤后重写 n，其余字段原样。
+    ``bars`` 给出时对断口期事件写 ``qfq_ratio``（见 attach_gap_ratios）。
     返回 (保留事件数, 丢弃事件数)。"""
     obj = json.loads(src.read_text(encoding="utf-8-sig"))
     events = obj.get("events") or []
     kept = [e for e in events if _le_end(_d8(e.get("date")))]
+    if bars is not None:
+        attach_gap_ratios(kept, bars)
     dropped = len(events) - len(kept)
     obj["events"] = kept
     shares = obj.get("shares")
@@ -311,13 +362,20 @@ def _export_tdx_cfg(tdx_root: Path, out: Path, files: list[dict], counts: dict) 
     print(f"tdx cfg: {n} 个（原样字节拷贝）")
 
 
-def _export_xdxr(data_root: Path, out: Path, files: list[dict], counts: dict) -> None:
+def _export_xdxr(
+    data_root: Path,
+    out: Path,
+    files: list[dict],
+    counts: dict,
+    bars_provider: Optional[Callable[[str], Any]] = None,
+) -> None:
     src_dir = data_root / "market" / "xdxr"
     n_files = n_kept = n_dropped = 0
+    bp = bars_provider or _default_bars_provider
     if src_dir.is_dir():
         for src in sorted(src_dir.glob("*.json")):
             dst = out / "data" / "market" / "xdxr" / src.name
-            k, d = filter_xdxr(src, dst)
+            k, d = filter_xdxr(src, dst, bars=bp(src.stem[:6]))
             _register(files, out, dst, k)
             n_files += 1
             n_kept += k
@@ -407,13 +465,14 @@ def _export_all(
     tdx_root: Path,
     data_root: Path,
     series_provider: Callable[[], Any],
+    bars_provider: Optional[Callable[[str], Any]] = None,
 ) -> Optional[tuple[list[dict], dict]]:
     """全部分节导出；0AMV 过滤后为空 ⇒ None（主调据此非零退出、不写 MANIFEST）。"""
     files: list[dict] = []
     counts: dict[str, int] = {}
     _export_vipdoc(tdx_root, out, files, counts)
     _export_tdx_cfg(tdx_root, out, files, counts)
-    _export_xdxr(data_root, out, files, counts)
+    _export_xdxr(data_root, out, files, counts, bars_provider)
     _export_sector(data_root, out, files, counts)
     _export_fundamentals(data_root, out, files, counts)
     n_amv = write_amv_series(out, series_provider())
@@ -492,7 +551,10 @@ def verify(root: Path) -> int:
 
 
 def main(
-    argv: Optional[list[str]] = None, *, series_provider: Optional[Callable] = None
+    argv: Optional[list[str]] = None,
+    *,
+    series_provider: Optional[Callable] = None,
+    bars_provider: Optional[Callable] = None,
 ) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument(
@@ -520,7 +582,7 @@ def main(
     provider = series_provider or _default_series_provider
     print(f"导出挖掘段快照 → {out}\n  tdx_root={tdx_root}\n  data_root={data_root}")
     try:
-        result = _export_all(out, tdx_root, data_root, provider)
+        result = _export_all(out, tdx_root, data_root, provider, bars_provider)
     except Exception as exc:  # noqa: BLE001 — 运维脚本：失败留现场（无 MANIFEST）
         print(f"❌ 导出失败: {exc}")
         return 2

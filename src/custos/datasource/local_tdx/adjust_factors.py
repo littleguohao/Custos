@@ -536,8 +536,16 @@ def compute_qfq_factors(
             continue  # 落在样本外
         if stats is not None:
             stats["events_in_sample"] += 1
-        prev_close = c[idx - 1]
-        r = event_ratio(float(prev_close), ev)
+        if "qfq_ratio" in ev:
+            # 挖掘段快照（TODO #116，v0.457）：事件的真实前一根 K 线落在快照断口
+            # （2017~2020-09）里，导出侧已在生产机用真实前收算好比例——直接用，
+            # 否则会拿 2016-12-30 的收盘当前收，挖掘 A 全段价格微偏。生产机自身的
+            # 权息缓存没有此字段 ⇒ 走原路径，行为不变。None = 生产机该事件也被跳过。
+            v = ev["qfq_ratio"]
+            r = None if v is None else float(v)
+        else:
+            prev_close = c[idx - 1]
+            r = event_ratio(float(prev_close), ev)
         if r is None:
             if stats is not None:
                 stats["events_dropped"] += 1

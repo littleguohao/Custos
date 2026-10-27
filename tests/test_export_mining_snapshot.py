@@ -300,3 +300,113 @@ class TestEndToEnd:
         rc = _run(prod, out, series={"2026-10-09": "long"})
         assert rc != 0
         assert not (out / "MANIFEST.json").exists()
+
+
+class TestGapRatios:
+    """v0.457 验收①回修：前收 bar 落断口的除权事件，导出侧预算 qfq_ratio；
+    快照侧复权因子与生产机全量数据逐位一致。"""
+
+    @staticmethod
+    def _bars():
+        import pandas as pd
+
+        d = pd.bdate_range("2015-01-02", "2022-06-30").strftime("%Y-%m-%d").tolist()
+        c = [10.0 + 0.01 * (i % 97) + 0.003 * i for i in range(len(d))]
+        return d, c
+
+    def test_snapshot_factors_match_full(self):
+        import numpy as np
+
+        from custos.datasource.local_tdx import adjust_factors as af
+
+        dates, closes = self._bars()
+        events = [
+            {
+                "date": "2016-06-15",
+                "category": 1,
+                "fenhong": 3.0,
+                "songzhuangu": 0.0,
+                "peigu": 0.0,
+                "peigujia": 0.0,
+            },
+            {
+                "date": "2018-07-10",
+                "category": 1,
+                "fenhong": 2.0,
+                "songzhuangu": 5.0,
+                "peigu": 0.0,
+                "peigujia": 0.0,
+            },
+            {
+                "date": "20190520",
+                "category": 1,
+                "fenhong": 1.5,
+                "songzhuangu": 0.0,
+                "peigu": 0.0,
+                "peigujia": 0.0,
+            },
+            {
+                "date": "2021-05-12",
+                "category": 1,
+                "fenhong": 4.0,
+                "songzhuangu": 0.0,
+                "peigu": 0.0,
+                "peigujia": 0.0,
+            },
+        ]
+        full = af.compute_qfq_factors(np.array(dates), np.array(closes), events)
+        keep = [i for i, d in enumerate(dates) if snap._keep_kline_d8(snap._d8(d))]
+        sd = [dates[i] for i in keep]
+        sc = [closes[i] for i in keep]
+        ev_snap = [dict(e) for e in events]
+        n = snap.attach_gap_ratios(ev_snap, (dates, closes))
+        assert n == 2  # 只有两个断口期事件被预算
+        assert "qfq_ratio" not in ev_snap[0] and "qfq_ratio" not in ev_snap[3]
+        got = af.compute_qfq_factors(np.array(sd), np.array(sc), ev_snap)
+        assert np.array_equal(got, full[keep]), "快照因子须与全量逐位一致"
+        # 回修前（无 qfq_ratio）确实不一致——即生产机验收①看到的微差
+        bad = af.compute_qfq_factors(
+            np.array(sd), np.array(sc), [dict(e) for e in events]
+        )
+        assert not np.array_equal(bad, full[keep])
+
+    def test_none_ratio_means_skip(self):
+        import numpy as np
+
+        from custos.datasource.local_tdx import adjust_factors as af
+
+        d = np.array(["2016-12-30", "2020-10-09", "2020-10-12"])
+        c = np.array([10.0, 11.0, 12.0])
+        f = af.compute_qfq_factors(d, c, [{"date": "2018-01-02", "qfq_ratio": None}])
+        assert np.array_equal(f, np.ones(3))
+
+    def test_filter_xdxr_writes_ratio_json_roundtrip(self, tmp_path):
+        import json
+
+        dates, closes = self._bars()
+        src = tmp_path / "600000.json"
+        src.write_text(
+            json.dumps(
+                {
+                    "market": 1,
+                    "events": [
+                        {
+                            "date": "2018-07-10",
+                            "category": 1,
+                            "fenhong": 2.0,
+                            "songzhuangu": 0.0,
+                            "peigu": 0.0,
+                            "peigujia": 0.0,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        dst = tmp_path / "out.json"
+        snap.filter_xdxr(src, dst, bars=(dates, closes))
+        r = json.loads(dst.read_text(encoding="utf-8"))["events"][0]["qfq_ratio"]
+        from custos.datasource.local_tdx import adjust_factors as af
+
+        i = dates.index("2018-07-10")
+        assert r == af.event_ratio(closes[i - 1], {"fenhong": 2.0})
