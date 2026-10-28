@@ -63,6 +63,8 @@ uv run python -m custos.research factor_exit_study --tag r39_v2_pre \
 #   --score-workers N：母体缺分 bar 先多进程一次算完（读数与原惰性串行逐位一致，不进冻结哈希）；
 #   stderr 现有 [prescore] 进度与逐臂 [arm] 行（每臂耗时 / 打分缓存量），可据此估剩余时间。
 #   N 取物理核数（本机 8 路实测 4~5×）；内存 ≈ 每路一份上证指数 + 当前任务 df，量级很小。
+#   v0.464：重放备忘落盘 artifacts/cache/replay_memo/（实测 ~130 B/条，全宇宙 × 1 个出场档约 2GB），R40/R45/R44/R47/R48/R49/R50/R42 共用，
+#   第二次起同档直接读盘；源码改动自动换目录（旧目录可手删）；CUSTOS_REPLAY_CACHE=off 关、=<路径> 改根。
 #   v0.463：不依赖池的判据已定结局（C1 不足 / 双窗 margin 非同正 / R45 未打过不交易）⇒ 跳过随机臂，stderr 打 [early-stop]；
 #   结局逐位不变，--no-early-stop 强制跑满。
 #   v0.461：随机臂逐笔重放备忘 --replay-memo N（默认 600 万条≈2.2GB，0=关）——同一 (票, bar, 出场档) 只重放一次，读数逐位不变；

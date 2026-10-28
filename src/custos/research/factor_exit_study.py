@@ -48,8 +48,10 @@ from __future__ import annotations
 
 import argparse
 import bisect
+import hashlib
 import itertools
 import json
+import os
 import random
 import sys
 from pathlib import Path
@@ -166,6 +168,154 @@ def buckets_of(signals: list[dict], cuts: list[float]) -> list[int]:
 # ---------------------------------------------------------------------------
 
 
+#: 落盘层环境变量：off/0/no/false = 关；路径 = 根目录；缺省 = artifacts/cache/replay_memo（v0.464）
+REPLAY_CACHE_ENV = "CUSTOS_REPLAY_CACHE"
+_REPLAY_CODE_VERSION: Optional[str] = None
+
+
+def replay_cache_root() -> Optional[Path]:
+    v = os.environ.get(REPLAY_CACHE_ENV, "")
+    if v.lower() in ("off", "0", "no", "false"):
+        return None
+    if v:
+        return Path(v)
+    from custos.core.paths import ARTIFACTS  # noqa: PLC0415
+
+    return ARTIFACTS / "cache" / "replay_memo"
+
+
+def replay_code_version() -> str:
+    """出场模拟相关源码 + 契约 JSON 的内容哈希（进程内算一次）：任一改动 ⇒ 新版本目录、旧缓存自动作废。"""
+    global _REPLAY_CODE_VERSION
+    if _REPLAY_CODE_VERSION is None:
+        from custos.core.paths import BASE, CONTRACTS_DIR  # noqa: PLC0415
+
+        src = Path(__file__).resolve().parents[1]  # src/custos
+        res = src / "research"
+        files = sorted(
+            [
+                *(src / "core").rglob("*.py"),
+                res / "backtest_factors.py",
+                res / "factor_exit_study.py",
+                res / "indicator_cache.py",
+                *CONTRACTS_DIR.glob("*.json"),
+            ]
+        )
+        h = hashlib.blake2b(digest_size=8)
+        for p in files:
+            h.update(
+                str(p.resolve().relative_to(BASE.resolve())).replace("\\", "/").encode()
+            )
+            h.update(p.read_bytes().replace(b"\r\n", b"\n"))
+        _REPLAY_CODE_VERSION = h.hexdigest()
+    return _REPLAY_CODE_VERSION
+
+
+class _ReplayDisk:
+    """重放备忘落盘层（v0.464）：``<root>/<代码版本>/<code前2>/<code>.jsonl``，**只追加**。
+
+    行格式：``["F", fid, [字段名…]]`` 声明字段组；``[表键, 内层键, fid, [值…]]`` 一笔交易；
+    ``[表键, 内层键, null]`` = 该信号不出交易。表键 = blake2b(code | df 内容摘要 | 出场参数 | regime 摘要 | 成本)，
+    数据或参数任一不同 ⇒ 不同表；源码改动 ⇒ 不同版本目录。坏行（崩溃截断）跳过；重复行后者为准。
+    值是 str / int / float / None（json 往返逐位不变，钉测核过）。
+    """
+
+    FLUSH_EVERY = 200_000
+
+    def __init__(self, root: Path) -> None:
+        self.root = root / replay_code_version()
+        self.pending: dict[str, list[str]] = {}
+        self.n_pending = 0
+        self.known_fids: dict[str, set[str]] = {}
+        self.loaded = 0
+        self.written = 0
+
+    def _path(self, code: str) -> Path:
+        c = str(code)[:6]
+        return self.root / c[:2] / f"{c}.jsonl"
+
+    @staticmethod
+    def fid_of(fields: tuple) -> str:
+        return hashlib.blake2b(
+            json.dumps(list(fields), ensure_ascii=False).encode(), digest_size=6
+        ).hexdigest()
+
+    @staticmethod
+    def key_out(k: Any) -> str:
+        return str(k) if isinstance(k, int) else f"{k[0]}|{k[1]}"
+
+    @staticmethod
+    def key_in(s: str) -> Any:
+        if "|" not in s:
+            return int(s)
+        a, b = s.split("|", 1)
+        return (int(a), b)
+
+    def load(self, code: str, thex: str) -> dict[Any, Any]:
+        """读该票文件里属于表 ``thex`` 的条目 → {内层键: (fields, vals) | None}。"""
+        known = self.known_fids.setdefault(code, set())
+        out: dict[Any, Any] = {}
+        p = self._path(code)
+        try:
+            text = p.read_text(encoding="utf-8")
+        except OSError:
+            return out
+        fields: dict[str, tuple] = {}
+        rows: list[list] = []
+        for line in text.splitlines():
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue  # 崩溃截断的末行
+            if not isinstance(row, list) or not row:
+                continue
+            if row[0] == "F" and len(row) == 3:
+                fields[row[1]] = tuple(row[2])
+                known.add(row[1])
+            elif row[0] == thex:
+                rows.append(row)
+        for row in rows:
+            try:
+                k = self.key_in(row[1])
+                if len(row) == 3 and row[2] is None:
+                    out[k] = None
+                else:
+                    out[k] = (fields[row[2]], tuple(row[3]))
+            except (KeyError, ValueError, IndexError, TypeError):
+                continue
+        self.loaded += len(out)
+        return out
+
+    def add(self, code: str, thex: str, k: Any, packed: Any) -> None:
+        buf = self.pending.setdefault(code, [])
+        if packed is None:
+            buf.append(json.dumps([thex, self.key_out(k), None]))
+        else:
+            fid = self.fid_of(packed[0])
+            known = self.known_fids.setdefault(code, set())
+            if fid not in known:
+                buf.append(json.dumps(["F", fid, list(packed[0])], ensure_ascii=False))
+                known.add(fid)
+            buf.append(
+                json.dumps(
+                    [thex, self.key_out(k), fid, list(packed[1])], ensure_ascii=False
+                )
+            )
+        self.n_pending += 1
+
+    def flush(self) -> None:
+        for code, lines in self.pending.items():
+            if not lines:
+                continue
+            p = self._path(code)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with p.open("a", encoding="utf-8") as fh:
+                fh.write("\n".join(lines) + "\n")
+        self.written += self.n_pending
+        self.pending = {}
+        self.n_pending = 0
+
+
 class ReplayMemo:
     """逐笔重放备忘（v0.461，通用）：``collect_all`` 下每个信号独立出一笔交易，
     (同一 df 对象, 出场参数, regime 对象, 成本, 信号 bar / 日期 / stop_override) → 交易是确定的。
@@ -178,8 +328,11 @@ class ReplayMemo:
       ``_trades_from_signals`` + 原 ``replay_signals`` 的拼装顺序一致（钉测对拍）。
     """
 
-    def __init__(self, max_entries: int) -> None:
+    def __init__(self, max_entries: int, disk_root: Optional[Path] = None) -> None:
         self.max_entries = int(max_entries)
+        self.disk = _ReplayDisk(disk_root) if disk_root is not None else None
+        self._digest: dict[int, str] = {}
+        self._thex: dict[tuple, str] = {}
         # 两级：外层键 = (df 身份, 参数, regime 身份, 成本) → 小整数；内层 = bar（或 (bar, stop_override)）
         self._base_id: dict[tuple, int] = {}
         self.tables: list[dict[Any, Any]] = []
@@ -189,12 +342,64 @@ class ReplayMemo:
         self.hits = 0
         self.misses = 0
 
-    def table(self, base: tuple) -> dict[Any, Any]:
+    def table(
+        self, base: tuple, code: str = "", df: Any = None, regime: Any = None
+    ) -> dict[Any, Any]:
         k = self._base_id.get(base)
         if k is None:
             k = self._base_id[base] = len(self.tables)
-            self.tables.append({})
+            tab: dict[Any, Any] = {}
+            if self.disk is not None:
+                for kk, v in self.disk.load(
+                    code, self.table_hex(base, code, df, regime)
+                ).items():
+                    if self.n_entries >= self.max_entries:
+                        break
+                    tab[kk] = None if v is None else self._intern(v)
+                    self.n_entries += 1
+            self.tables.append(tab)
         return self.tables[k]
+
+    def _intern(self, packed: tuple) -> tuple:
+        keys = self._fields.setdefault(packed[0], packed[0])
+        return (
+            keys,
+            tuple(sys.intern(v) if isinstance(v, str) else v for v in packed[1]),
+        )
+
+    def _content_digest(self, obj: Any, kind: str) -> str:
+        k = id(obj)
+        d = self._digest.get(k)
+        if d is None:
+            h = hashlib.blake2b(digest_size=16)
+            if kind == "df":
+                import numpy as np  # noqa: PLC0415
+                import pandas as pd  # noqa: PLC0415
+
+                h.update(json.dumps([str(c) for c in obj.columns]).encode())
+                h.update(
+                    np.asarray(pd.util.hash_pandas_object(obj, index=True)).tobytes()
+                )
+            else:
+                h.update(json.dumps(sorted((obj or {}).items()), default=repr).encode())
+            d = self._digest[k] = h.hexdigest()
+        return d
+
+    def table_hex(self, base: tuple, code: str, df: Any, regime: Any) -> str:
+        t = self._thex.get(base)
+        if t is None:
+            h = hashlib.blake2b(digest_size=10)
+            for part in (
+                str(code),
+                self._content_digest(df, "df"),
+                base[1],
+                self._content_digest(regime, "regime"),
+                repr(base[3]),
+            ):
+                h.update(part.encode())
+                h.update(b"\x1f")
+            t = self._thex[base] = h.hexdigest()
+        return t
 
     def _pin(self, obj: Any) -> int:
         k = id(obj)
@@ -221,11 +426,67 @@ class ReplayMemo:
 _REPLAY_MEMO: Optional[ReplayMemo] = None
 
 
-def enable_replay_memo(max_entries: int) -> Optional[ReplayMemo]:
-    """开 / 关进程级重放备忘（``max_entries ≤ 0`` = 关）；返回当前备忘对象（供打印命中率）。"""
+def enable_replay_memo(
+    max_entries: int, disk_root: Optional[Path] = None
+) -> Optional[ReplayMemo]:
+    """开 / 关进程级重放备忘（``max_entries ≤ 0`` = 关；``disk_root`` 给出则落盘跨运行复用）。
+    换掉旧备忘前先把它未落盘的条目写出。返回当前备忘对象（供打印命中率）。"""
     global _REPLAY_MEMO
-    _REPLAY_MEMO = ReplayMemo(max_entries) if max_entries and max_entries > 0 else None
+    if _REPLAY_MEMO is not None and _REPLAY_MEMO.disk is not None:
+        _REPLAY_MEMO.disk.flush()
+    _REPLAY_MEMO = (
+        ReplayMemo(max_entries, disk_root) if max_entries and max_entries > 0 else None
+    )
     return _REPLAY_MEMO
+
+
+#: 研究终端默认备忘上限（条）：实测每条约 360 字节 ⇒ 600 万≈2.2GB
+DEFAULT_REPLAY_MEMO = 6_000_000
+
+
+def memo_summary(memo: ReplayMemo) -> str:
+    tot = memo.hits + memo.misses
+    disk = (
+        f"；落盘读入 {memo.disk.loaded}、新写 {memo.disk.written + memo.disk.n_pending}"
+        if memo.disk is not None
+        else "；未落盘"
+    )
+    return (
+        f"命中 {memo.hits}/{tot}（{(memo.hits / tot * 100) if tot else 0:.1f}%），"
+        f"缓存 {memo.n_entries} 条（上限 {memo.max_entries}）{disk}"
+    )
+
+
+def replay_session(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """研究终端 ``run_study`` 装饰器（v0.464，通用）：整轮开逐笔重放备忘，结束落盘并关闭。
+
+    - 上限取 ``args.replay_memo``（缺省 ``DEFAULT_REPLAY_MEMO``；≤0 关）；
+    - **只有生产路径落盘**：任何注入件（非 None、非 bool 的额外参数）⇒ 合成运行，只开内存备忘；
+      落盘根见 ``replay_cache_root``（``CUSTOS_REPLAY_CACHE=off`` 关）；
+    - 重入安全：外层已开备忘时内层什么都不做（如 R49 内嵌 R48）。
+    """
+    import functools  # noqa: PLC0415
+
+    @functools.wraps(fn)
+    def wrapper(args: Any, *a: Any, **kw: Any) -> Any:
+        if _REPLAY_MEMO is not None:
+            return fn(args, *a, **kw)
+        cap = getattr(args, "replay_memo", None)
+        cap = DEFAULT_REPLAY_MEMO if cap is None else int(cap)
+        injected = any(
+            v is not None and not isinstance(v, bool) for v in (*a, *kw.values())
+        )
+        memo = enable_replay_memo(cap, None if injected else replay_cache_root())
+        try:
+            return fn(args, *a, **kw)
+        finally:
+            if memo is not None:
+                if memo.disk is not None:
+                    memo.disk.flush()
+                print(f"[replay-memo] {memo_summary(memo)}", file=sys.stderr)
+            enable_replay_memo(0)
+
+    return wrapper
 
 
 def _replay_memoized(
@@ -243,7 +504,12 @@ def _replay_memoized(
     trades: list[dict] = []
     for code, recs in by_code.items():
         df = per_code[code]["df"]
-        tab = memo.table((memo._pin(df), pk, rk, float(cost_bps)))
+        tab = memo.table((memo._pin(df), pk, rk, float(cost_bps)), code, df, regime)
+        thex = (
+            memo.table_hex((memo._pin(df), pk, rk, float(cost_bps)), code, df, regime)
+            if memo.disk is not None
+            else ""
+        )
         sigs: dict[int, dict] = {}
         for r in recs:  # 同 bar 去重：后者覆盖前者（同原路径 by_i = {c["i"]: c}）
             sigs[int(r["sig"]["i"])] = r["sig"]
@@ -269,9 +535,12 @@ def _replay_memoized(
             for i in miss:
                 tr = by_date.get(sigs[i].get("date"))
                 fresh[i] = tr
+                packed = None if tr is None else memo.pack(tr)
                 if memo.n_entries < memo.max_entries:
-                    tab[keyed[i]] = None if tr is None else memo.pack(tr)
+                    tab[keyed[i]] = packed
                     memo.n_entries += 1
+                if memo.disk is not None:
+                    memo.disk.add(code, thex, keyed[i], packed)
         score_of = {r["date"]: r["score"] for r in recs}
         for i in sorted(keyed):
             if i in fresh:
@@ -285,6 +554,8 @@ def _replay_memoized(
             if score is None:
                 continue
             trades.append({**tr, "score": score, "code": code})
+    if memo.disk is not None and memo.disk.n_pending >= memo.disk.FLUSH_EVERY:
+        memo.disk.flush()
     return trades
 
 

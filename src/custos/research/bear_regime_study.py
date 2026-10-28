@@ -1335,6 +1335,20 @@ def _build_report(
     }
 
 
+def _replay_session(fn: Any) -> Any:
+    """v0.464：逐笔重放备忘会话（``factor_exit_study.replay_session``，惰性导入防环）。"""
+    import functools  # noqa: PLC0415
+
+    @functools.wraps(fn)
+    def wrapper(*a: Any, **kw: Any) -> Any:
+        from custos.research import factor_exit_study as _fes  # noqa: PLC0415
+
+        return _fes.replay_session(fn)(*a, **kw)
+
+    return wrapper
+
+
+@_replay_session
 def run_study(
     args: Any,
     warm_fn: Optional[Callable[[str, str], dict[str, dict]]] = None,
@@ -1385,10 +1399,6 @@ def run_study(
     _prev = (_REF_NAME, _PORTFOLIO)
     if r45:
         _REF_NAME, _PORTFOLIO = R45_REF, R45_PORTFOLIO
-    from custos.research import factor_exit_study as _fes  # noqa: PLC0415
-
-    # v0.461：逐笔重放备忘（随机臂 × 门 × 出场档反复重放同一 (票, bar, 出场档)；结果逐位不变）
-    memo = _fes.enable_replay_memo(int(getattr(args, "replay_memo", 0) or 0))
     try:
         return _run_study_body(
             args,
@@ -1407,15 +1417,6 @@ def run_study(
         )
     finally:
         _REF_NAME, _PORTFOLIO = _prev
-        if memo is not None:
-            tot = memo.hits + memo.misses
-            print(
-                f"[replay-memo] 命中 {memo.hits}/{tot}"
-                f"（{(memo.hits / tot * 100) if tot else 0:.1f}%），缓存 {memo.n_entries} 条"
-                f"（上限 {memo.max_entries}）",
-                file=sys.stderr,
-            )
-        _fes.enable_replay_memo(0)
 
 
 def _run_study_body(

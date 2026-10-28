@@ -545,6 +545,20 @@ def judge(per_w: dict[str, dict[str, dict[str, Any]]], f: str) -> dict[str, Any]
     }
 
 
+def _replay_session(fn: Any) -> Any:
+    """v0.464：逐笔重放备忘会话（``factor_exit_study.replay_session``，惰性导入防环）。"""
+    import functools  # noqa: PLC0415
+
+    @functools.wraps(fn)
+    def wrapper(*a: Any, **kw: Any) -> Any:
+        from custos.research import factor_exit_study as _fes  # noqa: PLC0415
+
+        return _fes.replay_session(fn)(*a, **kw)
+
+    return wrapper
+
+
+@_replay_session
 def run_study(
     args: Any,
     *,

@@ -208,6 +208,8 @@ uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 �
   交易语义）。
 - **V0 分落盘缓存**（`research/score_pool.py`，v0.447）：只服务研究；键 = 三层 as-of 帧内容摘要，版本目录 = 打分源码 +
   契约 JSON 内容哈希（自动失效，勿手改）；测试 conftest 默认 `CUSTOS_V0_SCORE_CACHE=off`，专测用例自行设目录。
+- **逐笔重放备忘**（`factor_exit_study.replay_session`，v0.461/v0.464）：研究终端 `run_study` 挂装饰器，collect_all 重放按 (票, df 内容, 出场参数, regime, 成本, bar) 缓存交易，结果逐位不变；
+  生产路径落盘 `artifacts/cache/replay_memo/<出场源码哈希>/`（只追加 jsonl，跨运行 / 跨研究复用），注入件运行只开内存；conftest 默认 `CUSTOS_REPLAY_CACHE=off`。
 - **指标盘缓存**（`research/indicator_cache.py`）：不得服务 live、不得服务 as-of 重播种
   路径；指标实现任何改动必须 bump `INDICATOR_PACK_VERSION`。
 

@@ -132,6 +132,8 @@ def _skip_trade_counterfactual_subprocess(monkeypatch):
     monkeypatch.setenv("CUSTOS_SKIP_HOLDOUT_TRACKING", "1")
     # v0.447：V0 分落盘缓存测试中默认关（monkeypatch 的假打分不得写进 / 读出真缓存）
     monkeypatch.setenv("CUSTOS_V0_SCORE_CACHE", "off")
+    # v0.464：逐笔重放备忘落盘层默认关（专测用例自行设目录）
+    monkeypatch.setenv("CUSTOS_REPLAY_CACHE", "off")
 
 
 @pytest.fixture(autouse=True)

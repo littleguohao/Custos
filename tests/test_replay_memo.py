@@ -106,3 +106,91 @@ def test_distinct_df_objects_not_shared():
     fes.enable_replay_memo(1000)
     assert fes.replay_signals(a, s, PARAMS[0], RG, 25.0) == ra
     assert fes.replay_signals(b, s, PARAMS[0], RG, 25.0) == rb
+
+
+# ── v0.464 落盘层 ─────────────────────────────────────────────
+
+
+def _calls(pc, seed=11, stop=True):
+    rng = random.Random(seed)
+    return [(_subset(pc, rng, stop=stop), p) for _ in range(4) for p in PARAMS]
+
+
+def test_disk_roundtrip_bit_identical_across_processes(tmp_path):
+    """第一轮落盘，第二轮（新备忘、新 df 对象 = 模拟新进程）全部从盘读出，结果逐位一致。"""
+    pc = _world()
+    calls = _calls(pc)
+    ref = [fes.replay_signals(pc, s, p, RG, 25.0) for s, p in calls]
+    m1 = fes.enable_replay_memo(1_000_000, tmp_path)
+    assert [fes.replay_signals(pc, s, p, RG, 25.0) for s, p in calls] == ref
+    fes.enable_replay_memo(0)  # 换掉前自动 flush
+    assert m1.disk.written > 0 and list(tmp_path.rglob("*.jsonl"))
+    pc2 = _world()  # 内容相同的新对象
+    rg2: dict = {}
+    m2 = fes.enable_replay_memo(1_000_000, tmp_path)
+    got = [fes.replay_signals(pc2, s, p, rg2, 25.0) for s, p in calls]
+    assert got == ref
+    assert m2.misses == 0 and m2.disk.loaded > 0
+
+
+def test_disk_keys_on_content_cost_and_params(tmp_path):
+    """数据内容 / 成本 / 参数任一不同 ⇒ 不同表，不得串用。"""
+    pc = _world()
+    calls = _calls(pc, stop=False)[:2]
+    fes.enable_replay_memo(1_000_000, tmp_path)
+    for s, p in calls:
+        fes.replay_signals(pc, s, p, RG, 25.0)
+    fes.enable_replay_memo(0)
+    pc_alt = {
+        c: {"df": v["df"].assign(close=v["df"]["close"] * 1.01)} for c, v in pc.items()
+    }
+    for world, cost in ((pc_alt, 25.0), (pc, 50.0)):
+        ref = [fes.replay_signals(world, s, p, RG, cost) for s, p in calls]
+        m = fes.enable_replay_memo(1_000_000, tmp_path)
+        assert [fes.replay_signals(world, s, p, RG, cost) for s, p in calls] == ref
+        assert m.disk.loaded == 0, "内容 / 成本不同 ⇒ 不同表"
+        fes.enable_replay_memo(0)
+
+
+def test_disk_truncated_line_tolerated(tmp_path):
+    pc = _world()
+    calls = _calls(pc)
+    ref = [fes.replay_signals(pc, s, p, RG, 25.0) for s, p in calls]
+    fes.enable_replay_memo(1_000_000, tmp_path)
+    for s, p in calls:
+        fes.replay_signals(pc, s, p, RG, 25.0)
+    fes.enable_replay_memo(0)
+    for f in tmp_path.rglob("*.jsonl"):
+        with f.open("a", encoding="utf-8") as fh:
+            fh.write('["deadbeef", "12", "x')  # 崩溃截断
+    fes.enable_replay_memo(1_000_000, tmp_path)
+    assert [fes.replay_signals(pc, s, p, RG, 25.0) for s, p in calls] == ref
+
+
+def test_session_decorator_injected_no_disk_and_reentrant(tmp_path, monkeypatch):
+    monkeypatch.setenv(fes.REPLAY_CACHE_ENV, str(tmp_path))
+    seen = []
+
+    @fes.replay_session
+    def inner(args, **kw):
+        seen.append(("inner", fes._REPLAY_MEMO))
+
+    @fes.replay_session
+    def outer(args, **kw):
+        seen.append(("outer", fes._REPLAY_MEMO))
+        inner(args)
+
+    class A:
+        replay_memo = 100
+
+    outer(A())  # 生产路径（无注入件）⇒ 落盘
+    assert seen[0][1] is not None and seen[0][1].disk is not None
+    assert seen[1][1] is seen[0][1], "重入：内层复用外层备忘"
+    assert fes._REPLAY_MEMO is None
+    seen.clear()
+    outer(A(), warm_fn=lambda s, e: {})  # 注入 ⇒ 只开内存
+    assert seen[0][1] is not None and seen[0][1].disk is None
+    A.replay_memo = 0
+    seen.clear()
+    outer(A())
+    assert seen[0][1] is None
