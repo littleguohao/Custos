@@ -42,6 +42,8 @@ def _args(**kw):
         c4_min_pool=3,
         tag="t",
         gates="all",
+        # v0.463：既有用例测的是随机臂池语义 ⇒ 默认跑满；提前终止另有专测（TestEarlyStop）
+        no_early_stop=True,
     )
     base.update(kw)
     return argparse.Namespace(**base)
@@ -1097,6 +1099,10 @@ class TestLegacyBitIdentical:
             gates="j_low,j_low_adx25",
         )
         masked = {**rep, "provenance": None, "window_usage": None}
+        # v0.463 受命新增字段：C4.early_stop（本夹具跑满 ⇒ skipped=False），其余逐位同基准
+        c4 = dict(masked["criteria"]["C4"])
+        assert c4.pop("early_stop") == {"skipped": False}
+        masked["criteria"] = {**masked["criteria"], "C4": c4}
         assert canon_json(masked) == canon_json(_json.loads(_LEGACY_REPORT_BLOB)), (
             "legacy 报告偏离 v2 切换前基准（除 window_usage/provenance 外应同；"
             "浮点归一 1e-12——CI 异构 CPU 末位差，v0.359）"
@@ -1623,3 +1629,79 @@ class TestPrescoreAndRefDedupe:
         ]
         brs.run_arm({"g1": 3, "g2": 2}, exits, lambda n, w: [{}] * n, rp, top_n=5)
         assert calls.count("ref") == 2 and len(calls) == 12
+
+
+def _replay_all_lose(subset, params):
+    """所有门/档/随机臂同亏（margin<0）⇒ C2 同向为正不过，不依赖池即 falsified。"""
+    return [_trade_of(r, -0.02 if r["i"] % 2 == 0 else 0.005) for r in subset]
+
+
+class TestEarlyStop:
+    """v0.463：不依赖随机臂池的判据已定结局 ⇒ 跳过随机臂，总结局与跑满逐位一致。"""
+
+    @staticmethod
+    def _pair(spec, replay, **kw):
+        calls = {"n": 0}
+
+        def rand(n, w):
+            calls["n"] += 1
+            return _rand_flat(n, w)
+
+        warm_fn = lambda s, e: spec[(s, e)]  # noqa: E731
+        early = brs.run_study(
+            _args(no_early_stop=False, **kw),
+            warm_fn=warm_fn,
+            replay_fn=replay,
+            random_entry_fn=rand,
+        )
+        n_early = calls["n"]
+        full = brs.run_study(
+            _args(no_early_stop=True, **kw),
+            warm_fn=warm_fn,
+            replay_fn=replay,
+            random_entry_fn=rand,
+        )
+        return early, full, n_early
+
+    @pytest.mark.parametrize(
+        "gates,replay,verdict",
+        [
+            ({"j_low": 60}, "_replay_winner_gate", "untested"),  # C1 不足
+            (
+                {"j_low": 120, "j_low_adx25": 4},
+                "_replay_all_lose",
+                "falsified",
+            ),  # C2 符号
+        ],
+    )
+    def test_pool_free_terminal_skips_arms_same_verdict(self, gates, replay, verdict):
+        early, full, n_early = self._pair(_mk_per_code(gates), globals()[replay])
+        assert early["verdict"] == full["verdict"] == verdict
+        assert n_early == 0, "提前终止不得抽随机入场"
+        es = early["criteria"]["C4"]["early_stop"]
+        assert es["skipped"] is True and es["verdict"] == verdict
+        assert full["criteria"]["C4"]["early_stop"] == {"skipped": False}
+        assert early["criteria"]["C1"] == full["criteria"]["C1"]
+        if verdict == "falsified":
+            assert (
+                early["criteria"]["C2"]["ok"] is False is full["criteria"]["C2"]["ok"]
+            )
+        else:  # untested：池未建 ⇒ C2 量级比较未评（None），结局由 C1 决定
+            assert early["criteria"]["C2"]["ok"] is None
+
+    def test_pool_dependent_outcome_runs_arms(self):
+        """C2 符号过、结局取决于池（_replay_flat：池 q95 判死）⇒ 不提前，跑满。"""
+        early, full, n_early = self._pair(
+            _mk_per_code({"j_low": 120, "j_low_adx25": 4}), _replay_flat
+        )
+        assert n_early > 0
+        assert early["criteria"]["C4"]["early_stop"] == {"skipped": False}
+        assert early["verdict"] == full["verdict"] == "falsified"
+
+    def test_r45_beats_no_trade_fail_skips(self):
+        """R45：两窗组合收益≤0 ⇒ 未打过不交易，不依赖池即 falsified。"""
+        early, full, n_early = self._pair(
+            _mk_per_code({"j_low": 120}), _replay_all_lose, r45=True, gates="j_low"
+        )
+        assert n_early == 0
+        assert early["verdict"] == full["verdict"] == "falsified"

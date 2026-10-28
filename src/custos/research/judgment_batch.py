@@ -61,6 +61,8 @@ _BOOKKEEP_KEYS = {
     "score_workers",
     # 「replay_memo」（v0.461）：逐笔重放备忘上限，读数逐位不变——同 jobs 口径
     "replay_memo",
+    # 「no_early_stop」（v0.463）：随机臂提前终止开关，总结局不变——执行策略不进哈希
+    "no_early_stop",
     # 「tag/out_dir」（v0.406 审计 P1-2）：只决定产物命名/位置，不影响读数——进哈希会让崩溃
     # 重跑换 tag/换目录被批次门误判「口径变了」。⚠️ timeout **留在哈希里**（审计 3 B-1：
     # score_evolution 的格子超时决定格子 ran/failed ⇒ 臂池/候选集会变，影响读数）

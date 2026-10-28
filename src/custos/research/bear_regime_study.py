@@ -561,6 +561,52 @@ def _entry_view(per_code_w: dict[str, dict], entries: list[dict]) -> dict[str, d
     return view
 
 
+def _pool_free_verdict(
+    top: Optional[dict], configs: list[dict], r45: bool
+) -> Optional[dict[str, str]]:
+    """v0.463：只用不依赖随机臂池的判据部分推结局。返回 None = 结局仍取决于池（须跑臂）。
+
+    - C1（n_taken）不过 ⇒ untested（四态映射里 C1 优先，池怎么样都翻不了）；
+    - C2 的「双窗 margin 同向为正」不过 ⇒ C2=False ⇒ falsified；R45 另加「打过不交易」；
+    - R45-C3（止损邻档平滑 + 两窗最优止盈一致）只读网格 ⇒ 不过即 falsified。
+    R40-C3 要对比池 q95，不参与提前判定。逻辑与主流程同一批函数，钉测核对与跑满时结局一致。
+    """
+    tm = top["mining"] if top else None
+    tj = top["judgment"] if top else None
+    if not judge_c1(tm, tj)["ok"]:
+        return {"verdict": "untested", "reason": "C1 n_taken 不足"}
+    if not judge_c2(tm, tj, None, None)["pos_ok"]:
+        return {"verdict": "falsified", "reason": "C2 双窗 margin 非同向为正"}
+    if r45:
+        rets = [
+            ((top or {}).get(w) or {}).get("total_return")
+            for w in ("mining", "judgment")
+        ]
+        if not all(v is not None and v > 0 for v in rets):
+            return {"verdict": "falsified", "reason": "R45-C2 未打过不交易"}
+        if judge_c3_r45(configs, top).get("ok") is False:
+            return {"verdict": "falsified", "reason": "R45-C3 不过"}
+    return None
+
+
+def _skipped_arms(args: Any) -> dict[str, Any]:
+    """跳过随机臂时的空池（形态同 ``_run_random_arms`` 返回；C4 落 indeterminate）。"""
+    return {
+        "rng": random.Random(args.seed),
+        "pool_m": [],
+        "pool_j": [],
+        "q95_m": None,
+        "q95_j": None,
+        "batch_m": None,
+        "evaluated": 0,
+        "gate_pass": 0,
+        "entry_accounting": {
+            w: {"requested": 0, "returned": 0} for w in ("mining", "judgment")
+        },
+        "score_caches": {"mining": {}, "judgment": {}},
+    }
+
+
 def _memo_note() -> str:
     from custos.research import factor_exit_study as _fes  # noqa: PLC0415
 
@@ -1490,22 +1536,34 @@ def _run_study_body(
 
     top = _top(configs)
 
-    # ── 随机臂（对等纪律 v0.302 + **预算对等 v0.307**：每臂完整复刻 top 的
-    # 46 门 × 5 档 max-of-230 选型——逐门 n_g 对齐抽样，冻结配置进判定窗；
-    # v0.322：池构造=**criteria_kit 重抽单源**（v0.317 族））──
-    arms = _run_random_arms(
-        args,
-        gates,
-        per_code,
-        mining_segs,
-        gate_sigs,
-        regime_bear,
-        index_df,
-        exits,
-        ref_trail,
-        _replay,
-        random_entry_fn,
-    )
+    # ── v0.463 提前终止：不依赖随机臂池的判据先判；已定 untested / falsified ⇒ 随机臂改变不了
+    # 总结局（verdict_four_state：C1 不过优先 untested；C2 / C3 任一 False ⇒ falsified），跳过臂阶段 ──
+    early = _pool_free_verdict(top, configs, r45)
+    skip_arms = early is not None and not bool(getattr(args, "no_early_stop", False))
+    if skip_arms and early is not None:
+        print(
+            f"[early-stop] 不依赖随机臂池的判据已定结局 {early['verdict']}（{early['reason']}）"
+            "——跳过随机臂（--no-early-stop 可强制跑满）",
+            file=sys.stderr,
+        )
+        arms = _skipped_arms(args)
+    else:
+        # 随机臂（对等纪律 v0.302 + **预算对等 v0.307**：每臂完整复刻 top 的
+        # 46 门 × 5 档 max-of-230 选型——逐门 n_g 对齐抽样，冻结配置进判定窗；
+        # v0.322：池构造=**criteria_kit 重抽单源**（v0.317 族））
+        arms = _run_random_arms(
+            args,
+            gates,
+            per_code,
+            mining_segs,
+            gate_sigs,
+            regime_bear,
+            index_df,
+            exits,
+            ref_trail,
+            _replay,
+            random_entry_fn,
+        )
     rng = arms["rng"]
     pool_m = arms["pool_m"]
     q95_m = arms["q95_m"]
@@ -1556,6 +1614,9 @@ def _run_study_body(
     # provisional / top 挖掘窗 margin > q95 confirmed_pass）
     c4_state, c4 = _judge_c4(
         args, pool_m, top, q95_m, arms["evaluated"], arms["gate_pass"]
+    )
+    c4["early_stop"] = (
+        {"skipped": True, **early} if skip_arms and early else {"skipped": False}
     )
 
     # ── 总结局（criteria_kit 单源：C1 不过 ⇒ untested 优先；C2 池未建=None /
@@ -1669,6 +1730,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=1,
         help="warm 加载并行路数（v0.441，TODO #112：逐股 加载+扫描+打分 线程并行，"
         "产物与串行逐位一致；默认 1=原行为）",
+    )
+    ap.add_argument(
+        "--no-early-stop",
+        action="store_true",
+        help="v0.463：不依赖池的判据已定结局时仍跑满随机臂（默认跳过——结局逐位不变，只省臂阶段）",
     )
     ap.add_argument(
         "--replay-memo",
