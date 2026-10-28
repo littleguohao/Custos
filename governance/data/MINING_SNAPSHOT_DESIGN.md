@@ -99,5 +99,15 @@
 - 结果：挖掘 A 8 档中 6 档逐位一致（qfq_ratio 见效，剩 ref / x15 两档非 margin 字段微差）；挖掘 B 由第一轮全一致转为 6/8 档 5 位小数级微差
   （笔数全同、win_rate ±0.0001）。两轮真实侧 n 也变了（10805→10959 / 20872→20564），是代码版本漂移，轮内同 commit 可比。
 - 证据：`artifacts/logs/snap2_acc_{real,snap}/`；导出 `mining_snapshot_v2`（manifest 320bcba2e73f3879，verify 通过）。
-- 排查方向（待定位，不放宽验收）：见 TODO #116 当前下一步。
+- 推测根因：as-of V0 分要信号日前 1200 根日线（周 / 月 MACD 腿），挖掘 B 信号往前 1200 根落进判定段，快照物理上没有 ⇒
+  B 段 V0 分不同，依赖分数的读数（每日 top-N 选中集 / 组合层）出微差；A 段剩余两档疑为按根数（count）加载时快照往前多取到更早年份。
+
+## 验收口径放宽（owner 2026-10-28 拍板，v0.462）
+
+- **不依赖 V0 分的字段必须逐位一致**：全候选口径的 margin / 胜率 / 盈亏比 / 期望 / 笔数 / 记账 / 分布画像 / 随机宽度臂池等；
+- **依赖 V0 分的字段允许微差**：top-N 选中集与组合层（n_taken / ret_over_dd / rdd_gate / objective / total_return / sel_* / portfolio …）；
+- **判决不得翻转**：顶层 verdict 与各判据 ok / state 必须一致。
+- 对拍工具：`scripts/dev/snapshot_acceptance_diff.py <真实侧.json> <快照侧.json>`（退出码 0 通过 / 1 不通过），字段分类规则见脚本 docstring。
+- **已知局限补充**：快照上依赖 V0 分的读数（尤其挖掘 B）与生产机不逐位一致；开发机用于描述性探索与工具调试，凡要入批 / 入库的正式读数仍以生产机为准。
+
 

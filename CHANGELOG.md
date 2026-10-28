@@ -464,6 +464,7 @@
 | 2026-10-27 | v0.459 | **review 建议级收尾**：holdout 月报 B1 拆分改回合级归属（同回合平仓继承首笔买入日标记，修加仓分批卖错位落 unknown）、透传标量加 isfinite 防护（NaN⇒None）、R44 大单/大亏基线收紧为桶粒度点估计（5.93% / 17.97%）、补 SystemExit 钉测；**R50** 清死代码（cluster_perm/_perm_lifts/置换 aux）与过期 docstring、digest/report 补登 lift_low、校准补混合簇长用例与 scan_workers 逐位一致钉测、旧校准数字同步 v0.458 | owner review 2026-10-27 | 钉测 +7 |
 | 2026-10-27 | v0.460 | **组合层准备（TODO #117）**：`simulate_portfolio_topn` 加 `exposure_fn(date)`（0AMV 状态化仓位，None 逐位不变）；新增 `scan_portfolio_grid`（交易集只算一次 × 网格 × 多平分种子报区间）；准备文档盘点能力（等权 / 随机排序为参数配方）与局限（已实现回撤偏向集中） | owner 2026-10-27 | 钉测 +5 |
 | 2026-10-28 | v0.461 | **逐笔重放备忘（通用，读数逐位不变）**：`factor_exit_study.replay_signals` 加进程级备忘——collect_all 下 (df 身份, 出场参数, regime, 成本, bar) → 交易确定，同一组合只重放一次；两级 dict 每条 ~360 字节、按条数封顶；R40/R45 默认开（`--replay-memo`，600 万条），`[arm]` 行报命中率；全命中实测 ~9× | owner 2026-10-28 | 钉测 +4 |
+| 2026-10-28 | v0.462 | **#116 验收口径放宽**（owner 拍板）：不依赖 V0 分的字段（全候选 margin / 胜率 / 笔数 / 记账 / 分布）必须逐位一致，依赖 V0 分的 top-N 与组合层字段允许微差（B 段信号往前 1200 根落进判定段，快照物理上没有），判决不得翻转；新对拍脚本 `snapshot_acceptance_diff.py` | owner 2026-10-28 | 钉测 +5 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
