@@ -166,6 +166,128 @@ def buckets_of(signals: list[dict], cuts: list[float]) -> list[int]:
 # ---------------------------------------------------------------------------
 
 
+class ReplayMemo:
+    """逐笔重放备忘（v0.461，通用）：``collect_all`` 下每个信号独立出一笔交易，
+    (同一 df 对象, 出场参数, regime 对象, 成本, 信号 bar / 日期 / stop_override) → 交易是确定的。
+    同一组合在随机臂 / 门 / 出场档之间被反复重放时只算一次。
+
+    - 键里的 df / regime 用对象身份（``id``）并持有强引用（防 id 复用）；出场参数按内容（JSON 规范化）；
+    - 值按紧凑元组存（字段名元组共享、字符串 intern），``None`` = 该信号不出交易（越界 / 不可买）；
+    - ``max_entries`` 封顶：满了不再新增（已存的照常命中），内存有界；
+    - 输出逐位等价于不开备忘：同票内按 bar 升序、同 bar 去重、按信号日对分数——与
+      ``_trades_from_signals`` + 原 ``replay_signals`` 的拼装顺序一致（钉测对拍）。
+    """
+
+    def __init__(self, max_entries: int) -> None:
+        self.max_entries = int(max_entries)
+        # 两级：外层键 = (df 身份, 参数, regime 身份, 成本) → 小整数；内层 = bar（或 (bar, stop_override)）
+        self._base_id: dict[tuple, int] = {}
+        self.tables: list[dict[Any, Any]] = []
+        self.n_entries = 0
+        self._keep: dict[int, Any] = {}
+        self._fields: dict[tuple, tuple] = {}
+        self.hits = 0
+        self.misses = 0
+
+    def table(self, base: tuple) -> dict[Any, Any]:
+        k = self._base_id.get(base)
+        if k is None:
+            k = self._base_id[base] = len(self.tables)
+            self.tables.append({})
+        return self.tables[k]
+
+    def _pin(self, obj: Any) -> int:
+        k = id(obj)
+        self._keep.setdefault(k, obj)
+        return k
+
+    @staticmethod
+    def params_key(params: dict[str, Any]) -> str:
+        return json.dumps(params, sort_keys=True, default=repr, ensure_ascii=False)
+
+    def pack(self, tr: dict[str, Any]) -> tuple:
+        keys = tuple(tr)
+        keys = self._fields.setdefault(keys, keys)
+        return (
+            keys,
+            tuple(sys.intern(v) if isinstance(v, str) else v for v in tr.values()),
+        )
+
+    @staticmethod
+    def unpack(packed: tuple) -> dict[str, Any]:
+        return dict(zip(packed[0], packed[1]))
+
+
+_REPLAY_MEMO: Optional[ReplayMemo] = None
+
+
+def enable_replay_memo(max_entries: int) -> Optional[ReplayMemo]:
+    """开 / 关进程级重放备忘（``max_entries ≤ 0`` = 关）；返回当前备忘对象（供打印命中率）。"""
+    global _REPLAY_MEMO
+    _REPLAY_MEMO = ReplayMemo(max_entries) if max_entries and max_entries > 0 else None
+    return _REPLAY_MEMO
+
+
+def _replay_memoized(
+    memo: ReplayMemo,
+    by_code: dict[str, list[dict]],
+    per_code: dict[str, dict],
+    profile_params: dict[str, Any],
+    regime: dict[str, str],
+    cost_bps: float,
+) -> list[dict]:
+    from custos.research import backtest_factors as bt  # noqa: PLC0415
+
+    pk = memo.params_key(profile_params)
+    rk = memo._pin(regime)
+    trades: list[dict] = []
+    for code, recs in by_code.items():
+        df = per_code[code]["df"]
+        tab = memo.table((memo._pin(df), pk, rk, float(cost_bps)))
+        sigs: dict[int, dict] = {}
+        for r in recs:  # 同 bar 去重：后者覆盖前者（同原路径 by_i = {c["i"]: c}）
+            sigs[int(r["sig"]["i"])] = r["sig"]
+        # 内层键：bar 序号（df 身份已在外层 ⇒ 日期由 bar 决定）；带 stop_override 的信号连同其值
+        keyed: dict[int, Any] = {
+            i: (i if "stop_override" not in s else (i, repr(s["stop_override"])))
+            for i, s in sigs.items()
+        }
+        miss = [i for i, k in keyed.items() if k not in tab]
+        memo.hits += len(keyed) - len(miss)
+        memo.misses += len(miss)
+        fresh: dict[int, Any] = {}
+        if miss:
+            trs = bt.evaluate_trades(
+                {code: df},
+                signals_in={code: [sigs[i] for i in sorted(miss)]},
+                amv_regime=regime,
+                cost_bps=cost_bps,
+                collect_all=True,
+                **profile_params,
+            )
+            by_date = {tr["entry_date"]: tr for tr in trs}
+            for i in miss:
+                tr = by_date.get(sigs[i].get("date"))
+                fresh[i] = tr
+                if memo.n_entries < memo.max_entries:
+                    tab[keyed[i]] = None if tr is None else memo.pack(tr)
+                    memo.n_entries += 1
+        score_of = {r["date"]: r["score"] for r in recs}
+        for i in sorted(keyed):
+            if i in fresh:
+                tr = fresh[i]
+            else:
+                packed = tab[keyed[i]]
+                tr = None if packed is None else memo.unpack(packed)
+            if tr is None:
+                continue
+            score = score_of.get(tr["entry_date"])
+            if score is None:
+                continue
+            trades.append({**tr, "score": score, "code": code})
+    return trades
+
+
 def replay_signals(
     per_code: dict[str, dict],
     subset: list[dict],
@@ -173,12 +295,18 @@ def replay_signals(
     regime: dict[str, str],
     cost_bps: float,
 ) -> list[dict]:
-    """信号子集按一个出场档重放（与 exit_campaign 评估器同调用序同公式）。"""
+    """信号子集按一个出场档重放（与 exit_campaign 评估器同调用序同公式）。
+
+    进程级重放备忘开启时（``enable_replay_memo``，v0.461）走 ``_replay_memoized``，结果逐位一致。"""
     from custos.research import backtest_factors as bt  # noqa: PLC0415
 
     by_code: dict[str, list[dict]] = {}
     for rec in subset:
         by_code.setdefault(rec["code"], []).append(rec)
+    if _REPLAY_MEMO is not None:
+        return _replay_memoized(
+            _REPLAY_MEMO, by_code, per_code, profile_params, regime, cost_bps
+        )
     trades: list[dict] = []
     for code, recs in by_code.items():
         pack = per_code[code]

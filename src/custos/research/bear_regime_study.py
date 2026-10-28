@@ -561,6 +561,16 @@ def _entry_view(per_code_w: dict[str, dict], entries: list[dict]) -> dict[str, d
     return view
 
 
+def _memo_note() -> str:
+    from custos.research import factor_exit_study as _fes  # noqa: PLC0415
+
+    m = _fes._REPLAY_MEMO
+    if m is None:
+        return ""
+    tot = m.hits + m.misses
+    return f"；重放备忘命中 {(m.hits / tot * 100) if tot else 0:.0f}%（{m.n_entries}/{m.max_entries} 条）"
+
+
 def run_arm(
     gate_counts: dict[str, int],
     exits: list[dict],
@@ -973,7 +983,7 @@ def _run_random_arms(
         print(  # v0.446：逐臂进度（原先整段无输出，跑几天看不出进度）
             f"[arm] {_i + 1}（目标池 {args.n_random}）累计 {el:.0f}s，"
             f"均 {el / (_i + 1):.0f}s/臂；打分缓存 "
-            f"{ {w: len(c) for w, c in score_caches.items()} }",
+            f"{ {w: len(c) for w, c in score_caches.items()} }" + _memo_note(),
             file=sys.stderr,
         )
         return arm["mining"]["readings"]["margin"]
@@ -1329,6 +1339,10 @@ def run_study(
     _prev = (_REF_NAME, _PORTFOLIO)
     if r45:
         _REF_NAME, _PORTFOLIO = R45_REF, R45_PORTFOLIO
+    from custos.research import factor_exit_study as _fes  # noqa: PLC0415
+
+    # v0.461：逐笔重放备忘（随机臂 × 门 × 出场档反复重放同一 (票, bar, 出场档)；结果逐位不变）
+    memo = _fes.enable_replay_memo(int(getattr(args, "replay_memo", 0) or 0))
     try:
         return _run_study_body(
             args,
@@ -1347,6 +1361,15 @@ def run_study(
         )
     finally:
         _REF_NAME, _PORTFOLIO = _prev
+        if memo is not None:
+            tot = memo.hits + memo.misses
+            print(
+                f"[replay-memo] 命中 {memo.hits}/{tot}"
+                f"（{(memo.hits / tot * 100) if tot else 0:.1f}%），缓存 {memo.n_entries} 条"
+                f"（上限 {memo.max_entries}）",
+                file=sys.stderr,
+            )
+        _fes.enable_replay_memo(0)
 
 
 def _run_study_body(
@@ -1646,6 +1669,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default=1,
         help="warm 加载并行路数（v0.441，TODO #112：逐股 加载+扫描+打分 线程并行，"
         "产物与串行逐位一致；默认 1=原行为）",
+    )
+    ap.add_argument(
+        "--replay-memo",
+        type=int,
+        default=6_000_000,
+        help="逐笔重放备忘条数上限（v0.461：同一 (票, bar, 出场档) 只重放一次，结果逐位不变；"
+        "实测每条约 360 字节，默认 600 万≈2.2GB；满了不再新增、已存照常命中；0=关）",
     )
     ap.add_argument(
         "--score-workers",

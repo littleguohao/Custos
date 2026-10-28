@@ -63,6 +63,8 @@ uv run python -m custos.research factor_exit_study --tag r39_v2_pre \
 #   --score-workers N：母体缺分 bar 先多进程一次算完（读数与原惰性串行逐位一致，不进冻结哈希）；
 #   stderr 现有 [prescore] 进度与逐臂 [arm] 行（每臂耗时 / 打分缓存量），可据此估剩余时间。
 #   N 取物理核数（本机 8 路实测 4~5×）；内存 ≈ 每路一份上证指数 + 当前任务 df，量级很小。
+#   v0.461：随机臂逐笔重放备忘 --replay-memo N（默认 600 万条≈2.2GB，0=关）——同一 (票, bar, 出场档) 只重放一次，读数逐位不变；
+#   [arm] 行带命中率。命中率低且内存够时可调大；命中率 h 下臂阶段约提速 1/(1−0.89h)（全命中实测 ~9×）。
 #   v0.447：warm 阶段（信号日 V0 分，profile 占 warm 99%）同样走 --score-workers；且 V0 分**跨研究落盘缓存**
 #   （artifacts/cache/v0_score/<源码哈希>/，键 = as-of 帧内容摘要，代码一改自动换目录）——R40/R45/R44/R47~R50
 #   同票同信号日只算一次，后跑的研究大部分命中。磁盘量级：每 bar 约 50 字节。CUSTOS_V0_SCORE_CACHE=off 可关。
