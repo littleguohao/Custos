@@ -187,7 +187,12 @@ def replay_cache_root() -> Optional[Path]:
 #: 版本哈希的 import 闭包起点（v0.465）：出场模拟引擎。本模块（研究终端，改动频繁）不整文件入哈希，
 #: 只取 ``_REPLAY_VERSION_FUNCS`` 的源码——其余 study 代码改动不让缓存作废
 REPLAY_VERSION_ROOTS = ("custos.research.backtest_factors",)
-_REPLAY_VERSION_FUNCS = ("replay_signals", "_replay_memoized", "ReplayMemo")
+_REPLAY_VERSION_FUNCS = (
+    "replay_signals",
+    "_replay_memoized",
+    "ReplayMemo",
+    "_ReplayDisk",
+)
 
 
 def replay_source_files() -> list[Path]:
@@ -464,7 +469,7 @@ class ReplayMemo:
         )
 
     def _content_digest(self, obj: Any, kind: str) -> str:
-        k = id(obj)
+        k = self._pin(obj)  # 持强引用防 id 复用（安全兜底，勿依赖调用方先 pin 的惯例）
         d = self._digest.get(k)
         if d is None:
             h = hashlib.blake2b(digest_size=16)

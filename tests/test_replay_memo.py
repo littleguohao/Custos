@@ -227,6 +227,12 @@ def test_version_tracks_replay_function_source(monkeypatch):
     monkeypatch.setattr(fes, "_REPLAY_CODE_VERSION", None)
 
 
+def test_version_funcs_cover_disk_format():
+    """落盘行格式（_ReplayDisk.key_out/key_in/行布局）改动必须让缓存版本失效（review 2026-10-29）。"""
+    assert "_ReplayDisk" in fes._REPLAY_VERSION_FUNCS
+    assert "ReplayMemo" in fes._REPLAY_VERSION_FUNCS
+
+
 def test_prune_removes_stale_versions_and_dedups(tmp_path):
     pc = _world()
     calls = _calls(pc)
