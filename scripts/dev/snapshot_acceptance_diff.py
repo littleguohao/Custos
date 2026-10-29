@@ -112,7 +112,12 @@ def compare(real: Any, snap: Any) -> dict[str, Any]:
         if cls == "ignored":
             continue
         if p not in ra or p not in sa:
-            out["missing"].append(p)
+            # 分数相关列表长度可不同（如 passing_rdd_merged 过门档数），按微差记；其余缺字段 = 不通过
+            (
+                out["score_dependent_diff"]
+                if cls == "score_dependent"
+                else out["missing"]
+            ).append({"path": p, "real": ra.get(p, "<缺>"), "snap": sa.get(p, "<缺>")})
             continue
         out["n_compared"] += 1
         a, b = ra[p], sa[p]

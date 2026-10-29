@@ -184,24 +184,71 @@ def replay_cache_root() -> Optional[Path]:
     return ARTIFACTS / "cache" / "replay_memo"
 
 
+#: 版本哈希的 import 闭包起点（v0.465）：出场模拟引擎。本模块（研究终端，改动频繁）不整文件入哈希，
+#: 只取 ``_REPLAY_VERSION_FUNCS`` 的源码——其余 study 代码改动不让缓存作废
+REPLAY_VERSION_ROOTS = ("custos.research.backtest_factors",)
+_REPLAY_VERSION_FUNCS = ("replay_signals", "_replay_memoized", "ReplayMemo")
+
+
+def replay_source_files() -> list[Path]:
+    """起点模块的**包内 import 闭包**（AST 静态解析，含函数体内的惰性 import）——
+    出场模拟可能执行到的全部 custos 源码；无关模块改动不再让缓存作废。"""
+    import ast  # noqa: PLC0415
+
+    src = Path(__file__).resolve().parents[1]  # src/custos
+
+    def file_of(mod: str) -> Optional[Path]:
+        parts = mod.split(".")
+        if parts[0] != "custos":
+            return None
+        base = src.joinpath(*parts[1:])
+        for cand in (base.with_suffix(".py"), base / "__init__.py"):
+            if cand.is_file():
+                return cand
+        return None
+
+    seen: dict[str, Path] = {}
+    todo = list(REPLAY_VERSION_ROOTS)
+    while todo:
+        mod = todo.pop()
+        if mod in seen:
+            continue
+        f = file_of(mod)
+        if f is None:
+            continue
+        seen[mod] = f
+        pkg = mod if f.name == "__init__.py" else mod.rsplit(".", 1)[0]
+        parts = mod.split(".")  # 父包 __init__ 会先执行
+        todo.extend(".".join(parts[:k]) for k in range(2, len(parts)))
+        for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                todo.extend(a.name for a in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                if node.level:
+                    base = pkg.split(".")
+                    base = base[: len(base) - node.level + 1]
+                    head = ".".join(base + ([node.module] if node.module else []))
+                else:
+                    head = node.module or ""
+                todo.append(head)
+                todo.extend(
+                    f"{head}.{a.name}" for a in node.names
+                )  # from pkg import 子模块
+    return sorted(set(seen.values()))
+
+
 def replay_code_version() -> str:
-    """出场模拟相关源码 + 契约 JSON 的内容哈希（进程内算一次）：任一改动 ⇒ 新版本目录、旧缓存自动作废。"""
+    """出场模拟 import 闭包源码 + 契约 JSON 的内容哈希（进程内算一次）：任一改动 ⇒ 新版本目录、旧缓存自动作废。"""
     global _REPLAY_CODE_VERSION
     if _REPLAY_CODE_VERSION is None:
         from custos.core.paths import BASE, CONTRACTS_DIR  # noqa: PLC0415
 
-        src = Path(__file__).resolve().parents[1]  # src/custos
-        res = src / "research"
-        files = sorted(
-            [
-                *(src / "core").rglob("*.py"),
-                res / "backtest_factors.py",
-                res / "factor_exit_study.py",
-                res / "indicator_cache.py",
-                *CONTRACTS_DIR.glob("*.json"),
-            ]
-        )
+        import inspect  # noqa: PLC0415
+
+        files = sorted([*replay_source_files(), *CONTRACTS_DIR.glob("*.json")])
+        own = "\n".join(inspect.getsource(globals()[n]) for n in _REPLAY_VERSION_FUNCS)
         h = hashlib.blake2b(digest_size=8)
+        h.update(own.encode())
         for p in files:
             h.update(
                 str(p.resolve().relative_to(BASE.resolve())).replace("\\", "/").encode()
@@ -314,6 +361,55 @@ class _ReplayDisk:
         self.written += self.n_pending
         self.pending = {}
         self.n_pending = 0
+
+
+def prune_replay_cache(
+    root: Optional[Path] = None, *, dry_run: bool = False
+) -> dict[str, Any]:
+    """清理重放备忘（v0.465）：①删非当前源码版本的目录；②当前版本各票 jsonl 只留最近一次运行
+    写过的表以外仍「活」的部分——判据：同票同内层键多表并存时只能靠数据摘要区分新旧，此处保守地
+    **只做①与坏行剔除 + 同 (表, 键) 去重**，不猜哪张表过期（过期表最多占盘，不影响正确性）。"""
+    import shutil  # noqa: PLC0415
+
+    root = root or replay_cache_root()
+    out: dict[str, Any] = {
+        "root": str(root),
+        "removed_versions": [],
+        "bytes_before": 0,
+        "bytes_after": 0,
+    }
+    if root is None or not root.is_dir():
+        return out
+    cur = replay_code_version()
+    for d in sorted(p for p in root.iterdir() if p.is_dir()):
+        size = sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+        out["bytes_before"] += size
+        if d.name != cur:
+            out["removed_versions"].append(d.name)
+            if not dry_run:
+                shutil.rmtree(d)
+            continue
+        for f in d.rglob("*.jsonl"):
+            keep: dict[Any, str] = {}
+            for line in f.read_text(encoding="utf-8").splitlines():
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(row, list) or len(row) < 3:
+                    continue
+                k = ("F", row[1]) if row[0] == "F" else (row[0], row[1])
+                keep[k] = line  # 后者为准（与读取语义一致）
+            # 字段声明行排前面，保证读取时先于引用
+            lines = [v for k, v in keep.items() if k[0] == "F"] + [
+                v for k, v in keep.items() if k[0] != "F"
+            ]
+            if not dry_run:
+                tmp = f.with_suffix(f".{os.getpid()}.tmp")
+                tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                os.replace(tmp, f)
+        out["bytes_after"] += sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+    return out
 
 
 class ReplayMemo:

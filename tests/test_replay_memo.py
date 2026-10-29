@@ -194,3 +194,61 @@ def test_session_decorator_injected_no_disk_and_reentrant(tmp_path, monkeypatch)
     seen.clear()
     outer(A())
     assert seen[0][1] is None
+
+
+# ── v0.465：版本哈希收窄 + prune ─────────────────────────────
+
+
+def test_version_closure_covers_engine_and_excludes_studies():
+    names = {p.as_posix().split("src/custos/")[1] for p in fes.replay_source_files()}
+    for must in (
+        "research/backtest_factors.py",
+        "core/indicators.py",
+        "core/paths.py",
+    ):
+        assert must in names, must
+    for mustnt in (
+        "research/factor_exit_study.py",
+        "research/bear_regime_study.py",
+        "research/plan_rules_replay.py",
+        "research/criteria_kit.py",
+    ):
+        assert mustnt not in names, mustnt
+
+
+def test_version_tracks_replay_function_source(monkeypatch):
+    v0 = fes.replay_code_version()
+    monkeypatch.setattr(fes, "_REPLAY_CODE_VERSION", None)
+    import inspect
+
+    real = inspect.getsource
+    monkeypatch.setattr(inspect, "getsource", lambda o: real(o) + "#changed")
+    assert fes.replay_code_version() != v0
+    monkeypatch.setattr(fes, "_REPLAY_CODE_VERSION", None)
+
+
+def test_prune_removes_stale_versions_and_dedups(tmp_path):
+    pc = _world()
+    calls = _calls(pc)
+    ref = [fes.replay_signals(pc, s, p, RG, 25.0) for s, p in calls]
+    for _ in range(2):  # 两轮各写一遍 ⇒ 重复行（第二轮命中不写——手工制造重复）
+        fes.enable_replay_memo(1_000_000, tmp_path)
+        for s, p in calls:
+            fes.replay_signals(pc, s, p, RG, 25.0)
+        fes.enable_replay_memo(0)
+    cur = tmp_path / fes.replay_code_version()
+    f = next(cur.rglob("*.jsonl"))
+    f.write_text(f.read_text(encoding="utf-8") * 2 + "garbage\n", encoding="utf-8")
+    (tmp_path / "deadbeefdeadbeef" / "00").mkdir(parents=True)
+    (tmp_path / "deadbeefdeadbeef" / "00" / "000001.jsonl").write_text(
+        "x\n", encoding="utf-8"
+    )
+    dry = fes.prune_replay_cache(tmp_path, dry_run=True)
+    assert dry["removed_versions"] == ["deadbeefdeadbeef"]
+    assert (tmp_path / "deadbeefdeadbeef").exists()
+    out = fes.prune_replay_cache(tmp_path)
+    assert not (tmp_path / "deadbeefdeadbeef").exists()
+    assert out["bytes_after"] < out["bytes_before"]
+    m = fes.enable_replay_memo(1_000_000, tmp_path)
+    assert [fes.replay_signals(pc, s, p, RG, 25.0) for s, p in calls] == ref
+    assert m.misses == 0

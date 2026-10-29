@@ -85,3 +85,14 @@ def test_cli_exit_codes(tmp_path):
     assert sad.main([str(a), str(a)]) == 0
     assert sad.main([str(a), str(b), "--out", str(tmp_path / "o.json")]) == 1
     assert sad.main([str(a), str(tmp_path / "nope.json")]) == 2
+
+
+def test_score_dependent_list_length_diff_allowed():
+    a = _rep()
+    b = _rep()
+    a["criteria"]["C2"]["passing_rdd_merged"] = [5.0, 6.0]
+    b["criteria"]["C2"]["passing_rdd_merged"] = [5.0]
+    r = sad.compare(a, b)
+    assert r["passed"] and not r["missing"]
+    a["accounting"]["mining_a"]["n_extra"] = 1
+    assert not sad.compare(a, b)["passed"]
