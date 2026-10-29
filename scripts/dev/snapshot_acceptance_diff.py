@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
-"""#116 验收①对拍（v0.462，owner 2026-10-27 放宽口径）：真实数据 vs 快照的同 commit 研究产物逐字段比对。
+"""#116 验收①对拍（v0.462 owner 2026-10-27 放宽口径；v0.468 owner 2026-10-29 选 b 再加 tick 级容差）：真实数据 vs 快照的同 commit 研究产物逐字段比对。
 
 放宽后的验收口径（写死）：
 
-- **不依赖 V0 分的字段必须逐位一致**：全候选（collect_all）口径的 margin / 胜率 / 盈亏比 / 期望 / 笔数 / 记账 /
-  分布画像 / C4 随机宽度臂池等——它们只由价格与出场规则决定，快照与真实数据输入相同就必须相同；
+- **不依赖 V0 分的字段必须一致**：全候选（collect_all）口径的 margin / 胜率 / 盈亏比 / 期望 / 笔数 / 记账 /
+  分布画像 / C4 随机宽度臂池等。v0.468 起数值叶子带 **tick 级容差**（``STRICT_FLOAT_TOL``，绝对差 ≤2e-3）：
+  快照物理截断 holdout 权息 ⇒ 前复权锚点差一个每票常数（v0.467 实测 41/41 不一致票全有 holdout 权息、
+  0 例非常数比），经涨跌停 / tick 取整的非比例环节放大成 ≤~2e-4 的 margin 级微差；**整数叶子（笔数 /
+  计数）不在容差内，必须逐位**——常数比只动价格不动交易集合；
 - **依赖 V0 分的字段允许微差**：每日 top-N 选中集与组合层（``n_taken`` / ``ret_over_dd`` / ``rdd_gate`` /
   ``objective`` / ``total_return`` / ``sel_*`` / ``portfolio`` …）。原因：as-of V0 分要信号日前 1200 根日线
   （周 / 月 MACD 腿），挖掘 B 信号往前 1200 根落进判定段，快照物理上没有这段数据；
@@ -47,6 +50,10 @@ SCORE_DEPENDENT_KEYS = {
 SCORE_DEPENDENT_SEGMENTS = ("portfolio", "sel_", "selected", "taken", "rdd")
 #: 判决字段：必须一致
 VERDICT_KEYS = {"verdict", "ok", "state"}
+#: v0.468（owner 2026-10-29 验收修法选 b）：strict 数值叶子的 tick 级容差。
+#: 实测常数比污染的上界 ~1.5e-4（margin）/ 1e-3（盈亏比），取 2e-3 留 ~10x 余量；
+#: 再大就不是「tick 级」而是真输入差。整数叶子不适用（见 compare）。
+STRICT_FLOAT_TOL = 2e-3
 #: 不参与比对（运行环境 / 溯源）
 IGNORED_SEGMENTS = (
     "provenance",
@@ -104,6 +111,7 @@ def compare(real: Any, snap: Any) -> dict[str, Any]:
         "strict_mismatch": [],
         "verdict_mismatch": [],
         "score_dependent_diff": [],
+        "tolerance_diff": [],
         "missing": [],
         "n_compared": 0,
     }
@@ -128,8 +136,19 @@ def compare(real: Any, snap: Any) -> dict[str, Any]:
             isinstance(a, (int, float))
             and isinstance(b, (int, float))
             and not isinstance(a, bool)
+            and not isinstance(b, bool)
         ):
             row["abs_diff"] = abs(float(a) - float(b))
+            # v0.468：strict 浮点叶子走 tick 级容差；整数（笔数/计数）必须逐位。
+            # 容差带 1e-9 相对毛边：payoff_ratio 等字段落盘即三位舍入，十进制恰等于
+            # 2e-3 的差在二进制浮点里是 0.0020000000000000018，不该因此误判超差。
+            if (
+                cls == "strict"
+                and row["abs_diff"] <= STRICT_FLOAT_TOL * (1 + 1e-9)
+                and not (isinstance(a, int) and isinstance(b, int))
+            ):
+                out["tolerance_diff"].append(row)
+                continue
         {"strict": out["strict_mismatch"], "verdict": out["verdict_mismatch"]}.get(
             cls, out["score_dependent_diff"]
         ).append(row)
@@ -165,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"[snap-acc] 比对 {rep['n_compared']} 个字段：严格不一致 {len(rep['strict_mismatch'])}，"
         f"判决翻转 {len(rep['verdict_mismatch'])}，缺字段 {len(rep['missing'])}，"
+        f"tick 容差内微差 {len(rep['tolerance_diff'])}，"
         f"分数相关微差 {len(rep['score_dependent_diff'])}（最大绝对差 {rep['score_dependent_max_abs_diff']:.3g}）"
     )
     for k in ("strict_mismatch", "verdict_mismatch", "missing"):

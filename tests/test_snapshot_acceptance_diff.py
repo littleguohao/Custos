@@ -64,11 +64,28 @@ def test_score_dependent_diff_allowed_and_provenance_ignored():
 
 
 def test_strict_field_diff_fails():
-    r = sad.compare(_rep(), _rep(**{"windows.mining_a.x10.win_rate": 0.4001}))
+    # 超出 tick 容差（2e-3）的严格字段差异 ⇒ 不通过
+    r = sad.compare(_rep(), _rep(**{"windows.mining_a.x10.win_rate": 0.41}))
     assert not r["passed"] and r["strict_mismatch"][0]["path"].endswith("win_rate")
-    assert not sad.compare(_rep(), _rep(**{"criteria.C2.delta_margin": 0.0011}))[
+    assert not sad.compare(_rep(), _rep(**{"criteria.C2.delta_margin": 0.005}))[
         "passed"
     ]
+
+
+def test_strict_field_tick_tolerance_passes():
+    # v0.468（owner 选 b）：容差内浮点微差放行但记账；整数叶子（笔数）不在容差内
+    r = sad.compare(
+        _rep(),
+        _rep(
+            **{
+                "windows.mining_a.x10.win_rate": 0.4001,
+                "criteria.C2.delta_margin": 0.0011,
+            }
+        ),
+    )
+    assert r["passed"] and len(r["tolerance_diff"]) == 2
+    r2 = sad.compare(_rep(), _rep(**{"windows.mining_a.x10.n": 91}))
+    assert not r2["passed"] and r2["strict_mismatch"][0]["path"].endswith(".n")
 
 
 def test_verdict_flip_fails_even_if_score_dependent():
