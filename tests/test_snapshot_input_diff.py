@@ -1,7 +1,11 @@
-"""#116 输入层对拍脚本 compare 纯函数（v0.465）。"""
+"""#116 输入层对拍脚本 compare 与 _load 缺数容错（v0.467）。"""
 
 import importlib.util
 from pathlib import Path
+
+import pandas as pd
+
+from custos.datasource.local_tdx import local_tdx_data
 
 SCRIPT = (
     Path(__file__).resolve().parents[1] / "scripts" / "dev" / "snapshot_input_diff.py"
@@ -35,3 +39,32 @@ def test_identical_constant_and_nonconstant():
         rep["n_nonconstant"],
         rep["n_error"],
     ) == (1, 1, 1, 1)
+
+
+def test_load_records_empty_and_bad_schema_without_aborting(monkeypatch):
+    frames = {
+        "920025": pd.DataFrame(),
+        "bad": pd.DataFrame({"date": ["2022-01-04"]}),
+        "good": pd.DataFrame(
+            {
+                "date": ["2017-01-03", "2022-01-04"],
+                "close": [10.0, 11.0],
+                "low": [9.0, 10.0],
+            }
+        ),
+    }
+    monkeypatch.setattr(
+        local_tdx_data,
+        "get_ohlcv_table",
+        lambda code, count: frames[code],
+    )
+
+    got = sid._load(["920025", "bad", "good"])
+
+    assert got["920025"] == {"error": "empty_ohlcv"}
+    assert got["bad"] == {"error": "missing_columns=close,low"}
+    assert got["good"] == {
+        "date": ["2022-01-04"],
+        "close": [11.0],
+        "low": [10.0],
+    }

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""#116 输入层对拍（v0.465）：真实数据 vs 快照的**前复权日线**逐票比对，定位产物层不一致的来源。
+"""#116 输入层对拍（v0.467）：真实数据 vs 快照的**前复权日线**逐票比对，定位产物层不一致的来源。
 
 假设（待本脚本证实 / 证伪）：快照截掉了 holdout（≥2026-09-05）的权息事件 ⇒ 前复权锚点不同，
 快照价格 = 真实价格 × 每票一个常数。收益比例不变，但出场模拟里**非比例**的环节会出差：
@@ -42,15 +42,21 @@ def _load(codes: list[str]) -> dict[str, Any]:
     for c in codes:
         try:
             df = local_tdx_data.get_ohlcv_table(c, count=100000)
+            if df.empty:
+                out[c] = {"error": "empty_ohlcv"}
+                continue
+            missing = sorted({"date", "close", "low"} - set(df.columns))
+            if missing:
+                out[c] = {"error": f"missing_columns={','.join(missing)}"}
+                continue
+            df = df[df["date"].astype(str).map(_kept)]
+            out[c] = {
+                "date": df["date"].astype(str).tolist(),
+                "close": df["close"].astype(float).tolist(),
+                "low": df["low"].astype(float).tolist(),
+            }
         except Exception as exc:  # noqa: BLE001 — 逐票容错，记原因
             out[c] = {"error": repr(exc)}
-            continue
-        df = df[df["date"].astype(str).map(_kept)]
-        out[c] = {
-            "date": df["date"].astype(str).tolist(),
-            "close": df["close"].astype(float).tolist(),
-            "low": df["low"].astype(float).tolist(),
-        }
     return out
 
 
