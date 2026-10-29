@@ -158,6 +158,8 @@ def _args(**kw):
         universe_seed=42,
     )
     base.update(kw)
+    # v0.466：既有用例测随机臂池语义 ⇒ 默认跑满；提前终止另有专测
+    base.setdefault("no_early_stop", True)
     return argparse.Namespace(**base)
 
 
@@ -401,3 +403,15 @@ def test_ret_block_margin_is_breakeven_margin():
     assert b["payoff_hi"] == pytest.approx(2.0)
     assert b["margin_hi"] == pytest.approx(0.5 - 1 / 3)
     assert b["mean_ret_diff"] == pytest.approx(0.025 - r.mean())
+
+
+def test_early_stop_same_feature_verdicts_v0466():
+    """v0.466：全部特征 C1~C3 已定结局才跳过；逐特征结局与跑满一致。"""
+    for seed in range(3):
+        for edge in (False, True):
+            e = _run(seed, edge=edge, no_early_stop=False)
+            f = _run(seed, edge=edge, no_early_stop=True)
+            assert {k: v["verdict"] for k, v in e["features"].items()} == {
+                k: v["verdict"] for k, v in f["features"].items()
+            }
+            assert e["verdict"] == f["verdict"]

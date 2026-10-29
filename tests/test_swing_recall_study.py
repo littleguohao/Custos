@@ -474,6 +474,8 @@ def _args(**kw):
         score_workers=1,
     )
     base.update(kw)
+    # v0.466：既有用例测随机臂池语义 ⇒ 默认跑满；提前终止另有专测
+    base.setdefault("no_early_stop", True)
     return argparse.Namespace(**base)
 
 
@@ -754,3 +756,36 @@ def test_scan_workers_bit_identical():
     b = sr._build_window(seg, *span, scan_workers=2, **kw)
     assert list(a) == list(b)  # 顶层键序一致
     assert _norm(a) == _norm(b)
+
+
+def test_early_stop_same_object_status_v0466():
+    """v0.466：无两窗复现对象 ⇒ 跳过随机臂；对象状态与跑满一致。"""
+    for seed in range(2):
+        for edge in (False, True):
+            e = _world_run(seed, edge, no_early_stop=False)
+            f = _world_run(seed, edge, no_early_stop=True)
+            assert e["verdict"] == f["verdict"]
+            key = "objects" if "objects" in e else None
+            if key:
+                assert {o: v.get("status") for o, v in e[key].items()} == {
+                    o: v.get("status") for o, v in f[key].items()
+                }
+
+
+def test_early_stop_triggers_when_nothing_replicates_v0466(monkeypatch):
+    monkeypatch.setattr(sr, "LIFT_MIN", 1e9)  # 强制无复现对象
+    e = _world_run(0, True, no_early_stop=False)
+    f = _world_run(0, True, no_early_stop=True)
+
+    def es(rep):
+        return next(
+            v["early_stop"]
+            for v in rep.values()
+            if isinstance(v, dict) and "early_stop" in v
+        )
+
+    assert es(e)["skipped"] is True and es(f) == {"skipped": False}
+    assert e["verdict"] == f["verdict"] and e["robust_leads"] == f["robust_leads"] == []
+    assert {o: v["status"] for o, v in e["objects"].items()} == {
+        o: v["status"] for o, v in f["objects"].items()
+    }

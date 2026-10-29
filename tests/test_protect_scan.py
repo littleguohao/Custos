@@ -25,6 +25,7 @@ def _args(**kw):
         universe_seed=42,
     )
     base.update(kw)
+    base.setdefault("no_early_stop", True)  # v0.466：既有用例测池语义 ⇒ 跑满
     return argparse.Namespace(**base)
 
 
@@ -129,3 +130,13 @@ class TestSentinelProtectMaxOfOne:
                 "protect_scan[max-of-1 哨兵]",
                 lambda s: _run(s, scan_random=25, scan_c4_min_pool=20),
             )
+
+
+def test_early_stop_same_verdict_v0466():
+    """v0.466：R47 扫保护 C1~C3 已定结局 ⇒ 跳过随机臂，结局与跑满一致。"""
+    for seed in range(4):
+        e = _run(seed, no_early_stop=False)
+        f = _run(seed, no_early_stop=True)
+        assert e["verdict"] == f["verdict"], seed
+        if e["criteria"]["C4"]["early_stop"]["skipped"]:
+            assert e["criteria"]["C4"]["evaluated"] == 0

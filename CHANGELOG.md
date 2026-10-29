@@ -468,6 +468,7 @@
 | 2026-10-28 | v0.463 | **R40/R45 随机臂提前终止**：不依赖池的判据先判（C1 不足 ⇒ untested；双窗 margin 非同向为正 ⇒ falsified；R45 另加打过不交易与 C3），结局已定即跳过随机臂（`[early-stop]`，C4 记 `early_stop`），总结局与跑满逐位一致；`--no-early-stop` 强制跑满；不进配置哈希 | owner 2026-10-28 | 钉测 +4；R40 单元执行注记 |
 | 2026-10-28 | v0.464 | **重放备忘落盘 + 全研究终端通用**：`fes.replay_session` 装饰 R40/R44~R50/R42 的 `run_study`；表键 = (票, df 内容摘要, 出场参数, regime 摘要, 成本)，按出场源码哈希分目录、只追加 jsonl（~130 B/条），跨运行 / 跨研究复用；注入运行只开内存、重入复用外层；实测新进程读盘 3.9×，读数逐位不变 | owner 2026-10-28 | 钉测 +4 |
 | 2026-10-29 | v0.465 | 重放备忘版本哈希收窄为 `backtest_factors` 包内 import 闭包（AST）+ fes 重放函数源码，研究终端改动不再作废缓存；新 `scripts/dev/prune_replay_cache.py`（删旧版本 / 去重坏行）；#116 新增输入层对拍 `snapshot_input_diff.py`，验收对拍的分数相关列表长度差按微差记 | owner 2026-10-29 | 钉测 +5 |
+| 2026-10-29 | v0.466 | **随机臂提前终止推广到全部研究终端**：`criteria_kit.verdict_without_c4`（穷举 C4 四态结局相同）+ `assemble_c4_pool_or_skip` 单源；接入 R44 主流程 / 扫宽、R47、R48（全部特征已定才跳）、R49 / R50（无两窗复现才跳）；结局逐位不变，`--no-early-stop` 跑满；runbook 加「探索类先 `--universe-sample 1000` 摸底、读数只作描述」约定 | owner 2026-10-29 | 钉测 +9 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

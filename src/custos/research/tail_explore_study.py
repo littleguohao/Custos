@@ -357,7 +357,15 @@ def run_study(
         ld = pipeline(pnl[wa], pnl[wb], pa_, pb_, args.min_n)
         return _lead_stat(pnl[wa], ld, pa_)
 
-    pool_blk = kit.assemble_c4_pool(args.n_random, _arm)
+    # v0.466：池只决定「已复现线索」是否升 lead_robust；无复现线索 ⇒ 全部 a_only，与池无关
+    pool_blk = kit.assemble_c4_pool_or_skip(
+        args.n_random,
+        _arm,
+        skip_reason=(
+            None if any(ld["replicated"] for ld in leads) else "无两窗复现线索"
+        ),
+        enabled=not getattr(args, "no_early_stop", False),
+    )
     pool = pool_blk["pool"]
     q = kit.q95(pool)
     for ld in leads:
@@ -399,7 +407,10 @@ def run_study(
         "c4_pool": {
             "q95": q,
             "pool": pool,
-            **{k: pool_blk[k] for k in ("evaluated", "gate_pass_rate", "target_pool")},
+            **{
+                k: pool_blk[k]
+                for k in ("evaluated", "gate_pass_rate", "target_pool", "early_stop")
+            },
         },
         "r48_side": {"verdict": base["verdict"], "candidates": base["candidates"]},
         # 同次 R48 完整产物（main 落成 _tail_feature__<r48_tag>.json，一条命令出两面——v0.444）
@@ -432,6 +443,11 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--cost-bps", type=float, default=25.0)
     ap.add_argument("--top-n", type=int, default=20)
     ap.add_argument("--n-random", type=int, default=N_RANDOM, help="簇级置换臂数")
+    ap.add_argument(
+        "--no-early-stop",
+        action="store_true",
+        help="v0.466：结局已与随机臂池无关时仍跑满臂（默认跳过——结局逐位不变，只省臂阶段）",
+    )
     ap.add_argument("--c4-min-pool", type=int, default=C4_MIN_POOL)
     ap.add_argument(
         "--min-n",

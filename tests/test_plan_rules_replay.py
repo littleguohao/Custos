@@ -53,6 +53,8 @@ def _args(**kw):
         universe_seed=42,
     )
     base.update(kw)
+    # v0.466：既有用例测随机臂池语义 ⇒ 默认跑满；提前终止另有专测
+    base.setdefault("no_early_stop", True)
     return argparse.Namespace(**base)
 
 
@@ -845,6 +847,12 @@ class TestLegacyR40Compat:
         for k in ("git_sha", "git_dirty", "pre_reg_blob_hash", "objective_version"):
             prov.pop(k, None)
         rep["provenance"] = prov
+        # v0.466 受命新增字段：C4.early_stop（本夹具跑满 ⇒ skipped=False），其余逐位同基准
+        crit = dict(rep["criteria"])
+        c4 = dict(crit["C4"])
+        assert c4.pop("early_stop") == {"skipped": False}
+        crit["C4"] = c4
+        rep["criteria"] = crit
         return rep
 
     def test_report_bit_identical_to_pre_switch(self):
@@ -1124,6 +1132,8 @@ def _scan_args(**kw):
         universe_seed=42,
     )
     base.update(kw)
+    # v0.466：既有用例测随机臂池语义 ⇒ 默认跑满；提前终止另有专测
+    base.setdefault("no_early_stop", True)
     return argparse.Namespace(**base)
 
 
@@ -1446,3 +1456,32 @@ class TestAnchorJudgmentBatch:
         ]
         assert blk["line"]["m"] == 4 and blk["line"]["alpha"] == 0.0125
         assert blk["verdict"] in {"candidate", "provisional", "falsified"}
+
+
+class TestEarlyStopV0466:
+    """v0.466：C1~C3 已定结局 ⇒ 跳过随机臂；结局与跑满逐位一致。"""
+
+    def test_main_flow(self):
+        for replay in (_replay_flat, _replay_candidate):
+            e = _run(
+                _mk_per_code(), replay, n_random=4, c4_min_pool=3, no_early_stop=False
+            )
+            f = _run(
+                _mk_per_code(), replay, n_random=4, c4_min_pool=3, no_early_stop=True
+            )
+            assert e["verdict"] == f["verdict"]
+            es = e["criteria"]["C4"]["early_stop"]
+            if es["skipped"]:
+                assert e["criteria"]["C4"]["evaluated"] == 0
+
+    def test_width_scan(self):
+        skipped = 0
+        for seed in range(4):
+            for edge in (False, True):
+                e = _scan_run(seed, edge, no_early_stop=False)
+                f = _scan_run(seed, edge, no_early_stop=True)
+                assert e["verdict"] == f["verdict"], (seed, edge)
+                if e["criteria"]["C4"]["early_stop"]["skipped"]:
+                    skipped += 1
+                    assert e["criteria"]["C4"]["evaluated"] == 0
+        assert skipped > 0, "夹具里至少一例应触发提前终止"

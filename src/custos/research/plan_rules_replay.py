@@ -650,7 +650,13 @@ def run_study(
             return None
         return arm_rd["margin"] - live_m["margin"]
 
-    c4_pool = kit.assemble_c4_pool(args.n_random, _arm)
+    _decided = kit.verdict_without_c4(c1_ok=c1["ok"], c2_ok=c2["ok"], c3_ok=c3["ok"])
+    c4_pool = kit.assemble_c4_pool_or_skip(
+        args.n_random,
+        _arm,
+        skip_reason=None if _decided is None else f"C1~C3 已定结局 {_decided}",
+        enabled=not getattr(args, "no_early_stop", False),
+    )
     pool = c4_pool["pool"]
     q95_m = kit.q95(pool)
     plan_delta = (
@@ -671,6 +677,7 @@ def run_study(
         "evaluated": c4_pool["evaluated"],
         "gate_pass": c4_pool["gate_pass"],
         "gate_pass_rate": c4_pool["gate_pass_rate"],
+        "early_stop": c4_pool["early_stop"],
         "q95": q95_m,
         "plan_delta_mining": plan_delta,
         "min_pool": args.c4_min_pool,
@@ -1314,7 +1321,13 @@ def run_width_scan(
             best = d if best is None or d > best else best
         return best
 
-    c4_pool = kit.assemble_c4_pool(args.scan_random, _arm)
+    _decided = kit.verdict_without_c4(c1_ok=c1["ok"], c2_ok=c2["ok"], c3_ok=c3["ok"])
+    c4_pool = kit.assemble_c4_pool_or_skip(
+        args.scan_random,
+        _arm,
+        skip_reason=None if _decided is None else f"C1~C3 已定结局 {_decided}",
+        enabled=not getattr(args, "no_early_stop", False),
+    )
     pool = c4_pool["pool"]
     plan_delta = c2.get("merged_delta_margin") if x_star is not None else None
     c4_state = kit.c4_state_of(
@@ -1328,6 +1341,7 @@ def run_width_scan(
         "evaluated": c4_pool["evaluated"],
         "gate_pass": c4_pool["gate_pass"],
         "gate_pass_rate": c4_pool["gate_pass_rate"],
+        "early_stop": c4_pool["early_stop"],
         "q95": kit.q95(pool),
         "plan_delta_merged": plan_delta,
         "min_pool": args.scan_c4_min_pool,
@@ -1462,6 +1476,11 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--top-n", type=int, default=20)
     ap.add_argument("--cost-bps", type=float, default=COST_BPS_DEFAULT)
     ap.add_argument("--n-random", type=int, default=DEFAULT_N_RANDOM)
+    ap.add_argument(
+        "--no-early-stop",
+        action="store_true",
+        help="v0.466：结局已与随机臂池无关时仍跑满臂（默认跳过——结局逐位不变，只省臂阶段）",
+    )
     ap.add_argument("--c4-min-pool", type=int, default=C4_MIN_POOL)
     ap.add_argument("--seed", type=int, default=20261009)
     ap.add_argument(
@@ -1877,7 +1896,13 @@ def run_protect_scan(
             best = d if best is None or d > best else best
         return best
 
-    pool_blk = kit.assemble_c4_pool(args.scan_random, _arm)
+    _decided = kit.verdict_without_c4(c1_ok=c1["ok"], c2_ok=c2["ok"], c3_ok=c3["ok"])
+    pool_blk = kit.assemble_c4_pool_or_skip(
+        args.scan_random,
+        _arm,
+        skip_reason=None if _decided is None else f"C1~C3 已定结局 {_decided}",
+        enabled=not getattr(args, "no_early_stop", False),
+    )
     pool = pool_blk["pool"]
     plan_delta = c2.get("merged_delta_margin")
     c4_state = kit.c4_state_of(
@@ -1896,6 +1921,7 @@ def run_protect_scan(
                 "gate_pass_rate",
                 "max_arms",
                 "target_pool",
+                "early_stop",
             )
         },
         "min_pool": args.scan_c4_min_pool,

@@ -190,3 +190,17 @@ def test_main_writes_both_products(tmp_path):
     )
     for k in ("features", "c4_pool", "descriptive", "n_trades", "verdict"):
         assert both[k] == solo[k], k
+
+
+def test_early_stop_same_lead_status_v0466():
+    """v0.466：无两窗复现线索 ⇒ 跳过随机臂；线索状态与跑满一致。"""
+    for seed in range(3):
+        for edge in (False, True):
+            e = _run(seed, edge=edge, no_early_stop=False)
+            f = _run(seed, edge=edge, no_early_stop=True)
+            assert (
+                e["verdict"] == f["verdict"] and e["robust_leads"] == f["robust_leads"]
+            )
+            assert [(d["cell"], d["status"]) for d in e["leads"]] == [
+                (d["cell"], d["status"]) for d in f["leads"]
+            ]

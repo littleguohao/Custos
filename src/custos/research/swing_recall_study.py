@@ -1093,7 +1093,15 @@ def run_study(
                 best = max(best, min(la, lb))
         return best  # 无复现记 0（R49 同口径——臂恒有值，池必满 N）
 
-    pool_blk = kit.assemble_c4_pool(args.n_random, _arm)
+    # v0.466：池只决定「已复现对象」是否升 lead_robust；无复现对象 ⇒ 状态与池无关
+    pool_blk = kit.assemble_c4_pool_or_skip(
+        args.n_random,
+        _arm,
+        skip_reason=(
+            None if any(objs[o]["replicated"] for o in OBJECTS) else "无两窗复现对象"
+        ),
+        enabled=not getattr(args, "no_early_stop", False),
+    )
     pool = pool_blk["pool"]
     q95 = kit.q95(pool)
     for o in OBJECTS:
@@ -1185,7 +1193,10 @@ def run_study(
         "c4_pool": {
             "q95": q95,
             "pool": pool,
-            **{k: pool_blk[k] for k in ("evaluated", "gate_pass_rate", "target_pool")},
+            **{
+                k: pool_blk[k]
+                for k in ("evaluated", "gate_pass_rate", "target_pool", "early_stop")
+            },
         },
         "window_usage": {
             "window": "not_read",
@@ -1295,6 +1306,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--cost-bps", type=float, default=25.0)
     ap.add_argument("--top-n", type=int, default=20, help="B1 漏斗 L4 当日 top-N")
+    ap.add_argument(
+        "--no-early-stop",
+        action="store_true",
+        help="v0.466：结局已与随机臂池无关时仍跑满臂（默认跳过——结局逐位不变，只省臂阶段）",
+    )
     ap.add_argument(
         "--n-random", type=int, default=N_RANDOM, help="零假设臂数（保簇随机局部低点）"
     )

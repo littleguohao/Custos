@@ -597,11 +597,27 @@ def run_study(
         vals = [v for f in FEATURES if (v := _min_lift(per, f)) is not None]
         return max(vals) if vals else None
 
-    pool_blk = kit.assemble_c4_pool(args.n_random, _arm)
+    crits = {f: judge(real, f) for f in FEATURES}
+    _dec = [
+        kit.verdict_without_c4(
+            c1_ok=c["C1"]["ok"], c2_ok=c["C2"]["ok"], c3_ok=c["C3"]["ok"]
+        )
+        for c in crits.values()
+    ]
+    pool_blk = kit.assemble_c4_pool_or_skip(
+        args.n_random,
+        _arm,
+        skip_reason=(
+            f"全部 {len(FEATURES)} 个特征的 C1~C3 已定结局"
+            if all(d is not None for d in _dec)
+            else None
+        ),
+        enabled=not getattr(args, "no_early_stop", False),
+    )
     pool = pool_blk["pool"]
     feats: dict[str, Any] = {}
     for f in FEATURES:
-        crit = judge(real, f)
+        crit = crits[f]
         stat = crit["C2"]["min_lift_big"]
         st = kit.c4_state_of(pool, min_pool=args.c4_min_pool, plan_delta=stat)
         crit["C4"] = {"state": st, "stat": stat}
@@ -635,7 +651,10 @@ def run_study(
         "c4_pool": {
             "q95": kit.q95(pool),
             "pool": pool,
-            **{k: pool_blk[k] for k in ("evaluated", "gate_pass_rate", "target_pool")},
+            **{
+                k: pool_blk[k]
+                for k in ("evaluated", "gate_pass_rate", "target_pool", "early_stop")
+            },
         },
         "window_usage": {
             "window": "not_read",
@@ -672,6 +691,11 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--cost-bps", type=float, default=25.0)
     ap.add_argument("--top-n", type=int, default=20)
     ap.add_argument("--n-random", type=int, default=N_RANDOM, help="簇级置换臂数")
+    ap.add_argument(
+        "--no-early-stop",
+        action="store_true",
+        help="v0.466：结局已与随机臂池无关时仍跑满臂（默认跳过——结局逐位不变，只省臂阶段）",
+    )
     ap.add_argument("--c4-min-pool", type=int, default=C4_MIN_POOL)
     ap.add_argument("--seed", type=int, default=20261021)
     ap.add_argument(

@@ -154,6 +154,50 @@ def assemble_c4_pool(
     }
 
 
+def verdict_without_c4(
+    *, c1_ok: bool, c2_ok: Optional[bool], c3_ok: Optional[bool]
+) -> Optional[str]:
+    """v0.466：C1~C3 已定时，若四态结局对 C4 的**每一种**状态都相同 ⇒ 返回该结局（随机臂池改变不了它）；
+    否则 None（结局取决于池，须跑臂）。按 ``verdict_four_state`` 穷举，不另写一份映射。"""
+    vs = {
+        verdict_four_state(c1_ok=c1_ok, c2_ok=c2_ok, c3_ok=c3_ok, c4_state=s)
+        for s in C4_STATES
+    }
+    return vs.pop() if len(vs) == 1 else None
+
+
+def assemble_c4_pool_or_skip(
+    n_random: int,
+    evaluate_arm: Callable[[int], Optional[float]],
+    *,
+    skip_reason: Optional[str],
+    enabled: bool = True,
+    cap_factor: int = 10,
+) -> dict[str, Any]:
+    """v0.466 随机臂提前终止（单一来源）：``skip_reason`` 非 None（调用方已证明结局与池无关）且
+    ``enabled`` ⇒ 不评估任何臂，返回空池（形态同 ``assemble_c4_pool``，C4 状态机落 indeterminate）；
+    否则照常凑池。返回值多一个 ``early_stop`` 块供报告留痕。"""
+    if skip_reason is not None and enabled:
+        import sys  # noqa: PLC0415
+
+        print(
+            f"[early-stop] {skip_reason}——跳过随机臂（--no-early-stop 可强制跑满）",
+            file=sys.stderr,
+        )
+        return {
+            "pool": [],
+            "evaluated": 0,
+            "gate_pass": 0,
+            "max_arms": cap_factor * n_random,
+            "target_pool": n_random,
+            "gate_pass_rate": None,
+            "early_stop": {"skipped": True, "reason": skip_reason},
+        }
+    out = assemble_c4_pool(n_random, evaluate_arm, cap_factor=cap_factor)
+    out["early_stop"] = {"skipped": False}
+    return out
+
+
 # ---------------------------------------------------------------------------
 # 簇构造（v0.335，owner review——C4 打乱粒度按簇不按笔，单一来源）
 # ---------------------------------------------------------------------------
