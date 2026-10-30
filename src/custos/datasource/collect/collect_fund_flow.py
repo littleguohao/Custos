@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Collect fund flow rank from East Money direct API (no akshare dependency)."""
+"""Collect fund flow rank（个股 Kimi Work 东财主源，板块东财 push2）。
+
+``--source auto`` 个股榜优先用内置东财妙想，失败才回退旧 push2；行业/概念
+板块始终保留旧 push2，避免把内置接口的 0 值误当真实资金流。
+"""
 
 from __future__ import annotations
 import json, sys, time
@@ -64,21 +68,8 @@ def fetch_json(url: str) -> dict:
     return r.json()
 
 
-def main(argv=None) -> int:
-    import argparse
-
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--date", default=cn_today().strftime("%Y-%m-%d"))
-    args = ap.parse_args(argv)
-    today = args.date
-    OUT = MARKET_DIR / f"{today}_fund_flow_rank.json"
-
-    # Individual stock fund flow rank (top 200)
-    try:
-        data = fetch_json(EM_URL)
-    except Exception as e:
-        print(f"[WARN] stock fund flow fetch failed: {e}", file=sys.stderr)
-        return 1
+def normalize_stock_payload(data: dict) -> list[dict]:
+    """旧 push2 响应 → 统一 stock_rank 字段，供生产与影子对账共用。"""
     stocks = []
     for item in data.get("data", {}).get("diff", []):
         stocks.append(
@@ -99,6 +90,61 @@ def main(argv=None) -> int:
                 "small_pct": item.get("f87"),
             }
         )
+    return stocks
+
+
+def legacy_stock_rows() -> list[dict]:
+    return normalize_stock_payload(fetch_json(EM_URL))
+
+
+def kimiwork_stock_rows(limit: int = 200) -> list[dict]:
+    from custos.datasource import kimiwork_data  # noqa: PLC0415
+
+    return kimiwork_data.dongcai_fund_flow_stocks(limit=limit)
+
+
+def main(argv=None) -> int:
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--date", default=cn_today().strftime("%Y-%m-%d"))
+    ap.add_argument(
+        "--source",
+        choices=("auto", "legacy", "kimiwork"),
+        default="auto",
+        help="个股榜：auto=内置主源、旧源兜底；板块始终保留旧源",
+    )
+    args = ap.parse_args(argv)
+    today = args.date
+    OUT = MARKET_DIR / f"{today}_fund_flow_rank.json"
+
+    # 个股榜：已完成新旧源对账，内置主源失败时才回退旧 push2。
+    stock_fallback = False
+    if args.source == "legacy":
+        stocks = legacy_stock_rows()
+        stock_source = "eastmoney_direct_api"
+    elif args.source == "kimiwork":
+        stocks = kimiwork_stock_rows()
+        stock_source = "kimiwork_dongcai_screener"
+    else:
+        try:
+            stocks = kimiwork_stock_rows()
+            stock_source = "kimiwork_dongcai_screener"
+        except Exception as e:
+            print(
+                f"[WARN] Kimi Work 个股资金流失败，回退旧 push2: {e}",
+                file=sys.stderr,
+            )
+            try:
+                stocks = legacy_stock_rows()
+                stock_source = "eastmoney_direct_api"
+                stock_fallback = True
+            except Exception as legacy_error:
+                print(
+                    f"[WARN] 个股资金流新旧源均失败: {legacy_error}",
+                    file=sys.stderr,
+                )
+                return 1
 
     # Sector fund flow
     # 失败与"今天真的没有资金流入"必须可区分:以前失败写 []，下游(enrich_candidates
@@ -137,7 +183,13 @@ def main(argv=None) -> int:
         "stock_rank": stocks,
         "sector_rank": sectors,
         "sector_rank_status": sector_status,
-        "source": "eastmoney_direct_api",
+        "source": (
+            "kimiwork_dongcai_screener+eastmoney_direct_api"
+            if stock_source == "kimiwork_dongcai_screener"
+            else "eastmoney_direct_api"
+        ),
+        "stock_source": stock_source,
+        "stock_fallback": stock_fallback,
     }
 
     OUT.parent.mkdir(parents=True, exist_ok=True)

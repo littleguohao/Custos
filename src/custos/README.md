@@ -69,7 +69,7 @@ src/
 
 ## 子包职责
 
-- `datasource/collect/` — `collect_holding_quotes`(持仓+指数报价)、`collect_incremental_market`(A50/CNH/涨跌停梯队等)、`collect_fund_flow`(东财资金流)、`online_quotes`(域B独立在线行情,不依赖TDX)。
+- `datasource/collect/` — `collect_holding_quotes`(持仓+指数报价)、`collect_incremental_market`(A50/CNH/涨跌停梯队等)、`collect_fund_flow`(个股榜内置东财主源、旧 push2 兜底；行业/概念仍走东财 push2)、`online_quotes`(域B独立在线行情,不依赖TDX)。
 - `datasource/`（顶层）— 数据刷新类：`refresh_eod_klines`/`refresh_market_indices`（EOD 与指数）、`sync_compass_amv`（指南针 0AMV 台账）、`tdx_ext_quotes`/`overseas_market_collector`（海外市场）、`breadth_basis`（涨跌家数真值）、`trading_calendar`（交易日历）。2026-08-11 从 market_timing 迁入：它们只依赖 L0/L1，是数据层不是择时。`kimiwork_data`/`kimiwork_agent_gw` 统一封装内置 Yahoo、东财、Wind、CLS，托管 Python 调用，项目环境不新增依赖。
 - `datasource/local_tdx/` — 本地通达信数据封装(tq_http 快照、指南针 AMV、板块),详见 `local_tdx/README.md`。
 - `datasource/news/` — `rss_collector`/`rss_filter`/盘前情报 schema/盘后新闻摘要。

@@ -20,7 +20,7 @@
 | 路径 | 是什么 |
 |---|---|
 | `src/custos/core/` | L0 基建（paths/contracts/indicators/exit_rules）+ L2 因子/交易台账 |
-| `src/custos/datasource/` | L1 数据采集（含 `local_tdx/` 本地通达信封装；`kimiwork_data` 统一适配内置 Yahoo/东财/Wind/CLS） |
+| `src/custos/datasource/` | L1 数据采集（含 `local_tdx/` 本地通达信封装；`kimiwork_data` 统一适配内置 Yahoo/东财/Wind/CLS，个股资金流内置主源） |
 | `src/custos/pipeline/` | L3 四个 stage 包 + L4 五时点 runner（run_0850/0905/1445/1700/1800） |
 | `src/custos/research/` | L4 研究回测（只读管线数据，**生产永不 import 研究**，测试强制） |
 | `src/custos/research/evolution/` | LLM 因子进化引擎（研究侧） |

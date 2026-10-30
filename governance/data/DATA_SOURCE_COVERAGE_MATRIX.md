@@ -64,7 +64,7 @@
 
 | 数据项 | 状态 | 来源 | 采集入口 | 备注 |
 |---|---|---|---|---|
-| 个股主力净流入 | ✅ | **东财 push2** | `collect_fund_flow.py` | ⚠️ 旧文档写的是 `tdx_api_data zjlx`，**实际走东财**；已查证无法本地化（见 `DATA_SOURCE_PRINCIPLE.md`） |
+| 个股主力净流入 | ✅ | **Kimi Work 东财妙想**（旧 push2 兜底） | `collect_fund_flow.py` + `kimiwork_data.py` | 分段 10 名去重补齐 200；2026-10-30 对账前 100 名顺序一致、占比一致，金额仅展示舍入差；板块仍走 push2 |
 | 北向资金 | ✅ | 880863 | mootdx Reader 本地 | 5 日趋势 |
 | 融资融券指数 | ✅ | 880390 | mootdx Reader 本地 | 杠杆情绪 |
 | 两融余额变动 | ❌ | ~~tdx_api_data rzrq~~ | — | **全仓 0 处代码** |

@@ -272,7 +272,7 @@ class TestFundFlowSectorFailure:
 
         monkeypatch.setattr(cff, "fetch_json", fake_fetch)
         monkeypatch.setattr(cff.time, "sleep", lambda s: None)
-        rc = cff.main(["--date", "2026-07-20"])
+        rc = cff.main(["--date", "2026-07-20", "--source", "legacy"])
         assert rc == 0
         out = json.loads(
             (tmp_path / "data" / "market" / "2026-07-20_fund_flow_rank.json").read_text(
@@ -299,7 +299,7 @@ class TestFundFlowSectorFailure:
             ),
         )
         monkeypatch.setattr(cff.time, "sleep", lambda s: None)
-        assert cff.main(["--date", "2026-07-20"]) == 0
+        assert cff.main(["--date", "2026-07-20", "--source", "legacy"]) == 0
         out = json.loads(
             (tmp_path / "data" / "market" / "2026-07-20_fund_flow_rank.json").read_text(
                 encoding="utf-8"
