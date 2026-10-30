@@ -17,7 +17,6 @@
 | 106 | R36 已判路线复核：①R46 已撤回（owner 2026-10-21，配比路不继续）；②Phase 4 p2_sole 随机剔除臂对齐后（v0.386）重算 C4 | P3 | 生产机 | ② 重跑 r36_p4（低优先，选股侧思路重定后再看是否还需要） | R46 结论段、R36 头部审计注记 |
 | 111 | 格子进程内化（性能，最大一块）：score_evolution/strategy_grid 每格一个 backtest_factors 子进程、每格重载全宇宙（m2 实测 s3000 加载 45~53s/格）；改为进程内共享已加载 bars + 信号缓存逐格重打分（同 v0-lattice collect/score 拆分）。须金样逐位钉测、内存账重估 | P3 | 挂起 | R46 已改进程内实现、不再依赖；剩余受益者 = strategy_grid / R36 冻结读数 50 臂 / evolution_loop，等出现大规模格子跑数需求再做 | 性能排查 v0.401~0.403 |
 | 117 | 组合层新方向（单元待立，编号届时分配；R49 已用于逆向画像）：选股无区分力 + 收益靠右尾 ⇒ 铺宽还是集中（top-N / 持仓数 / 单票仓位）× 0AMV 状态化仓位（含 #86 ④盈亏比排序服务仓位）；R3「召回瓶颈未研究」的接续 | P2 | 挂起 | 第二批（R47/R48/R49）读完后起草预注册；工具准备已做（v0.460：`exposure_fn` 状态化仓位 + `scan_portfolio_grid` 网格与平分区间），能力盘点与局限见准备文档 | owner 2026-10-21 方向盘点；[R3](governance/research/R3_selection_discriminability_recall.md)；[准备文档](governance/research/portfolio_layer_prep.md) |
-| 107 | R1/R2 组合层 baseline 对照按 `--tie-seed` 0~19 重跑报区间（baseline 恒 0 分，原读数是代码序截断的单次抽签） | P3 | 生产机 | 命令与汇总工具已落地（v0.441 `tie_seed_summary`，4 条跑数命令见其 docstring）；执行 4 条跑数 + 汇总，区间回填 R1/R2 审计注记 | R1/R2 头部审计注记 |
 | 108 | R37 r37_b1 已实现口径复核（判定窗 +0.0034 贴零，open_end 污染量级可能更大；exit_campaign 产物无逐笔需重跑读数） | P3 | 生产机 | 重跑 r37_b1 读数段 | R37 头部审计注记 |
 | 109 | R40 v2 重跑：按 R40「v2 重跑修订」节在挖掘 A∪B 选型（代码口径 v0.382~0.387），过 C1~C4 再入判定段批次 | P2 | 生产机 | 现在发车：runbook ③ 命令（带 `--load-workers 4 --score-workers 8`，与 R45 共用 V0 分缓存）；R45 已判 falsified，第一批只剩 R40 | R40 v2 重跑修订节 |
 | 60 | plan 信号并入 SIGNAL_ORDER 与否。判据（两条同时成立）：①实现一致性——影子台账非 default 事件 ≥5 个交易日无异常；②规则有效性——R41 已判 falsified（v0.351）路径关闭，只剩 `plan_shadow_review` 累计 K=20 个独立事件（段头计、≥5 只持仓）均值 Δret₅ ≥ 0（凑不满 K ⇒ ②不成立 ⇒ 不并轨）。default 来源永不出 plan 信号；并轨=独立提交、只改 SIGNAL_ORDER | P2 | 观察中 | 影子事件持续累计，攒满或 60 交易日到期后 owner 定夺 | [R41](governance/research/R41_position_plan_rules_replay.md)；owner 2026-10-09 判据；v0.310/0.311/0.314/0.351 |
@@ -37,6 +36,7 @@
 | # | 原事项 | 闭环日期 | 去处 |
 | 116 | 开发机挖掘段数据快照 | 2026-10-29 | v0.453 导出+快照模式+硬闸；验收三轮后 owner 选 (b) 接受 tick 级微差，v0.468 容差口径对拍通过（严格 0 / 翻转 0 / 缺 0）；正式读数仍以生产机为准 |
 | 104 | R10 margin 按已实现口径重算 | 2026-10-30 | report-only 重算（v0.383+ 剔 open_end）：「可用 margin 只在叠 0AMV」仍成立（纯出场全负）；pct_12_amv +5.6→+2.9pp 跌破可用线，可用清单收窄为 4 个；回填 R10 头部审计注记 |
+| 107 | R1/R2 组合层 baseline 对照 tie-seed 0~19 重跑报区间 | 2026-10-30 | 4 跑 + tie_seed_summary（tie_seed_r1r2/）：baseline CAGR p50 +1.0%（A）/+3.2%（B）区间宽；配对 reversal_quality−baseline Δ p50 −99.2%/−47.3%（种子胜率 0%/15%）——rqi 组合层稳定负贡献；审计注记已回填 |
 |---|---|---|---|
 | 1 | 重下通达信完整历史日线 | 2026-08-09 | commit 4c37fae |
 | 2 | 验证 #1 | 2026-08-09 | commit 4c37fae |
