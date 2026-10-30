@@ -56,7 +56,7 @@
 |---|---|---|---|---|
 | 美股三大指数 / 费半 | ✅ | Kimi Work Yahoo | `overseas_market_collector.py` + `kimiwork_data.py` | ^DJI / ^IXIC / ^GSPC / ^SOX；2026-10-30 实测零错误 |
 | 日经 / KOSPI / 恒生科技 | ✅ | Kimi Work Yahoo | 同上 | 含三星 / SK 海力士，不再依赖本机 VPN 直连 |
-| A50 指数代理 / 离岸人民币 | ✅ | Wind EDB 固定代码 | `collect_incremental_market.py` + `kimiwork_data.py` | A50=L5471360，**非期货、显式 proxy**；CNH=M0290205；均校验最近交易日，陈旧即缺数 |
+| A50 指数代理 / 离岸人民币 | ✅ | Wind EDB 固定代码 | `collect_incremental_market.py` + `kimiwork_data.py` | A50=L5471360，**非期货、显式 proxy**；CNH=M0290205；均校验最近交易日，陈旧即缺数。有限对账 14/14 收盘价、13/13 日涨跌一致；Yahoo 无长历史，不能外推长期 |
 | AI 链个股（NVDA/AMD/TSM） | ✅ | Kimi Work Yahoo | `overseas_market_collector.py` | 最近两根真实收盘计算涨跌幅 |
 | 应急降级路径 | ⚠️ | 旧 Yahoo / TDX ext | `CUSTOS_LEGACY_OVERSEAS=1` 才启用 | 默认关闭，不作为日常数据源 |
 
