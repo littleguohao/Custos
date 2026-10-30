@@ -1271,7 +1271,10 @@ def _production(
             return bt._load_one_bars(code, args.count, start, end, warmup_bars=300)
 
         if workers > 1 and len(codes) > 1:
-            return bt.run_codes_parallel(codes, _one, workers)
+            # v0.469：同串行分支剔空表（无日线票返回无 date 列的空 df ⇒ _build_window KeyError，
+            # 开发机快照冒烟实锤；生产机遇退市 / 空 vipdoc 票同样会在 warm 数小时后崩）
+            par = bt.run_codes_parallel(codes, _one, workers)
+            return {c: df for c, df in par.items() if df is not None and len(df)}
         out: dict[str, Any] = {}
         for i, code in enumerate(codes, 1):
             if i % 200 == 0:

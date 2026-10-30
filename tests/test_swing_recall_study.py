@@ -789,3 +789,31 @@ def test_early_stop_triggers_when_nothing_replicates_v0466(monkeypatch):
     assert {o: v["status"] for o, v in e["objects"].items()} == {
         o: v["status"] for o, v in f["objects"].items()
     }
+
+
+def test_production_bars_fn_drops_empty_frames_parallel_v0469(monkeypatch):
+    """v0.469：生产 bars_fn 并行分支同串行剔空表（快照冒烟实锤：空 df 无 date 列 ⇒ KeyError）。"""
+    import pandas as pd
+
+    from custos.datasource.local_tdx import local_tdx_data
+    from custos.research import backtest_factors as bt
+
+    good = pd.DataFrame({"date": ["2010-01-04"], "close": [1.0]})
+    monkeypatch.setattr(
+        bt, "_resolve_universe", lambda ns, ap: ["000001", "000005", "000006"]
+    )
+    monkeypatch.setattr(bt, "load_amv_regime", lambda since: {"2010-01-04": "bull"})
+    monkeypatch.setattr(local_tdx_data, "get_ohlcv_table", lambda c, count: good.copy())
+    monkeypatch.setattr(
+        bt,
+        "_load_one_bars",
+        lambda code, count, s, e, warmup_bars=0: (
+            pd.DataFrame() if code == "000005" else good
+        ),
+    )
+    for workers in (1, 4):
+        args = _args(load_workers=workers, universe_sample=0, universe_local=False)
+        _w, bars_fn, _r = sr._production(args)
+        assert sorted(bars_fn("2010-01-01", "2010-12-31")) == ["000001", "000006"], (
+            workers
+        )
