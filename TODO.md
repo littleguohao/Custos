@@ -36,7 +36,7 @@
 | # | 原事项 | 闭环日期 | 去处 |
 | 116 | 开发机挖掘段数据快照 | 2026-10-29 | v0.453 导出+快照模式+硬闸；验收三轮后 owner 选 (b) 接受 tick 级微差，v0.468 容差口径对拍通过（严格 0 / 翻转 0 / 缺 0）；正式读数仍以生产机为准 |
 | 104 | R10 margin 按已实现口径重算 | 2026-10-30 | report-only 重算（v0.383+ 剔 open_end）：「可用 margin 只在叠 0AMV」仍成立（纯出场全负）；pct_12_amv +5.6→+2.9pp 跌破可用线，可用清单收窄为 4 个；回填 R10 头部审计注记 |
-| 107 | R1/R2 组合层 baseline 对照 tie-seed 0~19 重跑报区间 | 2026-10-30 | 4 跑 + tie_seed_summary（tie_seed_r1r2/）：baseline CAGR p50 +1.0%（A）/+3.2%（B）区间宽；配对 reversal_quality−baseline Δ p50 −99.2%/−47.3%（种子胜率 0%/15%）——rqi 组合层稳定负贡献；审计注记已回填 |
+| 107 | R1/R2 组合层 baseline 对照 tie-seed 0~19 重跑报区间 | 2026-10-30 | 4 跑 + tie_seed_summary（tie_seed_r1r2/）：baseline CAGR p50 +1.0%（A）/+3.2%（B）区间宽；配对 reversal_quality−baseline Δ p50 −99.2%/−47.3%（种子胜率 0%/15%）——rqi 组合层稳定负贡献；审计注记已回填（commit 542c323） |
 |---|---|---|---|
 | 1 | 重下通达信完整历史日线 | 2026-08-09 | commit 4c37fae |
 | 2 | 验证 #1 | 2026-08-09 | commit 4c37fae |
