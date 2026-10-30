@@ -1,6 +1,6 @@
 {
-  "version": "2.2",
-  "updated_at": "2026-08-21T17:30:00+08:00",
+  "version": "2.3",
+  "updated_at": "2026-10-30T14:30:00+08:00",
   "policy": {
     "purpose": "RSS用于事件发现；官方原文/独立来源用于确认；不得直接扩大交易权限。",
     "tiers": {
@@ -80,11 +80,24 @@
       "category": "cn_financial_media",
       "url": "https://api.wallstreetcn.com/apiv1/content/lives?channel=a-stock-channel&limit=100",
       "tier": "B",
-      "enabled": true,
+      "enabled": false,
       "type": "wscn_lives",
       "audit": "200_json",
       "policy_stage": "confirmed_2",
-      "note": "华尔街见闻7x24快讯A股频道,免key公开JSON API;B级专业财经媒体,需2个独立来源确认"
+      "superseded_by": "cls_telegraphs",
+      "note": "2026-10-30 直连 HTTP 403 后停用，改由财联社补位；保留配置仅供追溯"
+    },
+    {
+      "id": "cls_telegraphs",
+      "name": "财联社-电报快讯",
+      "category": "cn_financial_media",
+      "url": "https://www.cls.cn/telegraph",
+      "tier": "B",
+      "enabled": true,
+      "type": "kimiwork_cls",
+      "audit": "kimiwork_api",
+      "policy_stage": "confirmed_2",
+      "note": "Kimi Work 内置财联社快讯；B级专业财经媒体，需2个独立来源确认"
     },
     {
       "id": "jin10_flash",

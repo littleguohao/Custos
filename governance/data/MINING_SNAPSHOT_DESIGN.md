@@ -59,7 +59,8 @@
 - 导出侧两个实现细节：过滤后 0 条的 `.day` / 板块 CSV **不写出**（宇宙枚举自动跟着缩）；
   vipdoc 保留记录按**原样 32 字节切片**写回（不 unpack/repack，保验收 1 的逐位一致）；
   `--out` 守卫口径 = 位于仓库内且不在 `artifacts/cache/` 之下 ⇒ 拒；另有只读的 `--verify <dir>`
-  （逐文件重算 sha256 比对 MANIFEST）。
+  （逐文件重算 sha256 比对 MANIFEST）。2026-10-30 起原始路径与 resolve 后路径双判，
+  防止 `data/` 是指向仓外的 junction 时 `Path.resolve()` 把仓库相对路径映射出仓库、守卫漏判。
 - **review 修补（2026-10-26，合入前）**：① `tests/conftest.py` 顶部在任何 custos import 之前
   `pop("CUSTOS_DATA_SNAPSHOT")`——SNAPSHOT_ROOT 在 import paths 时定死，带着它跑 pytest 会让
   整个套件在快照模式下跑（台账测试被硬闸拦、加载测试读真实快照），报错难懂；专项测试走

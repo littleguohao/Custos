@@ -571,9 +571,16 @@ def main(
     if args.verify:
         return verify(Path(args.verify))
 
-    out = Path(args.out).resolve()
-    cache_root = (BASE / "artifacts" / "cache").resolve()
-    if out.is_relative_to(BASE) and not out.is_relative_to(cache_root):
+    raw_out = Path(args.out)
+    raw_cache = BASE / "artifacts" / "cache"
+    out = raw_out.resolve()
+    base_root = BASE.resolve()
+    cache_root = raw_cache.resolve()
+    # 原始路径与 resolve 后路径都要判：data/ 是指向仓外的 junction 时，前者能在
+    # 任何导出前拦住仓库相对路径，后者兜住符号链接别名；两者缺一不可。
+    if (
+        raw_out.is_relative_to(BASE) and not raw_out.is_relative_to(raw_cache)
+    ) or (out.is_relative_to(base_root) and not out.is_relative_to(cache_root)):
         print(f"❌ --out 位于仓库内且不在 artifacts/cache/ 之下（防误入库）: {out}")
         return 2
 

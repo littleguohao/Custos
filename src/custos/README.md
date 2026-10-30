@@ -27,6 +27,7 @@ src/
 │   ├── trading_calendar.py  # A 股交易日历刷新与查询（TDX JSON-RPC）
 │   ├── collect/           # 采集:持仓/指数报价、增量行情、资金流、在线行情
 │   ├── local_tdx/         # 本地通达信数据封装（见 local_tdx/README.md）
+│   ├── kimiwork_data.py / kimiwork_agent_gw.py  # 内置 Yahoo/东财/Wind/CLS 适配
 │   ├── news/              # RSS 新闻采集与过滤、盘前情报 schema、盘后摘要
 │   ├── breadth_basis.py   # 涨跌家数口径真值来源
 │   ├── refresh_eod_klines.py / refresh_market_indices.py  # EOD/指数刷新
@@ -69,7 +70,7 @@ src/
 ## 子包职责
 
 - `datasource/collect/` — `collect_holding_quotes`(持仓+指数报价)、`collect_incremental_market`(A50/CNH/涨跌停梯队等)、`collect_fund_flow`(东财资金流)、`online_quotes`(域B独立在线行情,不依赖TDX)。
-- `datasource/`（顶层）— 数据刷新类：`refresh_eod_klines`/`refresh_market_indices`（EOD 与指数）、`sync_compass_amv`（指南针 0AMV 台账）、`tdx_ext_quotes`/`overseas_market_collector`（海外市场）、`breadth_basis`（涨跌家数真值）、`trading_calendar`（交易日历）。2026-08-11 从 market_timing 迁入：它们只依赖 L0/L1，是数据层不是择时。
+- `datasource/`（顶层）— 数据刷新类：`refresh_eod_klines`/`refresh_market_indices`（EOD 与指数）、`sync_compass_amv`（指南针 0AMV 台账）、`tdx_ext_quotes`/`overseas_market_collector`（海外市场）、`breadth_basis`（涨跌家数真值）、`trading_calendar`（交易日历）。2026-08-11 从 market_timing 迁入：它们只依赖 L0/L1，是数据层不是择时。`kimiwork_data`/`kimiwork_agent_gw` 统一封装内置 Yahoo、东财、Wind、CLS，托管 Python 调用，项目环境不新增依赖。
 - `datasource/local_tdx/` — 本地通达信数据封装(tq_http 快照、指南针 AMV、板块),详见 `local_tdx/README.md`。
 - `datasource/news/` — `rss_collector`/`rss_filter`/盘前情报 schema/盘后新闻摘要。
 - `pipeline/market_timing/` — 择时评分、AMV/0AMV 状态机、技术监控、主题跟踪等。

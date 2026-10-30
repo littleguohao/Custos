@@ -236,7 +236,7 @@ class TestHelpers:
     def test_redact_strips_query_string(self):
         """日志脱敏：异常信息里的 **query string** 去掉 —— feed URL 可能带 token/appkey。
 
-        注册表里 6 个源有 1 个带 query string（wscn_lives）。
+        注册表里 7 个源有 1 个带 query string（wscn_lives，已停用但保留配置）。
         """
         out = rc._redact("HTTPError: https://api.x.com/feed?token=abc123&k=v")
         assert "abc123" not in out and "<redacted>" in out

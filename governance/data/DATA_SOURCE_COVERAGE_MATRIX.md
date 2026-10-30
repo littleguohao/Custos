@@ -54,11 +54,11 @@
 
 | 数据项 | 状态 | 来源 | 采集入口 | 备注 |
 |---|---|---|---|---|
-| 美股三大指数 / 费半 | ✅ | Yahoo Finance | `overseas_market_collector.py` | ^DJI / ^IXIC / ^GSPC / ^SOX |
-| 日经 / KOSPI / 恒生科技 | ✅ | Yahoo Finance | 同上 | |
-| A50 期指 / 离岸人民币 | ✅ | Yahoo Finance | 同上 | |
-| AI 链个股（NVDA/AMD/TSM） | ✅ | Yahoo Finance | 同上 | |
-| 降级路径 | ✅ | TDX ext 行情 | `tdx_ext_quotes.py` | Yahoo 不可用时降级（3c7c833） |
+| 美股三大指数 / 费半 | ✅ | Kimi Work Yahoo | `overseas_market_collector.py` + `kimiwork_data.py` | ^DJI / ^IXIC / ^GSPC / ^SOX；2026-10-30 实测零错误 |
+| 日经 / KOSPI / 恒生科技 | ✅ | Kimi Work Yahoo | 同上 | 含三星 / SK 海力士，不再依赖本机 VPN 直连 |
+| A50 期指 / 离岸人民币 | ✅ | 东财 / Wind EDB | `collect_incremental_market.py` + `kimiwork_data.py` | A50=东财日线；CNH=Wind M0290205 |
+| AI 链个股（NVDA/AMD/TSM） | ✅ | Kimi Work Yahoo | `overseas_market_collector.py` | 最近两根真实收盘计算涨跌幅 |
+| 应急降级路径 | ⚠️ | 旧 Yahoo / TDX ext | `CUSTOS_LEGACY_OVERSEAS=1` 才启用 | 默认关闭，不作为日常数据源 |
 
 ## 四、资金流向
 
@@ -87,7 +87,8 @@
 |---|---|---|---|---|
 | 持仓公告 | ⚠️ | `wenda_notice_query` | **cron LLM 调用**（不在 py 里） | 08:50 job 的 toolsAllow 含它；脚本链无此能力 |
 | 宏观 / 财经要闻 | ✅ | RSS | `rss_collector.py` + `rss_filter.py` | 源与过滤规则在 `contracts/RSS_*.json` |
-| 华尔街见闻快讯 | ✅ | wscn 直连 | `rss_collector.py`（wscn_lives 适配器） | 3f01e3a |
+| 华尔街见闻快讯 | 🚫 已停用 | ~~wscn 直连~~ | 2026-10-30 HTTP 403 | 由财联社补位，旧配置仅留追溯 |
+| 财联社快讯 | ✅ | Kimi Work CLS | `rss_collector.py`（kimiwork_cls 适配器） | B 级独立来源；隐藏/删除条目过滤；实测 100 条 |
 | 金十数据快讯 | ✅ | jin10 MCP 直连 | `rss_collector.py`（jin10_mcp 适配器） | v0.95；token 走 env `JIN10_MCP_TOKEN`，缺席该源标 failed 不炸链路 |
 | 研报评级 | ❌ | ~~wenda_report_query~~ | — | **0 处代码** |
 

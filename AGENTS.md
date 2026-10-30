@@ -20,7 +20,7 @@
 | 路径 | 是什么 |
 |---|---|
 | `src/custos/core/` | L0 基建（paths/contracts/indicators/exit_rules）+ L2 因子/交易台账 |
-| `src/custos/datasource/` | L1 数据采集（含 `local_tdx/` 本地通达信封装，文件解析器已下沉于此） |
+| `src/custos/datasource/` | L1 数据采集（含 `local_tdx/` 本地通达信封装；`kimiwork_data` 统一适配内置 Yahoo/东财/Wind/CLS） |
 | `src/custos/pipeline/` | L3 四个 stage 包 + L4 五时点 runner（run_0850/0905/1445/1700/1800） |
 | `src/custos/research/` | L4 研究回测（只读管线数据，**生产永不 import 研究**，测试强制） |
 | `src/custos/research/evolution/` | LLM 因子进化引擎（研究侧） |
@@ -55,6 +55,7 @@ flowchart TB
         TDX["local_tdx/ 通达信封装<br/>vipdoc 日线 · 权息 · 板块文件"]
         COL["collect/ 持仓/指数报价 · 资金流 · 增量行情"]
         NEWS["news/ RSS 采集过滤"]
+        KMI["kimiwork_data + kimiwork_agent_gw<br/>内置 Yahoo / 东财 / Wind / CLS"]
         ADP["顶层适配：trading_calendar · breadth_basis<br/>refresh_eod_klines · sync_compass_amv 等"]
     end
 
@@ -82,6 +83,10 @@ flowchart TB
     TDX --> INF
     COL --> INF
     NEWS --> INF
+    KMI --> INF
+    COL --> KMI
+    NEWS --> KMI
+    ADP --> KMI
     FAC --> KIT
     SCR --> KIT
     HLD --> KIT

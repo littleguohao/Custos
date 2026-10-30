@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""overseas market collector v1.
+"""overseas market collector v2（Kimi Work 内置数据源）。
 
-Fetches overseas indices / tech leaders from Yahoo Finance chart API and writes them
-into strategy_team/data/market/YYYY-MM-DD_market_timing_input.json.
-
-No API key required. If a symbol fails, it is preserved as missing with an error note.
+默认经 Kimi Work 内置 Yahoo 获取海外指数 / 科技龙头，写入
+``data/market/YYYY-MM-DD_market_timing_input.json``，不再依赖本机 Yahoo/VPN
+直连。旧 Yahoo chart + TDX ext 仅在 ``CUSTOS_LEGACY_OVERSEAS=1`` 时应急启用。
+任一标的失败均保留缺数与错误，不编造价格或新鲜度。
 """
 
 from __future__ import annotations
@@ -137,7 +137,14 @@ def _chart_result_dict(
     }
 
 
-def fetch_chart(symbol: str, region: str = "") -> dict[str, Any]:
+def _legacy_overseas_enabled() -> bool:
+    """旧 Yahoo 直连 / TDX ext 仅作显式应急通道，默认不依赖 VPN。"""
+    import os
+
+    return os.environ.get("CUSTOS_LEGACY_OVERSEAS") == "1"
+
+
+def _fetch_chart_legacy(symbol: str, region: str = "") -> dict[str, Any]:
     data = _fetch_chart_json(symbol)
     result = (data.get("chart") or {}).get("result") or []
     if not result:
@@ -158,6 +165,48 @@ def fetch_chart(symbol: str, region: str = "") -> dict[str, Any]:
     return _chart_result_dict(
         symbol, meta, price, prev, change_pct, last_ts, closes, asia_live
     )
+
+
+def _fetch_kimiwork_chart(symbol: str, region: str = "") -> dict[str, Any]:
+    """内置 Yahoo 日 K → 原有 chart 结构；涨跌幅按最近两根真实收盘计算。"""
+    from custos.datasource import kimiwork_data  # noqa: PLC0415
+
+    rows = []
+    currency = None
+    for row in kimiwork_data.yahoo_daily(symbol):
+        try:
+            rows.append((str(row["Date"]), float(row["Close"])))
+            currency = row.get("currency")
+        except (KeyError, TypeError, ValueError):
+            continue
+    if len(rows) < 2:
+        raise ValueError(f"Kimi Work Yahoo 有效日 K 不足 2 根: {symbol}")
+    rows.sort(key=lambda item: item[0])
+    closes = [close for _, close in rows]
+    last_day, price = rows[-1]
+    prev = rows[-2][1]
+    change_pct = pct_change(price, prev, digits=2)
+    last_dt = datetime.fromisoformat(last_day.replace("Z", "+00:00"))
+    last_ts = last_dt.timestamp()
+    local_now = datetime.now(ZoneInfo("Asia/Shanghai"))
+    asia_live = region in {"jp", "kr"} and 8 <= local_now.hour < 15
+    # 交易所与实时市场状态若源未提供就留空，不猜测。
+    meta = {
+        "currency": None if currency in (None, "", "NA") else currency,
+        "exchangeName": None,
+        "marketState": None,
+    }
+    result = _chart_result_dict(
+        symbol, meta, price, prev, change_pct, last_ts, closes, asia_live
+    )
+    result["source"] = "Kimi Work / Yahoo Finance"
+    return result
+
+
+def fetch_chart(symbol: str, region: str = "") -> dict[str, Any]:
+    if _legacy_overseas_enabled():
+        return _fetch_chart_legacy(symbol, region)
+    return _fetch_kimiwork_chart(symbol, region)
 
 
 def classify(details: dict[str, Any]) -> str:
@@ -237,7 +286,17 @@ def main():
             }
         except Exception as e:
             errors[key] = repr(e)
-            # Yahoo 失败 → 试 TDX 扩展市场（owner 原则：本地 TDX 优先，HTTP 不稳定）。
+            if not _legacy_overseas_enabled():
+                # 默认不再尝试 VPN 直连或 TDX ext；缺数显式留痕并快速结束。
+                details[key] = {
+                    **meta,
+                    "symbol": meta["symbol"],
+                    "change_pct": None,
+                    "error": repr(e),
+                    "source": "Kimi Work / Yahoo Finance",
+                }
+                continue
+            # 仅 CUSTOS_LEGACY_OVERSEAS=1 时试 TDX 扩展市场。
             # 只是**降级**不是替代：ext 覆盖不全（无 A50、无 USDCNH、无指数本身，
             # 指数只能用 ETF 代理），且代理有跟踪误差与交易时段差异。
             # 拿到数据时如实标 proxy/proxy_note，不让读报告的人误当成指数本身。
@@ -287,11 +346,19 @@ def main():
     overseas["overseas_summary"] = impact_summary(details)
     overseas["details"] = details
     overseas["errors"] = errors
-    overseas["source"] = "Yahoo Finance chart API"
+    source_names = sorted(
+        {
+            str(d.get("source"))
+            for d in details.values()
+            if isinstance(d, dict) and d.get("source")
+        }
+    )
+    base_source = " + ".join(source_names) or "Kimi Work / Yahoo Finance"
+    overseas["source"] = base_source
     if fallback_used:
         # 留痕：下游据此知道这批数字里有代理值，不得当成指数本身
         overseas["fallback_source"] = fallback_used
-        overseas["source"] = "Yahoo Finance chart API + TDX ext fallback"
+        overseas["source"] = base_source + " + TDX ext fallback"
     # as_of: latest last_timestamp across all symbols (epoch -> Asia/Shanghai ISO);
     # falls back to collection time when no symbol returned a timestamp.
     ts_vals = [
@@ -325,15 +392,13 @@ def main():
     overseas["quality"] = "auto" if not errors else "degraded"
 
     dq = data.setdefault("data_quality", {})
-    dq.setdefault("sources", []).append("overseas_market_collector:yahoo_finance")
+    dq.setdefault("sources", []).append("overseas_market_collector:kimiwork")
     if errors:
         dq.setdefault("notes", []).append(
             f"外围市场部分标的抓取失败：{', '.join(errors.keys())}"
         )
     else:
-        dq.setdefault("notes", []).append(
-            "外围市场由 Yahoo Finance chart API 自动采集。"
-        )
+        dq.setdefault("notes", []).append("外围市场由 Kimi Work 内置数据源自动采集。")
 
     MARKET_DIR.mkdir(parents=True, exist_ok=True)
     # ⚠️ 落盘前校验：本采集器只负责 overseas_market / data_quality 两节，

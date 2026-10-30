@@ -83,7 +83,7 @@ ST 识别正确）。而当时的应对——引入东财 HTTP——反而把系
 | PIT 财务 | ✅ | 东财 datacenter | 单期约 24 页 |
 | 真市值/总股本 | ✅ | 东财 datacenter | 单期约 11 页 |
 | 资金流向 | ✅ | 东财 push2 | — |
-| 海外行情 | ✅ | Yahoo → TDX ext 降级 | — |
+| 海外行情 | ✅ | Kimi Work Yahoo；A50=东财、CNH=Wind EDB | 12 标的零错误；旧通道仅显式应急 |
 
 ---
 
@@ -177,9 +177,10 @@ apply_qfq(df, []) → attrs: {'adjust': 'qfq', 'adjust_events': 0}
 主力净流入需要逐笔委托明细聚合，本地 TDX 不提供。东财 push2 的 `ut` 参数是网页端
 硬编码的公开值（非凭据、非密钥，全网通用），抽成常量只为不散落三处魔法串。
 
-### ③ 海外行情：Yahoo 主路径 + TDX ext 降级
+### ③ 海外行情：Kimi Work 内置源主路径（2026-10-30 修订）
 
-TDX ext 有海外品种但覆盖不全、代码映射需维护。Yahoo 为主、ext 为降级（3c7c833）。
+本机 Yahoo 直连依赖特定网络环境，2026-10-30 盘前 12 个标的全部 SSL 失败并耗时 199 秒。现 12 个外围指数/个股统一走 `kimiwork_data` 的内置 Yahoo 日 K，A50 走内置东财，CNH 走 Wind EDB `M0290205`；最近两根真实收盘计算涨跌幅，`source/as_of/quality` 留痕，产物 schema 不变。
+旧 Yahoo chart 与 TDX ext 仅 `CUSTOS_LEGACY_OVERSEAS=1` 时应急启用，默认不再尝试，避免故障时逐票长时间重连。实测 12/12 外围标的成功；财联社同时补位华尔街见闻 403，7/7 新闻源成功。
 
 ---
 

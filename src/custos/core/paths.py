@@ -81,6 +81,16 @@ PLANS = DAILY_REPORTS
 REVIEWS = REPORTS
 LOGS = ARTIFACT_LOGS
 
+# Kimi Work 内置数据源：由托管 Python（含 agent-gw）执行子进程，项目 .venv
+# 不新增依赖。其他机器可用环境变量改道；CSV 附件只在内存中消费。
+KIMI_WORK_CACHE = ARTIFACTS / "cache" / "kimiwork"
+KIMI_WORK_PYTHON = Path(
+    os.environ.get(
+        "KIMI_WORK_PYTHON",
+        r"E:\KimiData\daimon-share\daimon\runtime\python\.venv\Scripts\python.exe",
+    )
+)
+
 
 def daily_report_dir(day: str, base: Path | None = None) -> Path:
     """单日报告目录：``{base}/{day}/``（``base`` 默认 ``DAILY_REPORTS``）。

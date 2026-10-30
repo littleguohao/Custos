@@ -2,7 +2,8 @@
 """海外行情 TDX 扩展市场 fallback 测试。
 
 定位是**降级不是替代**：ext 市场覆盖不全（无 A50 期货、无 USDCNH 汇率、无指数本身，
-指数只能用 ETF 代理），所以 Yahoo 仍是主路径。这套测试主要钉住两件事：
+指数只能用 ETF 代理）。生产主路径已改 Kimi Work 内置源，ext 仅在
+`CUSTOS_LEGACY_OVERSEAS=1` 时应急启用。这套测试主要钉住两件事：
 ① 不支持的品种要老实返回 None，不能编数据；
 ② 用了代理必须留痕（proxy/proxy_note/fallback_source），不能让读报告的人
    把 ETF 涨跌当成指数涨跌。
@@ -121,6 +122,7 @@ class TestCollectorIntegration:
         """Yahoo 挂了走 ext 时，必须留下 degraded 与 fallback_source 供下游归因。"""
         from custos.datasource import overseas_market_collector as omc
 
+        monkeypatch.setenv("CUSTOS_LEGACY_OVERSEAS", "1")
         monkeypatch.setattr(
             omc,
             "SYMBOLS",

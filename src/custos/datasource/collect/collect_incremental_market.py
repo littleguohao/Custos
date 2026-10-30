@@ -94,6 +94,78 @@ def fetch_yahoo(symbol: str) -> dict:
     return parse_yahoo_payload(symbol, data)
 
 
+def _leading_number(value) -> float:
+    """解析 ``13032.68点`` 这类带单位数值；无法取得数值前缀就显式失败。"""
+    import re
+
+    match = re.match(r"\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))", str(value))
+    if not match:
+        raise ValueError(f"无法解析数值: {value!r}")
+    return float(match.group(1))
+
+
+def fetch_a50_kimiwork() -> dict:
+    """东财 A50 期货日线 → 原增量行情结构，不再走 Yahoo/VPN。"""
+    from custos.datasource import kimiwork_data  # noqa: PLC0415
+
+    rows = []
+    for row in kimiwork_data.dongcai_a50_daily():
+        if len(row) < 2:
+            continue
+        try:
+            day = datetime.strptime(str(row[1])[:10], "%Y-%m-%d").date().isoformat()
+            close = _leading_number(row[0])
+        except (TypeError, ValueError):
+            continue
+        rows.append((day, close))
+    rows.sort(key=lambda item: item[0])
+    if len(rows) < 2:
+        raise ValueError("东财 A50 有效日线不足 2 根")
+    day, price = rows[-1]
+    prev = rows[-2][1]
+    change = pct_change(price, prev, digits=2)
+    if change is None:
+        raise ValueError("前收为 0，无法计算涨跌幅")
+    return {
+        "symbol": "CFF=A50",
+        "price": round(price, 4),
+        "previous_close": round(prev, 4),
+        "change_pct": round(change, 4),
+        "as_of": day,
+        "source": "Kimi Work / Dongcai",
+    }
+
+
+def fetch_cnh_kimiwork() -> dict:
+    """Wind EDB USDCNH 即期汇率日线 → 原增量行情结构。"""
+    from custos.datasource import kimiwork_data  # noqa: PLC0415
+
+    rows = []
+    for row in kimiwork_data.wind_cnh_daily():
+        try:
+            day = datetime.strptime(str(row["date"])[:8], "%Y%m%d").date().isoformat()
+            close = float(row["value"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        rows.append((day, close))
+    rows.sort(key=lambda item: item[0])
+    if len(rows) < 2:
+        raise ValueError("Wind USDCNH 有效日线不足 2 根")
+    day, price = rows[-1]
+    prev = rows[-2][1]
+    change = pct_change(price, prev, digits=2)
+    if change is None:
+        raise ValueError("前收为 0，无法计算涨跌幅")
+    return {
+        "symbol": "USDCNH=X",
+        "price": round(price, 4),
+        "previous_close": round(prev, 4),
+        "change_pct": round(change, 4),
+        "as_of": day,
+        "source": "Kimi Work / Wind EDB M0290205",
+    }
+
+
 def make_reader() -> tuple[object | None, str | None]:
     """Reader 创建失败必须落进输出 JSON 的 error 字段,而不是让脚本在写盘前崩掉。"""
     try:
@@ -217,21 +289,18 @@ def main(argv=None) -> int:
         "collected_at": cn_now().strftime("%Y-%m-%dT%H:%M:%S+08:00"),
     }
 
-    # ===== 1. A50 futures + CNH (Yahoo Finance) =====
+    # ===== 1. A50（东财）+ CNH（Wind EDB），默认不走 Yahoo/VPN =====
     try:
-        result["a50_futures"] = fetch_yahoo("CFF=A50")
-    except Exception:
-        try:
-            result["a50_futures"] = fetch_yahoo("XIN9.FGI")
-        except Exception as e:
-            result["a50_futures"] = {
-                "error": str(e),
-                "note": "A50 CFD unavailable via Yahoo, use web_search in report",
-            }
+        result["a50_futures"] = fetch_a50_kimiwork()
+    except Exception as e:
+        result["a50_futures"] = {
+            "error": str(e),
+            "note": "Kimi Work 东财 A50 不可用；不得把其他指数冒充 A50 期货",
+        }
     _a50_sanity(result)
 
     try:
-        result["cnh_usd"] = fetch_yahoo("USDCNH=X")
+        result["cnh_usd"] = fetch_cnh_kimiwork()
     except Exception as e:
         result["cnh_usd"] = {"error": str(e)}
 

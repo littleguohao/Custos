@@ -420,6 +420,57 @@ def parse_jin10_flash(entries, src, fetched, transport_verified=True):
     return items
 
 
+def parse_cls_telegraphs(entries, src, fetched, transport_verified=True):
+    """财联社快讯 → rss_evidence；隐藏/删除记录不得进入证据链。"""
+    items = []
+    for e in entries:
+        if not isinstance(e, dict) or e.get("status") != 1:
+            continue
+        content = clean(e.get("content") or e.get("title"))
+        if not content:
+            continue
+        eid = str(e.get("id") or "")
+        try:
+            published = datetime.fromtimestamp(
+                int(e.get("ctime")), timezone.utc
+            ).isoformat()
+        except (TypeError, ValueError, OverflowError):
+            published = None
+        norm = re.sub(r"\W+", "", content.lower())[:300]
+        item_id = hashlib.sha256(
+            (src["id"] + "|" + (eid or norm)).encode()
+        ).hexdigest()[:24]
+        dup = hashlib.sha256(norm.encode()).hexdigest()[:20] if norm else item_id
+        title = clean(e.get("title")) or content[:50]
+        items.append(
+            {
+                "item_id": item_id,
+                "published_at": published,
+                "fetched_at": fetched,
+                "source_id": src["id"],
+                "source_name": fix_source_name(src["id"], src["name"]),
+                "source_tier": src["tier"],
+                "category": src["category"],
+                "title": title,
+                "summary": content[:2000],
+                "source_url": "",
+                "feed_url": src["url"],
+                "affected_entities": [],
+                "affected_sectors": [],
+                "direction": "uncertain",
+                "impact_horizon": "unknown",
+                "fact": title,
+                "inference": "",
+                "validation_condition": [],
+                "quality": _tier_quality(src["tier"], transport_verified),
+                "confirmed": src["tier"] in {"S", "A"} and transport_verified,
+                "transport_verified": transport_verified,
+                "duplicate_group_id": dup,
+            }
+        )
+    return items
+
+
 def parse_wscn_lives(raw, src, fetched, transport_verified=True):
     # WallstreetCN lives JSON API: {"code":20000,"data":{"items":[{id,content,display_time,uri,...}]}}
     data = json.loads(raw.decode("utf-8", errors="replace"))
@@ -508,6 +559,25 @@ def main():
                 )
             ctx, verified = build_ssl_context(src)
             row["transport_verified"] = verified
+            if src.get("type") == "kimiwork_cls":
+                from custos.datasource import kimiwork_data  # noqa: PLC0415
+
+                entries = kimiwork_data.cls_telegraphs(limit=a.limit_per_feed)
+                raw = json.dumps(entries, ensure_ascii=False).encode("utf-8")
+                row.update(
+                    http_status=200,
+                    final_url=src["url"],
+                    content_type="application/json",
+                    bytes=len(raw),
+                )
+                (day / f"{src['id']}.json").write_bytes(raw)
+                items = parse_cls_telegraphs(entries, src, fetched, verified)[
+                    : a.limit_per_feed
+                ]
+                normalized.extend(items)
+                row.update(status="ok", items=len(items))
+                log.append(row)
+                continue
             if src.get("type") == "jin10_mcp":
                 # 金十 MCP（JSON-RPC POST + SSE），与上方 RSS/JSON GET 不同路；
                 # token 走环境变量（v0.113 起兜底用户 secrets 文件），缺席时
