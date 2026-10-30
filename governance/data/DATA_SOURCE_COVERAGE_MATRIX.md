@@ -56,7 +56,7 @@
 |---|---|---|---|---|
 | 美股三大指数 / 费半 | ✅ | Kimi Work Yahoo | `overseas_market_collector.py` + `kimiwork_data.py` | ^DJI / ^IXIC / ^GSPC / ^SOX；2026-10-30 实测零错误 |
 | 日经 / KOSPI / 恒生科技 | ✅ | Kimi Work Yahoo | 同上 | 含三星 / SK 海力士，不再依赖本机 VPN 直连 |
-| A50 期指 / 离岸人民币 | ✅ | 东财 / Wind EDB | `collect_incremental_market.py` + `kimiwork_data.py` | A50=东财日线；CNH=Wind M0290205 |
+| A50 指数代理 / 离岸人民币 | ✅ | Wind EDB 固定代码 | `collect_incremental_market.py` + `kimiwork_data.py` | A50=L5471360，**非期货、显式 proxy**；CNH=M0290205；均校验最近交易日，陈旧即缺数 |
 | AI 链个股（NVDA/AMD/TSM） | ✅ | Kimi Work Yahoo | `overseas_market_collector.py` | 最近两根真实收盘计算涨跌幅 |
 | 应急降级路径 | ⚠️ | 旧 Yahoo / TDX ext | `CUSTOS_LEGACY_OVERSEAS=1` 才启用 | 默认关闭，不作为日常数据源 |
 
@@ -64,7 +64,7 @@
 
 | 数据项 | 状态 | 来源 | 采集入口 | 备注 |
 |---|---|---|---|---|
-| 个股主力净流入 | ✅ | **Kimi Work 东财妙想**（旧 push2 兜底） | `collect_fund_flow.py` + `kimiwork_data.py` | 分段 10 名去重补齐 200；2026-10-30 对账前 100 名顺序一致、占比一致，金额仅展示舍入差；板块仍走 push2 |
+| 个股主力净流入 | ✅ | **东财 push2 主源**；妙想仅影子对账 | `collect_fund_flow.py`（live）+ `fund_flow_shadow_diff.py`（诊断） | 妙想自然语言接口无法证明不含 LLM，退出 live；影子侧校验日期、重复、缺口、单调排序与数量 |
 | 北向资金 | ✅ | 880863 | mootdx Reader 本地 | 5 日趋势 |
 | 融资融券指数 | ✅ | 880390 | mootdx Reader 本地 | 杠杆情绪 |
 | 两融余额变动 | ❌ | ~~tdx_api_data rzrq~~ | — | **全仓 0 处代码** |

@@ -20,7 +20,7 @@
 | 路径 | 是什么 |
 |---|---|
 | `src/custos/core/` | L0 基建（paths/contracts/indicators/exit_rules）+ L2 因子/交易台账 |
-| `src/custos/datasource/` | L1 数据采集（含 `local_tdx/` 本地通达信封装；`kimiwork_data` 统一适配内置 Yahoo/东财/Wind/CLS，个股资金流内置主源） |
+| `src/custos/datasource/` | L1 数据采集（含 `local_tdx/` 本地通达信封装；`kimiwork_data` 统一适配内置 Yahoo/东财/Wind/CLS，个股 push2 主源、妙想仅影子） |
 | `src/custos/pipeline/` | L3 四个 stage 包 + L4 五时点 runner（run_0850/0905/1445/1700/1800） |
 | `src/custos/research/` | L4 研究回测（只读管线数据，**生产永不 import 研究**，测试强制） |
 | `src/custos/research/evolution/` | LLM 因子进化引擎（研究侧） |
@@ -127,6 +127,10 @@ uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 �
   （向量化用 numpy 等 pandas 自带物；DSL 解析用 stdlib ast，**禁止 eval/exec**）。
 - 本机（dev）**无网络、无通达信数据**：测试一律合成数据注入（loader= / monkeypatch），
   conftest 已 block 部分网络、并把各台账改道 tmp。真实数据跑数只在生产机。
+- **Kimi Work 托管 Python 配置**：内置数据源子进程由 `KIMI_WORK_PYTHON` 指向的、已安装
+  `agent-gw` 的 Python 执行。默认值是生产机 `E:\KimiData\daimon-share\daimon\runtime\python\.venv\Scripts\python.exe`；
+  其他机器必须显式设置该环境变量，不能依赖默认 Windows 路径。插件输出路径统一在
+  `artifacts/cache/kimiwork/`，解析直接消费 `files[].content`。
   有快照时 `CUSTOS_DATA_SNAPSHOT=<dir>` 进**快照模式**（v0.453，TODO #116）：paths 单点
   改道 TDX_ROOT/DATA 读挖掘段镜像；判定窗台账/批次门拒写、live 五入口拒跑（exit 2/6）、
   加载器读到禁带日期报错（判定段/holdout 物理不在快照内，详见

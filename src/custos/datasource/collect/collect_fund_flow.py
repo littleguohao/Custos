@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Collect fund flow rank（个股 Kimi Work 东财主源，板块东财 push2）。
+"""Collect fund flow rank（个股 push2 主源，板块东财 push2）。
 
-``--source auto`` 个股榜优先用内置东财妙想，失败才回退旧 push2；行业/概念
-板块始终保留旧 push2，避免把内置接口的 0 值误当真实资金流。
+妙想自然语言接口只用于 ``scripts/dev/fund_flow_shadow_diff.py`` 影子对账，
+不得进入 live 主链；``--source kimiwork`` 仅供人工诊断使用。
 """
 
 from __future__ import annotations
@@ -97,10 +97,12 @@ def legacy_stock_rows() -> list[dict]:
     return normalize_stock_payload(fetch_json(EM_URL))
 
 
-def kimiwork_stock_rows(limit: int = 200) -> list[dict]:
+def kimiwork_stock_rows(
+    limit: int = 200, *, target_date: str | None = None
+) -> list[dict]:
     from custos.datasource import kimiwork_data  # noqa: PLC0415
 
-    return kimiwork_data.dongcai_fund_flow_stocks(limit=limit)
+    return kimiwork_data.dongcai_fund_flow_stocks(limit=limit, target_date=target_date)
 
 
 def main(argv=None) -> int:
@@ -111,40 +113,21 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--source",
         choices=("auto", "legacy", "kimiwork"),
-        default="auto",
-        help="个股榜：auto=内置主源、旧源兜底；板块始终保留旧源",
+        default="legacy",
+        help="默认/ auto=push2 主源；kimiwork 仅人工诊断，不得用于 live",
     )
     args = ap.parse_args(argv)
     today = args.date
     OUT = MARKET_DIR / f"{today}_fund_flow_rank.json"
 
-    # 个股榜：已完成新旧源对账，内置主源失败时才回退旧 push2。
+    # 自然语言妙想不再进入 live 主链；auto 仅为旧配置兼容别名。
     stock_fallback = False
-    if args.source == "legacy":
-        stocks = legacy_stock_rows()
-        stock_source = "eastmoney_direct_api"
-    elif args.source == "kimiwork":
-        stocks = kimiwork_stock_rows()
+    if args.source == "kimiwork":
+        stocks = kimiwork_stock_rows(target_date=today)
         stock_source = "kimiwork_dongcai_screener"
     else:
-        try:
-            stocks = kimiwork_stock_rows()
-            stock_source = "kimiwork_dongcai_screener"
-        except Exception as e:
-            print(
-                f"[WARN] Kimi Work 个股资金流失败，回退旧 push2: {e}",
-                file=sys.stderr,
-            )
-            try:
-                stocks = legacy_stock_rows()
-                stock_source = "eastmoney_direct_api"
-                stock_fallback = True
-            except Exception as legacy_error:
-                print(
-                    f"[WARN] 个股资金流新旧源均失败: {legacy_error}",
-                    file=sys.stderr,
-                )
-                return 1
+        stocks = legacy_stock_rows()
+        stock_source = "eastmoney_direct_api"
 
     # Sector fund flow
     # 失败与"今天真的没有资金流入"必须可区分:以前失败写 []，下游(enrich_candidates

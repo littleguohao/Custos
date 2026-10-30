@@ -172,19 +172,20 @@ apply_qfq(df, []) → attrs: {'adjust': 'qfq', 'adjust_events': 0}
 东财 `RPT_LICO_FN_CPD` 带 `NOTICE_DATE`（公告日），这是本地拿不到的能力。
 ⇒ 保留东财是架构选择。
 
-### ② 资金流向：个股内置主源，板块保留东财（2026-10-30 修订）
+### ② 资金流向：push2 主源，妙想仅影子（2026-10-30 修订）
 
-主力净流入需要逐笔委托明细聚合，本地 TDX 不提供。个股榜已改走 `kimiwork_data` 的东财妙想
-分段排名（每段 10 名，去重补齐 200 名），旧 push2 仅作失败兜底；行业／概念板块内置接口
-返回 0 值，不能用，继续走原 push2。输出 `stock_source` / `stock_fallback` 留痕，字段结构不变。
-2026-10-30 影子对账：旧源前 100 名与内置前 100 名顺序完全一致，所有占比字段一致，金额差
-均在中文单位展示舍入内；内置另补齐 100 名。对账脚本为 `scripts/dev/fund_flow_shadow_diff.py`，
-产物落 `artifacts/logs/fund_flow_shadow/`。
+主力净流入需要逐笔委托明细聚合，本地 TDX 不提供。妙想 `mx_stocks_screener` 接受自然语言
+查询，接口契约无法证明后端不含 LLM，因此**不得进入 live 主链**；`collect_fund_flow` 默认
+恢复 push2，`auto` 仅作旧配置兼容别名，`--source kimiwork` 只供人工诊断。行业／概念板块
+始终走 push2。
+影子工具 `scripts/dev/fund_flow_shadow_diff.py` 保留新旧源对账，并对妙想分段结果强制校验
+日期、重复、缺口、数量及主力净额单调递减。2026-10-30 对账仍为前 100 名顺序一致、占比一致、
+金额仅展示舍入差；生产主源恢复 push2 的 100 名。
 
 ### ③ 海外行情：Kimi Work 内置源主路径（2026-10-30 修订）
 
-本机 Yahoo 直连依赖特定网络环境，2026-10-30 盘前 12 个标的全部 SSL 失败并耗时 199 秒。现 12 个外围指数/个股统一走 `kimiwork_data` 的内置 Yahoo 日 K，A50 走内置东财，CNH 走 Wind EDB `M0290205`；最近两根真实收盘计算涨跌幅，`source/as_of/quality` 留痕，产物 schema 不变。
-旧 Yahoo chart 与 TDX ext 仅 `CUSTOS_LEGACY_OVERSEAS=1` 时应急启用，默认不再尝试，避免故障时逐票长时间重连。实测 12/12 外围标的成功；财联社同时补位华尔街见闻 403，7/7 新闻源成功。
+本机 Yahoo 直连依赖特定网络环境，2026-10-30 盘前 12 个标的全部 SSL 失败并耗时 199 秒。现 12 个外围指数/个股统一走 `kimiwork_data` 的内置 Yahoo 日 K；A50 改用 Wind 固定代码 `L5471360`（富时中国 A50 指数，**非期货、显式 proxy**），CNH 走 Wind EDB `M0290205`。妙想自然语言 A50 查询已退出 live，不能证明后端不含 LLM。最近两根真实收盘计算涨跌幅，`source/as_of/quality` 留痕，产物 schema 不变。
+A50/CNH 均校验价格合理区间与最近交易日，旧数据不填值；A50 代理身份不得被读成期货。旧 Yahoo chart 与 TDX ext 仅 `CUSTOS_LEGACY_OVERSEAS=1` 时应急启用，默认不再尝试。财联社补位华尔街见闻 403，7/7 新闻源成功。
 
 ---
 

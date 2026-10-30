@@ -2,8 +2,10 @@
 """Kimi Work 内置金融数据源适配器（纯脚本、无项目侧新增依赖）。
 
 通过托管 Python 子进程调用 ``kimiwork_agent_gw.py``，直接解析原始 JSON 与
-CSV 内容。这里不引入 LLM 推理，也不改变任何交易决策；所有失败均显式抛出，
-由采集器记录为缺数，禁止用旧缓存冒充本次成功。
+CSV 内容。插件 ``file_path`` 仅指定到 ``artifacts/cache/kimiwork/``，附件是否
+落盘由插件决定，解析不依赖附件。这里不引入 LLM 推理，也不改变交易决策；
+所有失败均显式抛出，由采集器记录为缺数，禁止用旧缓存冒充本次成功。
+自然语言妙想接口只用于影子对账，不得作为 live 主源。
 """
 
 from __future__ import annotations
@@ -15,9 +17,9 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from custos.core.paths import KIMI_WORK_CACHE, KIMI_WORK_PYTHON, TOOLS
+from custos.core.paths import KIMI_WORK_CACHE, KIMI_WORK_PYTHON, TOOLS, cn_now, cn_today
 
 
 class KimiWorkDataError(RuntimeError):
@@ -106,8 +108,11 @@ def yahoo_daily(symbol: str) -> list[dict[str, str]]:
     return _csv_records(raw)
 
 
-def dongcai_a50_daily() -> list[list[str]]:
-    """东财富时中国 A50 期货最近 5 日收盘序列（日期倒序）。"""
+def dongcai_a50_daily() -> list[dict[str, str]]:
+    """仅供诊断的东财自然语言 A50 查询，禁止进入 live 主链。
+
+    即使诊断也按表头取列；列顺序变化不会把日期误读成价格。
+    """
     raw = call_api(
         "dongcai",
         "dongcai_mx_finance_data",
@@ -117,8 +122,65 @@ def dongcai_a50_daily() -> list[list[str]]:
             "file_path": str(_cache_path("dongcai", "a50")),
         },
     )
-    _, rows = csv_table(raw)
-    return rows
+    header, raw_rows = csv_table(raw)
+    if "headName" not in header:
+        raise KimiWorkDataError("A50 诊断响应缺少日期表头 headName")
+    value_fields = [name for name in header if name != "headName"]
+    if len(value_fields) != 1:
+        raise KimiWorkDataError(f"A50 诊断响应收盘字段不唯一: {value_fields}")
+    value_field = value_fields[0]
+    return [
+        {"date": row["headName"], "close": row[value_field]}
+        for row in (dict(zip(header, item)) for item in raw_rows)
+    ]
+
+
+def expected_daily_date(target: str) -> str:
+    """返回该次采集允许的最新日线日，盘后要求当日、盘前要求上一交易日。"""
+    from custos.core.runtime_guards import (  # noqa: PLC0415
+        previous_confirmed_trading_day,
+        trading_day_status,
+    )
+
+    target = str(target)[:10]
+    today = cn_today().isoformat()
+    if target < today and trading_day_status(target)["is_trading_day"] is True:
+        return target
+    if (
+        target == today
+        and trading_day_status(target)["is_trading_day"] is True
+        and cn_now().hour >= 15
+    ):
+        return target
+    expected = previous_confirmed_trading_day(target)
+    if not expected:
+        raise KimiWorkDataError(f"无法确定 {target} 的最近交易日")
+    return expected
+
+
+def validate_daily_as_of(day: str, target: str) -> str:
+    """日期必须恰好是最近允许的交易日，拒绝旧数据或未来数据。"""
+    expected = expected_daily_date(target)
+    actual = str(day)[:10]
+    if actual != expected:
+        raise KimiWorkDataError(
+            f"数据日期陈旧或不匹配: as_of={actual}, expected={expected}, target={target}"
+        )
+    return expected
+
+
+def wind_a50_daily() -> list[dict[str, str]]:
+    """Wind 固定代码 L5471360：富时中国 A50 指数（非期货，代理用途）。"""
+    raw = call_api(
+        "wind",
+        "wind_query_economic_indicator_data",
+        {
+            "question": "L5471360",
+            "observation": "5",
+            "file_path": str(_cache_path("wind", "a50_index")),
+        },
+    )
+    return _csv_records(raw)
 
 
 def parse_cn_amount(value: Any) -> float | None:
@@ -152,16 +214,28 @@ def _field(row: dict[str, str], prefix: str) -> str:
     return ""
 
 
-def dongcai_fund_flow_stocks(limit: int = 200) -> list[dict[str, Any]]:
-    """东财 A 股资金流榜，字段归一到现有 ``fund_flow_rank.stock_rank``。
+def _header_dates(header: list[str]) -> set[str]:
+    dates = set()
+    for name in header:
+        match = re.search(r"\((\d{4})\.(\d{2})\.(\d{2})\)", name)
+        if match:
+            dates.add("-".join(match.groups()))
+    return dates
 
-    只使用明确的排名查询，不让“展示字段”被后端误解析成额外筛选条件。
-    板块资金流目前不可用，不在此函数中假装支持。
+
+def dongcai_fund_flow_stocks(
+    limit: int = 200, *, target_date: str | None = None
+) -> list[dict[str, Any]]:
+    """仅供影子对账的东财妙想资金流榜，绝不作为 live 主源。
+
+    接口接受自然语言查询，无法由契约证明后端不含 LLM，因此只能作诊断。
+    这里仍严格校验每个分段的日期、重复、缺口、排序和数量，防止拼接静默污染。
     """
     limit = max(1, int(limit))
+    target = target_date or cn_today().isoformat()
+    expected = expected_daily_date(target)
     result = []
     seen = set()
-    # 后端单次最多给 10 行；明确分段排名才能补满目标榜单。
     for start in range(1, limit + 1, 10):
         end = min(start + 9, limit)
         query = (
@@ -181,14 +255,22 @@ def dongcai_fund_flow_stocks(limit: int = 200) -> list[dict[str, Any]]:
             },
             timeout=180,
         )
-        rows = _csv_records(raw)
-        new_in_chunk = 0
+        header, raw_rows = csv_table(raw)
+        dates = _header_dates(header)
+        if dates != {expected}:
+            raise KimiWorkDataError(
+                f"资金流分段日期不匹配: {sorted(dates) or '缺失'}，expected={expected}"
+            )
+        rows = [dict(zip(header, row)) for row in raw_rows]
+        if len(rows) != end - start + 1:
+            raise KimiWorkDataError(
+                f"资金流分段 {start}~{end} 返回 {len(rows)} 行，存在缺口"
+            )
         for row in rows:
             code = _field(row, "代码").strip()
             if not code or code in seen:
-                continue
+                raise KimiWorkDataError(f"资金流分段重复或缺代码: {code!r}")
             seen.add(code)
-            new_in_chunk += 1
             result.append(
                 {
                     "code": code,
@@ -207,13 +289,15 @@ def dongcai_fund_flow_stocks(limit: int = 200) -> list[dict[str, Any]]:
                     "small_pct": _number_or_none(_field(row, "小单净占比")),
                 }
             )
-        if not rows or new_in_chunk == 0 or len(rows) < end - start + 1:
-            break
-        if len(result) >= limit:
-            break
-    if not result:
-        raise KimiWorkDataError("东财个股资金流返回空列表")
-    return result[:limit]
+    if len(result) != limit:
+        raise KimiWorkDataError(f"资金流榜单数量不足: {len(result)}/{limit}")
+    if any(not isinstance(x["main_net_inflow"], (int, float)) for x in result):
+        raise KimiWorkDataError("资金流榜单存在缺失主力净额")
+    result.sort(key=lambda x: cast(float, x["main_net_inflow"]), reverse=True)
+    amounts = [cast(float, x["main_net_inflow"]) for x in result]
+    if any(a < b for a, b in zip(amounts, amounts[1:])):
+        raise KimiWorkDataError("资金流拼接结果未按主力净额单调递减")
+    return result
 
 
 def wind_cnh_daily() -> list[dict[str, str]]:

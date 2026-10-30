@@ -33,10 +33,10 @@ def test_csv_adapters_parse_builtin_payloads(monkeypatch):
         kd,
         "call_api",
         lambda *args, **kwargs: _csv_raw(
-            "325898,headName\n13032.68点,2026-10-29(日)\n"
+            "headName,325898\n2026-10-29(日),13032.68点\n"
         ),
     )
-    assert kd.dongcai_a50_daily() == [["13032.68点", "2026-10-29(日)"]]
+    assert kd.dongcai_a50_daily() == [{"date": "2026-10-29(日)", "close": "13032.68点"}]
 
     seen = {}
 
@@ -86,13 +86,18 @@ def test_overseas_chart_from_kimiwork_daily(monkeypatch):
 def test_incremental_a50_and_cnh_from_builtin(monkeypatch):
     monkeypatch.setattr(
         kd,
-        "dongcai_a50_daily",
-        lambda: [["13000点", "2026-10-28(日)"], ["13032.68点", "2026-10-29(日)"]],
+        "wind_a50_daily",
+        lambda: [
+            {"date": "20261028", "value": "13000"},
+            {"date": "20261029", "value": "13032.68"},
+        ],
     )
-    a50 = cim.fetch_a50_kimiwork()
+    a50 = cim.fetch_a50_kimiwork("2026-10-29")
     assert a50["change_pct"] == pytest.approx(0.25)
     assert a50["as_of"] == "2026-10-29"
-    assert a50["source"] == "Kimi Work / Dongcai"
+    assert a50["proxy"] is True
+    assert "非A50期货" in a50["proxy_note"]
+    assert a50["source"] == "Kimi Work / Wind EDB L5471360"
 
     monkeypatch.setattr(
         kd,
@@ -102,9 +107,35 @@ def test_incremental_a50_and_cnh_from_builtin(monkeypatch):
             {"date": "20261029", "value": "6.65699"},
         ],
     )
-    cnh = cim.fetch_cnh_kimiwork()
+    cnh = cim.fetch_cnh_kimiwork("2026-10-29")
     assert cnh["change_pct"] == pytest.approx(-0.07)
     assert cnh["source"] == "Kimi Work / Wind EDB M0290205"
+
+
+def test_incremental_rejects_stale_date(monkeypatch):
+    monkeypatch.setattr(
+        kd,
+        "wind_cnh_daily",
+        lambda: [
+            {"date": "20261028", "value": "6.66158"},
+            {"date": "20261029", "value": "6.65699"},
+        ],
+    )
+    with pytest.raises(Exception, match="陈旧|不匹配"):
+        cim.fetch_cnh_kimiwork("2026-10-30")
+
+
+def test_incremental_rejects_price_outlier(monkeypatch):
+    monkeypatch.setattr(
+        kd,
+        "wind_a50_daily",
+        lambda: [
+            {"date": "20261028", "value": "13000"},
+            {"date": "20261029", "value": "999999999"},
+        ],
+    )
+    with pytest.raises(ValueError, match="合理区间"):
+        cim.fetch_a50_kimiwork("2026-10-29")
 
 
 def test_legacy_ext_is_not_called_by_default(monkeypatch, tmp_path):

@@ -94,63 +94,65 @@ def fetch_yahoo(symbol: str) -> dict:
     return parse_yahoo_payload(symbol, data)
 
 
-def _leading_number(value) -> float:
-    """解析 ``13032.68点`` 这类带单位数值；无法取得数值前缀就显式失败。"""
-    import re
+def _checked_wind_rows(
+    rows: list[dict], target: str, min_price: float, max_price: float
+) -> list[tuple[str, float]]:
+    """按表头 date/value 解析并校验 Wind 日线，禁止位置解析和旧数据混入。"""
+    from custos.datasource.kimiwork_data import validate_daily_as_of  # noqa: PLC0415
 
-    match = re.match(r"\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))", str(value))
-    if not match:
-        raise ValueError(f"无法解析数值: {value!r}")
-    return float(match.group(1))
+    parsed = []
+    for row in rows:
+        try:
+            day = datetime.strptime(str(row["date"])[:8], "%Y%m%d").date()
+            close = float(row["value"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not min_price <= close <= max_price:
+            raise ValueError(f"价格超出合理区间 [{min_price}, {max_price}]: {close}")
+        parsed.append((day.isoformat(), close))
+    parsed.sort(key=lambda item: item[0])
+    if len(parsed) < 2:
+        raise ValueError("有效 Wind 日线不足 2 根")
+    latest = parsed[-1][0]
+    expected = validate_daily_as_of(latest, target)
+    oldest = parsed[0][0]
+    if (datetime.fromisoformat(latest) - datetime.fromisoformat(oldest)).days > 14:
+        raise ValueError(f"日线跨度过大，疑似非最近 5 个交易日: {oldest}~{latest}")
+    if latest != expected:
+        raise ValueError(f"数据日期不匹配: {latest} != {expected}")
+    return parsed
 
 
-def fetch_a50_kimiwork() -> dict:
-    """东财 A50 期货日线 → 原增量行情结构，不再走 Yahoo/VPN。"""
+def fetch_a50_kimiwork(target_date: str | None = None) -> dict:
+    """Wind 固定代码 A50 指数代理（非期货），不使用自然语言接口。"""
     from custos.datasource import kimiwork_data  # noqa: PLC0415
 
-    rows = []
-    for row in kimiwork_data.dongcai_a50_daily():
-        if len(row) < 2:
-            continue
-        try:
-            day = datetime.strptime(str(row[1])[:10], "%Y-%m-%d").date().isoformat()
-            close = _leading_number(row[0])
-        except (TypeError, ValueError):
-            continue
-        rows.append((day, close))
-    rows.sort(key=lambda item: item[0])
-    if len(rows) < 2:
-        raise ValueError("东财 A50 有效日线不足 2 根")
+    target = target_date or cn_today().isoformat()
+    rows = _checked_wind_rows(kimiwork_data.wind_a50_daily(), target, 100, 100000)
     day, price = rows[-1]
     prev = rows[-2][1]
     change = pct_change(price, prev, digits=2)
     if change is None:
         raise ValueError("前收为 0，无法计算涨跌幅")
     return {
-        "symbol": "CFF=A50",
+        "symbol": "L5471360",
+        "proxy": True,
+        "proxy_note": "富时中国A50指数（非A50期货），固定Wind EDB代码L5471360",
         "price": round(price, 4),
         "previous_close": round(prev, 4),
         "change_pct": round(change, 4),
         "as_of": day,
-        "source": "Kimi Work / Dongcai",
+        "expected_as_of": day,
+        "source": "Kimi Work / Wind EDB L5471360",
     }
 
 
-def fetch_cnh_kimiwork() -> dict:
-    """Wind EDB USDCNH 即期汇率日线 → 原增量行情结构。"""
+def fetch_cnh_kimiwork(target_date: str | None = None) -> dict:
+    """Wind 固定代码 USDCNH 即期汇率，带日期与合理性校验。"""
     from custos.datasource import kimiwork_data  # noqa: PLC0415
 
-    rows = []
-    for row in kimiwork_data.wind_cnh_daily():
-        try:
-            day = datetime.strptime(str(row["date"])[:8], "%Y%m%d").date().isoformat()
-            close = float(row["value"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        rows.append((day, close))
-    rows.sort(key=lambda item: item[0])
-    if len(rows) < 2:
-        raise ValueError("Wind USDCNH 有效日线不足 2 根")
+    target = target_date or cn_today().isoformat()
+    rows = _checked_wind_rows(kimiwork_data.wind_cnh_daily(), target, 0.1, 100)
     day, price = rows[-1]
     prev = rows[-2][1]
     change = pct_change(price, prev, digits=2)
@@ -162,6 +164,7 @@ def fetch_cnh_kimiwork() -> dict:
         "previous_close": round(prev, 4),
         "change_pct": round(change, 4),
         "as_of": day,
+        "expected_as_of": day,
         "source": "Kimi Work / Wind EDB M0290205",
     }
 
@@ -289,20 +292,21 @@ def main(argv=None) -> int:
         "collected_at": cn_now().strftime("%Y-%m-%dT%H:%M:%S+08:00"),
     }
 
-    # ===== 1. A50（东财）+ CNH（Wind EDB），默认不走 Yahoo/VPN =====
+    # ===== 1. A50 指数代理 + CNH（均为 Wind 固定代码，带新鲜度校验）=====
     try:
-        result["a50_futures"] = fetch_a50_kimiwork()
+        result["a50_futures"] = fetch_a50_kimiwork(target)
     except Exception as e:
         result["a50_futures"] = {
+            "status": "unavailable",
             "error": str(e),
-            "note": "Kimi Work 东财 A50 不可用；不得把其他指数冒充 A50 期货",
+            "note": "A50 使用 Wind 固定指数代理（非期货），失败时不填旧值",
         }
     _a50_sanity(result)
 
     try:
-        result["cnh_usd"] = fetch_cnh_kimiwork()
+        result["cnh_usd"] = fetch_cnh_kimiwork(target)
     except Exception as e:
-        result["cnh_usd"] = {"error": str(e)}
+        result["cnh_usd"] = {"status": "unavailable", "error": str(e)}
 
     # ===== 2/4. Market breadth + northbound via mootdx Reader (local) =====
     reader, reader_error = make_reader()

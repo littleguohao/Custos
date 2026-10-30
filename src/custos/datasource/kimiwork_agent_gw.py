@@ -2,8 +2,8 @@
 """Kimi Work 内置数据源的最小 JSON-RPC 入口（由 Kimi 托管 Python 执行）。
 
 项目虚拟环境不安装 agent-gw；生产采集器用 ``KIMI_WORK_PYTHON`` 指向的托管
-Python 执行本文件。只打印原始 JSON，不保存插件返回的附件——调用方直接消费
-``files[].content``，避免把临时文件写到仓库外。
+Python 执行本文件。只打印原始 JSON，本脚本不额外保存插件附件；调用方直接消费
+``files[].content``。插件自身的输出位置统一由调用方指定到 artifacts/cache/。
 """
 
 from __future__ import annotations

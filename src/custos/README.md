@@ -8,6 +8,14 @@
 - 所有输出统一写入 `strategy_team/data/`(日志进 `artifacts/logs/`)。
 - 五个时点 runner(`pipeline/run_0850/0905/1445/1700/1800`)是唯一调度入口,共享行为收敛到 `core/pipeline_kit.py`。
 
+## Kimi Work 数据源运行配置
+
+内置数据源由 `KIMI_WORK_PYTHON` 指向的、已安装 `agent-gw` 的托管 Python 执行；项目 `.venv`
+不新增依赖。默认路径仅适用于生产机：`E:\KimiData\daimon-share\daimon\runtime\python\.venv\Scripts\python.exe`。
+其他机器必须设置 `KIMI_WORK_PYTHON`，否则不会使用系统 Python 猜测路径。插件输出统一指定到
+`artifacts/cache/kimiwork/`，是否实际落盘由插件决定；解析直接消费 `files[].content`。
+自然语言妙想接口只用于影子对账，live 个股资金流使用 push2，A50/CNH 使用 Wind 固定指标。
+
 ## 目录结构（2026-08-11 归堆）
 
 ```
@@ -69,7 +77,7 @@ src/
 
 ## 子包职责
 
-- `datasource/collect/` — `collect_holding_quotes`(持仓+指数报价)、`collect_incremental_market`(A50/CNH/涨跌停梯队等)、`collect_fund_flow`(个股榜内置东财主源、旧 push2 兜底；行业/概念仍走东财 push2)、`online_quotes`(域B独立在线行情,不依赖TDX)。
+- `datasource/collect/` — `collect_holding_quotes`(持仓+指数报价)、`collect_incremental_market`(A50/CNH/涨跌停梯队等)、`collect_fund_flow`(个股 push2 主源；妙想仅影子对账，行业/概念仍走东财 push2)、`online_quotes`(域B独立在线行情,不依赖TDX)。
 - `datasource/`（顶层）— 数据刷新类：`refresh_eod_klines`/`refresh_market_indices`（EOD 与指数）、`sync_compass_amv`（指南针 0AMV 台账）、`tdx_ext_quotes`/`overseas_market_collector`（海外市场）、`breadth_basis`（涨跌家数真值）、`trading_calendar`（交易日历）。2026-08-11 从 market_timing 迁入：它们只依赖 L0/L1，是数据层不是择时。`kimiwork_data`/`kimiwork_agent_gw` 统一封装内置 Yahoo、东财、Wind、CLS，托管 Python 调用，项目环境不新增依赖。
 - `datasource/local_tdx/` — 本地通达信数据封装(tq_http 快照、指南针 AMV、板块),详见 `local_tdx/README.md`。
 - `datasource/news/` — `rss_collector`/`rss_filter`/盘前情报 schema/盘后新闻摘要。

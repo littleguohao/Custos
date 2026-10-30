@@ -89,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", default="")
     args = parser.parse_args(argv)
     old = cff.legacy_stock_rows()
-    new = cff.kimiwork_stock_rows(limit=args.limit)
+    new = cff.kimiwork_stock_rows(limit=args.limit, target_date=args.date)
     if not old or not new:
         print("[ERR] 任一侧为空，不写对账产物", file=sys.stderr)
         return 1

@@ -82,7 +82,8 @@ REVIEWS = REPORTS
 LOGS = ARTIFACT_LOGS
 
 # Kimi Work 内置数据源：由托管 Python（含 agent-gw）执行子进程，项目 .venv
-# 不新增依赖。其他机器可用环境变量改道；CSV 附件只在内存中消费。
+# 不新增依赖。其他机器必须设置 KIMI_WORK_PYTHON 指向含 agent-gw 的托管 Python；
+# 插件 file_path 统一落在 artifacts/cache/kimiwork，解析直接消费 files[].content。
 KIMI_WORK_CACHE = ARTIFACTS / "cache" / "kimiwork"
 KIMI_WORK_PYTHON = Path(
     os.environ.get(
