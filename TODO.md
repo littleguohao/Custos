@@ -13,7 +13,6 @@
 
 | # | 事项 | 优先级 | 卡在 | 下一步 | 出处 |
 |---|---|---|---|---|---|
-| 88 | 首次月度交易反思（2026-09 月），跑顺「月报 → TRADE_LESSONS」流程；之后按月执行，节奏见 MASTER_WORKFLOW §七 | P2 | 生产机 | 读 2026-09 月报 JSON（无则先补跑 `monthly_review`），按模板写 E3 并核对 L1~L7 | owner 2026-10-12；[TRADE_LESSONS](TRADE_LESSONS.md) |
 | 106 | R36 已判路线复核：①R46 已撤回（owner 2026-10-21，配比路不继续）；②Phase 4 p2_sole 随机剔除臂对齐后（v0.386）重算 C4 | P3 | 生产机 | ② 重跑 r36_p4（低优先，选股侧思路重定后再看是否还需要） | R46 结论段、R36 头部审计注记 |
 | 111 | 格子进程内化（性能，最大一块）：score_evolution/strategy_grid 每格一个 backtest_factors 子进程、每格重载全宇宙（m2 实测 s3000 加载 45~53s/格）；改为进程内共享已加载 bars + 信号缓存逐格重打分（同 v0-lattice collect/score 拆分）。须金样逐位钉测、内存账重估 | P3 | 挂起 | R46 已改进程内实现、不再依赖；剩余受益者 = strategy_grid / R36 冻结读数 50 臂 / evolution_loop，等出现大规模格子跑数需求再做 | 性能排查 v0.401~0.403 |
 | 117 | 组合层新方向（单元待立，编号届时分配；R49 已用于逆向画像）：选股无区分力 + 收益靠右尾 ⇒ 铺宽还是集中（top-N / 持仓数 / 单票仓位）× 0AMV 状态化仓位（含 #86 ④盈亏比排序服务仓位）；R3「召回瓶颈未研究」的接续 | P2 | 挂起 | 第二批（R47/R48/R49）读完后起草预注册；工具准备已做（v0.460：`exposure_fn` 状态化仓位 + `scan_portfolio_grid` 网格与平分区间），能力盘点与局限见准备文档 | owner 2026-10-21 方向盘点；[R3](governance/research/R3_selection_discriminability_recall.md)；[准备文档](governance/research/portfolio_layer_prep.md) |
@@ -37,6 +36,7 @@
 | 116 | 开发机挖掘段数据快照 | 2026-10-29 | v0.453 导出+快照模式+硬闸；验收三轮后 owner 选 (b) 接受 tick 级微差，v0.468 容差口径对拍通过（严格 0 / 翻转 0 / 缺 0）；正式读数仍以生产机为准 |
 | 104 | R10 margin 按已实现口径重算 | 2026-10-30 | report-only 重算（v0.383+ 剔 open_end）：「可用 margin 只在叠 0AMV」仍成立（纯出场全负）；pct_12_amv +5.6→+2.9pp 跌破可用线，可用清单收窄为 4 个；回填 R10 头部审计注记 |
 | 107 | R1/R2 组合层 baseline 对照 tie-seed 0~19 重跑报区间 | 2026-10-30 | 4 跑 + tie_seed_summary（tie_seed_r1r2/）：baseline CAGR p50 +1.0%（A）/+3.2%（B）区间宽；配对 reversal_quality−baseline Δ p50 −99.2%/−47.3%（种子胜率 0%/15%）——rqi 组合层稳定负贡献；审计注记已回填（commit 542c323） |
+| 88 | 首次月度交易反思（2026-09） | 2026-10-30 | TRADE_LESSONS E3（生产机）：9 月净 +5.3 万、胜率 100%（n=5 右尾兑现）、三类 issues 零触发、L1~L7 无违反；月度例行走通 |
 |---|---|---|---|
 | 1 | 重下通达信完整历史日线 | 2026-08-09 | commit 4c37fae |
 | 2 | 验证 #1 | 2026-08-09 | commit 4c37fae |
