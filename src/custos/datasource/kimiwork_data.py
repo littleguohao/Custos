@@ -293,10 +293,14 @@ def dongcai_fund_flow_stocks(
         raise KimiWorkDataError(f"资金流榜单数量不足: {len(result)}/{limit}")
     if any(not isinstance(x["main_net_inflow"], (int, float)) for x in result):
         raise KimiWorkDataError("资金流榜单存在缺失主力净额")
-    result.sort(key=lambda x: cast(float, x["main_net_inflow"]), reverse=True)
+    # 单调检查必须在拼接原序上做（先排序再查恒通过）：分段在不同时刻取数，
+    # 盘中排名漂移会让相邻段交界处逆序——这正是要拦的拼接污染
     amounts = [cast(float, x["main_net_inflow"]) for x in result]
-    if any(a < b for a, b in zip(amounts, amounts[1:])):
-        raise KimiWorkDataError("资金流拼接结果未按主力净额单调递减")
+    bad = [i for i, (a, b) in enumerate(zip(amounts, amounts[1:]), 1) if a < b]
+    if bad:
+        raise KimiWorkDataError(
+            f"资金流拼接结果未按主力净额单调递减（逆序 {len(bad)} 处，首处第 {bad[0]} 名后）"
+        )
     return result
 
 

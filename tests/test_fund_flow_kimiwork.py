@@ -150,3 +150,18 @@ def test_shadow_compare_tracks_order_and_rounding():
     assert report["common_codes"] == 2
     assert report["same_order_prefix"] == 2
     assert report["fields"]["main_net_inflow"]["n_compared"] == 2
+
+
+def test_fund_flow_rejects_cross_chunk_inversion(monkeypatch):
+    """拼接原序逆序（第二段首名大于第一段末名）必须拒——先排序再查会恒通过。"""
+
+    def fake_api(source, api, params, **kwargs):
+        if "第1至10" in params["query"]:
+            rows = [_row(str(i).zfill(6), f"{10 - i}.00亿") for i in range(1, 11)]
+        else:
+            rows = [_row(str(i).zfill(6), "5.00亿") for i in range(11, 21)]
+        return _raw(HEADER, rows)
+
+    monkeypatch.setattr(kd, "call_api", fake_api)
+    with pytest.raises(kd.KimiWorkDataError, match="单调递减"):
+        kd.dongcai_fund_flow_stocks(limit=20, target_date="2026-10-30")

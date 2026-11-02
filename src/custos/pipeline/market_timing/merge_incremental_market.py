@@ -122,9 +122,17 @@ def merge_incremental(inc: dict, mkt: dict, target: str) -> tuple[dict, list[str
             )
     # Overseas from incremental (只增不毁: 不覆盖已有非空值,也不写入 None)
     if "a50_futures" in inc:
-        v = inc["a50_futures"].get("change_pct")
+        a50 = inc["a50_futures"]
+        v = a50.get("change_pct")
         if v is not None:
-            mkt.setdefault("overseas_market", {}).setdefault("a50_change_pct", v)
+            ov = mkt.setdefault("overseas_market", {})
+            ov.setdefault("a50_change_pct", v)
+            # 键名沿用历史契约；A50 现为 Wind 指数代理（非期货，无隔夜信息）——身份随值带过去
+            if a50.get("proxy"):
+                ov.setdefault("a50_is_proxy", True)
+                ov.setdefault(
+                    "a50_proxy_note", a50.get("proxy_note") or "A50 指数代理（非期货）"
+                )
     if "cnh_usd" in inc:
         v = inc["cnh_usd"].get("change_pct")
         if v is not None:
