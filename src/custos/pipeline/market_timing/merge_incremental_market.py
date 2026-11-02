@@ -203,7 +203,7 @@ def _merge_incremental_step(
 
 
 def _ledger_amv_observation(target: str) -> tuple | None:
-    """回退人工观测台账(用户 15:15 告知的值由 LLM 写入 0amv_observations.jsonl)。
+    """回退人工观测台账(用户盘后告知的值由 LLM 写入 0amv_observations.jsonl)。
 
     返回 (amv_change_pct, as_of);无可用观测返回 None。同日多条时取最后出现的(最新)。
     """
@@ -346,7 +346,7 @@ def main(argv=None) -> int:
         return code
 
     # 2. Auto-fix 0AMV quality if amv_0day is set but quality missing.
-    #    amv_0day 缺失时回退到人工观测台账(用户 15:15 告知的值由 LLM 写入 0amv_observations.jsonl)
+    #    amv_0day 缺失时回退到人工观测台账(用户盘后告知的值由 LLM 写入 0amv_observations.jsonl)
     code = _autofix_amv_quality(target, market_path, status)
     if code is not None:
         return code
