@@ -817,3 +817,45 @@ def test_production_bars_fn_drops_empty_frames_parallel_v0469(monkeypatch):
         assert sorted(bars_fn("2010-01-01", "2010-12-31")) == ["000001", "000006"], (
             workers
         )
+
+
+class TestQualifyV0477:
+    """v0.477 跑数前修订：资格 = 簇数 ≥ 门 ∧ lift_low 簇稳健 95% 下界 > 1.2；逐对象兑现质量只描述。"""
+
+    def test_cluster_bound_math(self):
+        import numpy as np
+
+        # 10 簇各 10 笔、各命中 5 ⇒ p=0.5、簇残差全 0 ⇒ 下界 = 点估计
+        lift, lo = sr.cluster_lift_bounds([10] * 10, [5] * 10, 0.25)
+        assert lift == pytest.approx(2.0) and lo == pytest.approx(2.0)
+        # 同总量但簇间完全相关（5 簇全中、5 簇全不中）⇒ 区间显著变宽
+        lift2, lo2 = sr.cluster_lift_bounds([10] * 10, [10] * 5 + [0] * 5, 0.25)
+        assert lift2 == pytest.approx(2.0) and lo2 < 1.2
+        se = (
+            np.sqrt(sum((h - 0.5 * 10) ** 2 for h in [10] * 5 + [0] * 5) * 10 / 9) / 100
+        )
+        assert lo2 == pytest.approx((0.5 - 1.96 * se) / 0.25)
+        assert sr.cluster_lift_bounds([5], [3], 0.2)[1] is None  # 单簇无下界
+        assert sr.cluster_lift_bounds([], [], 0.2) == (None, None)
+
+    def test_qualify_uses_bound_not_count(self):
+        ok = {"n_clusters": 40, "lift_low_lo95": 1.25, "n_signals": 60}
+        assert sr._qualifies(ok, 30)
+        assert not sr._qualifies({**ok, "n_clusters": 29}, 30)
+        assert not sr._qualifies({**ok, "lift_low_lo95": 1.19, "n_signals": 10**6}, 30)
+
+    def test_production_cluster_gate_default(self):
+        class A:
+            min_n = sr.MIN_N
+
+        assert sr._min_clusters(A()) == sr.MIN_CLUSTERS == 30
+
+    def test_report_has_bounds_and_quality(self):
+        rep = _world_run(0)
+        o = rep["objects"]["b1_l1"]
+        assert "lift_lo95_a" in o and "lift_lo95_b" in o
+        w = next(iter(o["windows"].values()))
+        assert {"n_clusters", "lift_low_lo95"} <= set(w)
+        q = next(iter(o["quality"].values()))
+        assert q["n_realized"] > 0 and {"payoff", "p_big", "p_bigloss"} <= set(q)
+        assert rep["params"]["quality_baseline"]["p_big"] == pytest.approx(0.0593)

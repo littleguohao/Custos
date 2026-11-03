@@ -56,7 +56,9 @@ MAX_GAP_DAYS = 20  # 停牌跨越 >20 自然日的波段剔除
 WIN_LO, WIN_HI = -10, 5  # 起涨窗口 [T0−10, T0+5]（交易日）
 WIDE_LO, WIDE_HI = -20, 10  # 宽窗（只描述，不进线索筛选）
 AMP_BANDS = ("20_30", "30_50", "50_100", "100p")  # 涨幅分带 20~30/30~50/50~100/≥100%
-MIN_N = 1000  # A 合格信号数门槛（写死；--min-n 仅测试注入通道）
+MIN_N = 1000  # 🔄 v0.477 起不再作资格门槛（owner 2026-11-03：看质量不看数量）；--min-n 保留为测试注入的簇数门
+MIN_CLUSTERS = 30  # v0.477 资格兜底：有效簇数 ≥ 30（防只靠几个簇）
+LIFT_Z = 1.96  # v0.477 资格：lift_low 簇稳健 95% 下界 > LIFT_MIN
 LIFT_MIN = 1.2
 N_RANDOM = 200
 #: 跑数前修订（v0.458，owner 2026-10-27）：局部低点对照——收盘为近 LOCAL_LOW_N 根（含当日）最低的 bar。
@@ -624,6 +626,8 @@ def window_readings(
     ``low_null_material``（局部低点命中前缀和 + 分层下标池）× ``cluster_lengths``
     （对象簇形状）在主流程组装（口径见 R50 文档「跑数前修订 v0.458」节）。
     """
+    from custos.research import criteria_kit as kit  # noqa: PLC0415
+
     n_swings = sum(len(v) for v in win["swings_of"].values())
     # 分带分母 = 全部波段（含无信号代码——它们的波段本来就不可能匹配）
     band_totals: dict[str, int] = {b: 0 for b in AMP_BANDS}
@@ -676,6 +680,15 @@ def window_readings(
         base, base_grp = _baseline(win, obj, n_sig, seed)
         base_low = _baseline_low_exact(win, obj)
         prec = (n_hit / n_sig) if n_sig else None
+        cl_n: dict[int, int] = {}
+        cl_h: dict[int, int] = {}
+        if flat:
+            for cid, r in zip(kit.cluster_ids(flat), flat):
+                cl_n[cid] = cl_n.get(cid, 0) + 1
+                cl_h[cid] = cl_h.get(cid, 0) + int(bool(r.get("_hit")))
+        _lift, lo95 = cluster_lift_bounds(
+            [cl_n[c] for c in cl_n], [cl_h[c] for c in cl_n], base_low
+        )
         readings[obj] = {
             "n_signals": n_sig,
             "n_matched": n_hit,
@@ -685,6 +698,8 @@ def window_readings(
             "baseline_low": base_low,
             # 判据量（v0.458）：对局部低点基线的精度 lift
             "lift_low": (prec / base_low if prec is not None and base_low else None),
+            "n_clusters": len(cl_n),
+            "lift_low_lo95": lo95,  # v0.477 资格量
             "recall": (matched_swings / n_swings if n_swings else None),
             "n_swings_matched": matched_swings,
             "lead_quantiles": _quantiles(offsets),
@@ -701,7 +716,10 @@ def window_readings(
             "baseline_by_year": base_grp["by_year"],
             "baseline_by_month": base_grp["by_month"],
         }
-    aux = {"n_signals": {o: readings[o]["n_signals"] for o in OBJECTS}}
+    aux = {
+        "n_signals": {o: readings[o]["n_signals"] for o in OBJECTS},
+        "n_clusters": {o: readings[o]["n_clusters"] for o in OBJECTS},
+    }
     return readings, aux
 
 
@@ -780,6 +798,79 @@ def _by_year_month(
     return _group(lambda d: d[:4], "baseline_by_year"), _group(
         lambda d: d[5:7], "baseline_by_month"
     )
+
+
+#: 逐对象兑现质量（v0.477，只描述）：大单 / 大亏阈值与 R44 同口径，基线为 R44 全候选精确值
+QUALITY_BIG_WIN = 0.20
+QUALITY_BIG_LOSS = -0.10
+QUALITY_BASELINE = {
+    "p_big": 0.0593,
+    "p_bigloss": 0.1797,
+    "source": "R44 全候选（v0.459）",
+}
+
+
+def _object_quality(
+    win: dict[str, Any],
+    per_code: dict[str, dict],
+    regime: dict[str, str],
+    cost_bps: float,
+    replay_fn: Optional[Callable[[list[dict], dict[str, Any]], list[dict]]],
+) -> dict[str, Any]:
+    """v0.477（owner 2026-11-03「看信号质量」）：每对象全部信号按 ``LIVE_PARAMS`` 重放（入场不叠
+    0AMV、同成本）→ 已实现笔数 / 均值 / 中位 / 胜率 / 盈亏比 / 大单率 / 大亏率。**只作描述，不进判据**。"""
+    from custos.research import backtest_factors as bt  # noqa: PLC0415
+    from custos.research import factor_exit_study as fes  # noqa: PLC0415
+    from custos.research import plan_rules_replay as prr  # noqa: PLC0415
+
+    out: dict[str, Any] = {}
+    for o in OBJECTS:
+        recs = [
+            {
+                "code": r["code"],
+                "date": r["date"],
+                "i": int(r["i"]),
+                "sig": {"i": int(r["i"]), "date": r["date"]},
+                "score": 0.0,
+            }
+            for r in win["sig_rows"][o]
+            if replay_fn is not None or r["code"] in per_code
+        ]
+        if not recs:
+            out[o] = {"n_realized": 0}
+            continue
+        trades = (
+            replay_fn(recs, prr.LIVE_PARAMS)
+            if replay_fn is not None
+            else fes.replay_signals(per_code, recs, prr.LIVE_PARAMS, regime, cost_bps)
+        )
+        rets = np.asarray(
+            [
+                float(t["ret"])
+                for t in trades
+                if isinstance(t.get("ret"), (int, float))
+                and not bt.is_unrealized_reason(t.get("reason"))
+            ],
+            dtype=float,
+        )
+        if not len(rets):
+            out[o] = {"n_realized": 0}
+            continue
+        wins_, losses = rets[rets > 0], rets[rets <= 0]
+        out[o] = {
+            "n_realized": int(len(rets)),
+            "mean": float(rets.mean()),
+            "median": float(np.median(rets)),
+            "win_rate": float((rets > 0).mean()),
+            "payoff": (
+                float(wins_.mean() / -losses.mean())
+                if len(wins_) and len(losses) and losses.mean() < 0
+                else None
+            ),
+            "p_big": float((rets >= QUALITY_BIG_WIN).mean()),
+            "p_bigloss": float((rets <= QUALITY_BIG_LOSS).mean()),
+        }
+    return out
 
 
 def _realization(
@@ -920,16 +1011,18 @@ def _null_lifts(
     shapes: dict[str, Any],
     base_low: dict[str, Any],
     rng: Any,
-) -> dict[str, Optional[float]]:
-    """单臂：每对象按簇形状逐簇抽同层随机局部低点作锚点，整簇取锚点命中；精度 ÷ 局部低点基线。"""
-    out: dict[str, Optional[float]] = {}
+) -> dict[str, tuple[Optional[float], Optional[float]]]:
+    """单臂：每对象按簇形状逐簇抽同层随机局部低点作锚点，整簇取锚点命中；精度 ÷ 局部低点基线。
+    v0.477：返回 {对象: (lift, 簇稳健下界)}——臂资格与候选同口径（下界 > LIFT_MIN）。"""
+    out: dict[str, Any] = {}
     for o in OBJECTS:
         sh = shapes[o]
         b = base_low.get(o)
         if not sh or not b or not len(mat["all"]):
-            out[o] = None
+            out[o] = (None, None)
             continue
-        hit = cnt = 0
+        ns: list[Any] = []
+        hs: list[Any] = []
         for key, lens in sh.items():
             pool = mat["strata"].get(key)
             if pool is None or not len(pool):
@@ -940,18 +1033,46 @@ def _null_lifts(
             )  # 锚点（随机局部低点）是否落在起涨窗口
             # 整簇取锚点命中：簇内命中完全相关——真实信号簇（相邻 bar）与 16 根宽的起涨窗口
             # 高度同进同出；取完全相关是保守端（零假设方差 ≥ 真实）
-            hit += int((h * lens).sum())
-            cnt += int(lens.sum())
-        out[o] = (hit / cnt / b) if cnt else None
+            ns.append(lens)
+            hs.append(h * lens)
+        if not ns:
+            out[o] = (None, None)
+            continue
+        out[o] = cluster_lift_bounds(np.concatenate(ns), np.concatenate(hs), b)
     return out
 
 
-def _qualifies(rd: dict[str, Any], min_n: int) -> bool:
-    """A 合格 / B 复现同门槛（R50 写死）：信号数 ≥ min_n ∧ 精度 lift_low > LIFT_MIN。"""
+def cluster_lift_bounds(
+    n_c: Any, h_c: Any, base: Optional[float], z: float = LIFT_Z
+) -> tuple[Optional[float], Optional[float]]:
+    """簇稳健比率估计（v0.477）：精度 p = Σh/Σn，方差按簇残差 Σ(h_c − p·n_c)² ·k/(k−1) / (Σn)²；
+    返回 (lift, lift 下界) = (p/base, (p − z·se)/base)。簇数 < 2 或基线缺 ⇒ 下界 None。"""
+    n_c = np.asarray(n_c, dtype=float)
+    h_c = np.asarray(h_c, dtype=float)
+    tot = float(n_c.sum())
+    if not base or tot <= 0:
+        return None, None
+    p = float(h_c.sum()) / tot
+    k = len(n_c)
+    if k < 2:
+        return p / base, None
+    se = float(np.sqrt(((h_c - p * n_c) ** 2).sum() * k / (k - 1)) / tot)
+    return p / base, (p - z * se) / base
+
+
+def _min_clusters(args: Any) -> int:
+    """资格簇数门：生产 = MIN_CLUSTERS；测试经 --min-n 注入（合成世界簇少）。"""
+    v = getattr(args, "min_n", None)
+    return int(v) if v is not None and int(v) != MIN_N else MIN_CLUSTERS
+
+
+def _qualifies(rd: dict[str, Any], min_clusters: int) -> bool:
+    """A 合格 / B 复现同门槛（v0.477 跑数前修订，owner 2026-11-03）：有效簇数 ≥ min_clusters ∧
+    lift_low 的簇稳健 95% 下界 > LIFT_MIN。原「信号数 ≥ 1000 ∧ 点估计 > 1.2」🔄 已废——数量不是质量，
+    稀疏但稳的对象被误挡、成簇的多信号对象被高估可信度。"""
+    lo = rd.get("lift_low_lo95")
     return bool(
-        rd.get("n_signals", 0) >= min_n
-        and rd.get("lift_low") is not None
-        and rd["lift_low"] > LIFT_MIN
+        rd.get("n_clusters", 0) >= min_clusters and lo is not None and lo > LIFT_MIN
     )
 
 
@@ -1042,14 +1163,16 @@ def run_study(
     objs: dict[str, Any] = {}
     for o in OBJECTS:
         ra, rb = readings[wa][o], readings[wb][o]
-        qa = _qualifies(ra, args.min_n)
-        qb = _qualifies(rb, args.min_n)
+        qa = _qualifies(ra, _min_clusters(args))
+        qb = _qualifies(rb, _min_clusters(args))
         objs[o] = {
             "windows": {wa: ra, wb: rb},
             "qualify_a": qa,
             "replicated": bool(qa and qb),
             "lift_a": ra.get("lift_low"),
             "lift_b": rb.get("lift_low"),
+            "lift_lo95_a": ra.get("lift_low_lo95"),
+            "lift_lo95_b": rb.get("lift_low_lo95"),
             "lift_any_a": ra.get("lift"),  # 描述：对任意 bar
             "lift_any_b": rb.get("lift"),
             "stat": (min(ra["lift_low"], rb["lift_low"]) if (qa and qb) else None),
@@ -1081,14 +1204,17 @@ def run_study(
             lifts[w] = _null_lifts(wins[w], mats[w], shapes[w], base_low[w], rng)
         best = 0.0
         for o in OBJECTS:
-            la, lb = lifts[wa][o], lifts[wb][o]
+            (la, la_lo), (lb, lb_lo) = lifts[wa][o], lifts[wb][o]
+            mc = _min_clusters(args)
             if (
-                aux[wa]["n_signals"][o] >= args.min_n
-                and aux[wb]["n_signals"][o] >= args.min_n
+                aux[wa]["n_clusters"][o] >= mc
+                and aux[wb]["n_clusters"][o] >= mc
                 and la is not None
                 and lb is not None
-                and la > LIFT_MIN
-                and lb > LIFT_MIN
+                and la_lo is not None
+                and lb_lo is not None
+                and la_lo > LIFT_MIN
+                and lb_lo > LIFT_MIN
             ):
                 best = max(best, min(la, lb))
         return best  # 无复现记 0（R49 同口径——臂恒有值，池必满 N）
@@ -1120,6 +1246,14 @@ def run_study(
         o for o in OBJECTS if objs[o]["status"] in ("lead_robust", "lead_replicated")
     ]
     robust = [o for o in OBJECTS if objs[o]["status"] == "lead_robust"]
+
+    # v0.477：逐对象兑现质量（描述）——同一出场下信号能不能赚到钱
+    quality = {
+        w: _object_quality(wins[w], per_code_of[w], regime, args.cost_bps, replay_fn)
+        for w in wins
+    }
+    for o in OBJECTS:
+        objs[o]["quality"] = {w: quality[w][o] for w in wins}
 
     funnel = {w: _funnel(wins[w], readings[w]) for w in wins}
     by_year: dict[str, Any] = {}
@@ -1166,7 +1300,10 @@ def run_study(
             "score_line": B1_SCORE_LINE,
             "top_n": args.top_n,
             "min_n": args.min_n,
+            "min_clusters": _min_clusters(args),
+            "qualify_rule": "v0.477：n_clusters ≥ min_clusters ∧ lift_low 簇稳健 95% 下界 > lift_min",
             "lift_min": LIFT_MIN,
+            "quality_baseline": QUALITY_BASELINE,
             "cost_bps": args.cost_bps,
             "warmup_bars": 300,
         },

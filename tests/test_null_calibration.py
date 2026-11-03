@@ -981,6 +981,7 @@ class TestSwingRecallCalibration:
     实测定稿（v0.458 修订口径，合成世界逐种子实测，以 R50 文档「跑数前修订 v0.458」节
     为准）：成簇零假设 2/20（50 臂）/ 1/20（200 臂，生产口径）、逐 bar iid 世界 0/20、
     植入 edge 可识别、逐笔哨兵（簇形状拆成全 1）19/20。
+    v0.477（资格改簇稳健下界）：实测见 R50 文档「跑数前修订 v0.477」节；哨兵须同拆簇判定（10/20）。
     夹具设计纪律（簇必须同长且冷热不合并）见 test_swing_recall_study._world docstring。
     """
 
@@ -1027,6 +1028,13 @@ class TestSentinelSwingIidPermutation:
 
         # v0.458：零假设改为「保簇形状的随机局部低点入场」——哨兵把簇形状拆成全 1（逐笔抽样）
         monkeypatch.setattr(sr, "cluster_lengths", lambda rows: [(1, r) for r in rows])
+        # v0.477：资格改用簇稳健下界后，簇处理有两道（零假设簇形状 + 资格的簇方差）——
+        # 只拆一道 0/20 不再失败（另一道兜住）；哨兵须两道同拆（cluster_ids 逐笔成簇）：实测 10/20
+        from custos.research import criteria_kit as kit
+
+        monkeypatch.setattr(
+            kit, "cluster_ids", lambda recs, max_gap=5: list(range(len(recs)))
+        )
         with pytest.raises(AssertionError, match="零假设校准失败"):
             hn.assert_noise_calibration(
                 "swing_recall[逐笔置换哨兵]", _r50_run(False, **R50_KW), seeds=R50_SEEDS
