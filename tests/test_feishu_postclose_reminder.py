@@ -248,3 +248,87 @@ def test_still_missing_after_ingest_sends_reminder(
 def test_complete_message_cannot_be_generated():
     with pytest.raises(ValueError, match="记录齐全"):
         reminder._message(DAY, [])
+
+
+def test_collection_already_complete_does_not_remind_or_poll(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(reminder, "_is_trading_day", lambda _day: True)
+    monkeypatch.setattr(
+        reminder, "_record_status", lambda _day: {"amv": True, "trades": True}
+    )
+    artifact = reminder._run_collection_day(
+        DAY,
+        lambda _ctx: pytest.fail("已齐时不应启动入站轮询"),
+        sleep_fn=lambda _seconds: pytest.fail("已齐时不应等待"),
+    )
+    assert artifact["completed"] is True
+    assert artifact["stopped_reason"] == "already_complete"
+    assert artifact["sent"] is False
+    assert artifact["poll_count"] == 0
+
+
+def test_collection_stops_immediately_after_second_poll(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    status = {"amv": False, "trades": False}
+    sleeps: list[int] = []
+    sent: list[str] = []
+    polls = {"count": 0}
+
+    def ingest(_ctx):
+        polls["count"] += 1
+        if polls["count"] == 2:
+            status.update(amv=True, trades=True)
+        return {"artifact": {"new_messages": 1, "actions": [], "receipt_sent": False}}
+
+    monkeypatch.setattr(reminder, "_is_trading_day", lambda _day: True)
+    monkeypatch.setattr(reminder, "_record_status", lambda _day: status)
+    monkeypatch.setattr(reminder, "_send_text", sent.append)
+    artifact = reminder._run_collection_day(DAY, ingest, sleep_fn=sleeps.append)
+
+    assert artifact["completed"] is True
+    assert artifact["stopped_reason"] == "received_complete"
+    assert artifact["poll_count"] == 2
+    assert sleeps == [600, 600]
+    assert len(sent) == 1
+    assert artifact["missing"] == []
+
+
+def test_collection_stops_at_deadline_without_more_polling(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    sleeps: list[int] = []
+    sent: list[str] = []
+    monkeypatch.setattr(reminder, "_is_trading_day", lambda _day: True)
+    monkeypatch.setattr(
+        reminder, "_record_status", lambda _day: {"amv": False, "trades": False}
+    )
+    monkeypatch.setattr(reminder, "_send_text", sent.append)
+    artifact = reminder._run_collection_day(
+        DAY,
+        lambda _ctx: {"artifact": {"new_messages": 0, "actions": []}},
+        sleep_fn=sleeps.append,
+        max_polls=2,
+    )
+
+    assert artifact["completed"] is False
+    assert artifact["stopped_reason"] == "deadline"
+    assert artifact["poll_count"] == 2
+    assert sleeps == [600, 600]
+    assert len(sent) == 1
+    assert artifact["missing"] == ["amv", "trades"]
+
+
+def test_collection_non_trading_day_does_not_remind_or_poll(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(reminder, "_is_trading_day", lambda _day: False)
+    artifact = reminder._run_collection_day(
+        DAY,
+        lambda _ctx: pytest.fail("非交易日不应接收"),
+        sleep_fn=lambda _seconds: pytest.fail("非交易日不应等待"),
+    )
+    assert artifact["stopped_reason"] == "non_trading_day"
+    assert artifact["sent"] is False
+    assert artifact["poll_count"] == 0

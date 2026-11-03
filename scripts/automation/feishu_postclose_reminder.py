@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""盘后补数：先接收入站回复，再检查台账，缺什么提醒什么。
+"""盘后补数单任务：15:00 缺项提醒一次，10 分钟轮询，收齐即停，17:00 截止。
 
-调度时点为交易日 15:30 / 16:00 / 16:30。每次先调用确定性入站桥读取新回复，
-随后只读当天台账；两项齐全不发送，缺项才发送飞书文本，不调用模型。
+每日只运行这一轮；开始时已齐则不提醒也不轮询。入站接收、台账登记、状态检查
+均为确定性脚本，不调用模型，不保留常驻 10 分钟轮询。
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import json
 import math
 import os
 import subprocess
+import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -244,6 +245,83 @@ def _run_for_day(day: str, ingest_fn=None) -> dict:
     return artifact
 
 
+def _run_collection_day(
+    day: str,
+    ingest_fn,
+    *,
+    sleep_fn=None,
+    max_polls: int = 12,
+) -> dict:
+    """15:00 缺项提醒一次，随后每 10 分钟接收；收齐即停，12 轮后到 17:00 截止。"""
+    if not _is_trading_day(day):
+        return {
+            "date": day,
+            "trading_day": False,
+            "sent": False,
+            "completed": False,
+            "poll_count": 0,
+            "stopped_reason": "non_trading_day",
+            "reason": "非交易日，未提醒、未轮询",
+        }
+    status = _record_status(day)
+    initial_missing = [name for name in ("amv", "trades") if not status[name]]
+    if not initial_missing:
+        return {
+            "date": day,
+            "trading_day": True,
+            "sent": False,
+            "completed": True,
+            "poll_count": 0,
+            "stopped_reason": "already_complete",
+            "amv_confirmed": True,
+            "trade_recorded": True,
+            "initial_missing": [],
+            "missing": [],
+            "reason": "15:00 两项已齐，未提醒、未启动轮询",
+        }
+
+    _send_text(_message(day, initial_missing))
+    sleep = sleep_fn or time.sleep
+    last_ingest: dict = {}
+    for poll_count in range(1, max_polls + 1):
+        sleep(600)
+        last_ingest = ingest_fn({}).get("artifact", {})
+        status = _record_status(day)
+        missing = [name for name in ("amv", "trades") if not status[name]]
+        if not missing:
+            return {
+                "date": day,
+                "trading_day": True,
+                "sent": True,
+                "completed": True,
+                "poll_count": poll_count,
+                "stopped_reason": "received_complete",
+                "amv_confirmed": True,
+                "trade_recorded": True,
+                "initial_missing": initial_missing,
+                "missing": [],
+                "ingest": last_ingest,
+                "reason": f"第 {poll_count} 次轮询后两项收齐，已停止",
+            }
+
+    labels = {"amv": "0AMV", "trades": "交易记录"}
+    missing = [name for name in ("amv", "trades") if not status[name]]
+    return {
+        "date": day,
+        "trading_day": True,
+        "sent": True,
+        "completed": False,
+        "poll_count": max_polls,
+        "stopped_reason": "deadline",
+        "amv_confirmed": status["amv"],
+        "trade_recorded": status["trades"],
+        "initial_missing": initial_missing,
+        "missing": missing,
+        "ingest": last_ingest,
+        "reason": "截至 17:00 仍未收齐：" + "、".join(labels[name] for name in missing),
+    }
+
+
 def run(ctx) -> dict:
     # Automation 按绝对路径加载本文件，不保证仓库根在 sys.path；同目录桥也按路径加载。
     import importlib.util
@@ -255,4 +333,4 @@ def run(ctx) -> dict:
     bridge = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(bridge)
     day = datetime.now(CST).date().isoformat()
-    return {"artifact": _run_for_day(day, ingest_fn=bridge.run)}
+    return {"artifact": _run_collection_day(day, bridge.run)}
