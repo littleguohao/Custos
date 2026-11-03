@@ -350,6 +350,19 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 
 交易日历优先级：人工`overrides` > 交易所官方休市安排 > 本地通达信缓存 > 周末规则 > `unknown`。非交易日跳过并保持安静（例外：08:50/09:05 经 `--run-on-closed` 每日化后按休市口径续跑，见上；1445/1700/1800 时点 runner 仍在日历门退出）。
 
+### Kimi Work 无聊天执行（v0.489）
+
+以下任务直接运行 `scripts/automation/deterministic_pipeline.py`，不再以 Agent 聊天包装确定性命令；无聊天窗口、无模型编排 token、无逐日历史上下文，运行日志与结构化结果仍保留：
+
+| 时点 | 活动任务 ID | 行为 |
+|---|---|---|
+| 每日 09:05 | `automation_f4000a0c-673e-4fe9-9fa9-471ed632a45e` | `run_0905` + 盘前日报飞书投递 |
+| 交易日 14:45 | `automation_4b658250-ee41-405b-a78e-b032d0f8e78f` | `run_1445` + 尾盘报告飞书投递；日历门退出码 3 静默跳过 |
+| 交易日 17:00 | `automation_44f0790b-93f4-48f4-a7ec-1e366bb8fdde` | `run_1700` + 最终复盘飞书投递；日历门退出码 3 静默跳过 |
+| 每周五 14:35 | `automation_a0d643ef-60f3-4fa0-a042-b9f20a01d9ea` | 本地通达信交易日历 `--require-refresh` |
+
+报告投递统一验收 `artifacts/reports/daily/YYYY-MM-DD/` 下非空文件，缺失或投递失败即任务失败，不得以旧路径/空报告冒充成功。原同名 `local_conversation(reuse)` 任务均停用保留作历史与回退，**不得与对应新任务同时启用**。定时触发实测可能不带 `defaultInput`，脚本以 `TASK_PIPELINES` 按上述任务 ID 选择管线；更换任务 ID 必须同步该映射。08:50 公告/RSS 语义研判不在本次无聊天迁移范围内。
+
 所有任务必须先检查交易日或统计周期完整性。任务失败应记录原因并告警，不得以空报告冒充成功。
 
 ---
