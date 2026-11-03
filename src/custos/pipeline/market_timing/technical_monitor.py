@@ -108,8 +108,42 @@ def _read_vipdoc_daily(tdx_code: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+#: v0.486（owner 2026-11-03「需要全部前复权」）：读全历史前复权日线
+QFQ_LOAD_BARS = 100000
+
+
 def read_vipdoc(tdx_code: str) -> pd.DataFrame:
-    """Read K-line via the datasource layer (replaces struct.unpack binary parsing)."""
+    """持仓 / 主题技术面的日线入口：**前复权**（v0.486 起；此前直读 vipdoc 原始价）。
+
+    走 ``local_tdx_data.get_ohlcv_table(adjust="qfq")``——与选股链、研究链同一复权口径。原始价下除权缺口
+    会造出假的「跌破 N 结构低点 / 跌破箱体」（快照实测 N 结构判定 2.0%、趋势 / 20 日箱体 2.9% 与前复权不同），
+    误触发持仓 P0。指数（880xxx / 999999）无权息，数据层原样返回。复权失败（``attrs["adjust"]=="none"``）
+    时如实 WARN 并照常返回（与选股链同一降级口径，数据层另有失败计数）。
+    """
+    try:
+        from custos.datasource.local_tdx.local_tdx_data import (  # noqa: PLC0415
+            get_ohlcv_table,
+        )
+
+        df = get_ohlcv_table(tdx_code, count=QFQ_LOAD_BARS)
+    except Exception as exc:  # noqa: BLE001 — 外部契约不变：失败返回空 DF（消费方按 no kline data 处理）
+        print(
+            f"[WARN] read_vipdoc({tdx_code}) 前复权读取失败，返回空表: {exc}",
+            file=sys.stderr,
+        )
+        return pd.DataFrame()
+    if df is None or df.empty:
+        return pd.DataFrame()
+    if df.attrs.get("adjust") == "none":
+        print(
+            f"[WARN] read_vipdoc({tdx_code}) 前复权失败，退回未复权价（结构 / 箱体判定可能被除权缺口误触发）",
+            file=sys.stderr,
+        )
+    return df.sort_values("date").reset_index(drop=True)
+
+
+def read_vipdoc_raw(tdx_code: str) -> pd.DataFrame:
+    """未复权原始日线（v0.486 前 read_vipdoc 的行为）；live 判定不得使用，只留给需要原始价的诊断。"""
     return _read_vipdoc_daily(tdx_code)
 
 

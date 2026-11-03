@@ -178,8 +178,8 @@ class TestBjVipdocRouting(unittest.TestCase):
     """v0.101：北交所代码必须走 local_tdx_data 的 .day 直读——mootdx Reader 把
     920xxx 误路由到 SH（读不到 ⇒ 持仓技术面全空，曙光数创 920808 实盘暴露）。
 
-    2026-08-24 数据层解耦后，沪深与 BJ **都**委托 local_tdx_data.read_vipdoc_daily
-    （BJ 路由由数据层内部处理），本组测试钉住这个委托关系。"""
+    2026-08-24 数据层解耦后，沪深与 BJ **都**委托数据层（BJ 路由由数据层内部处理）；
+    v0.486 起委托 get_ohlcv_table（前复权），本组测试钉住这个委托关系。"""
 
     def _intercept_ltd(self):
         """替换 sys.modules 里的 local_tdx_data，拦截函数体内的惰性 import。"""
@@ -189,11 +189,20 @@ class TestBjVipdocRouting(unittest.TestCase):
         called = {}
 
         def fake_read_vipdoc_daily(code):
-            called["code"] = code
+            called["raw"] = code
             return frame([9, 10], [11, 12], [10, 11])
+
+        def fake_get_ohlcv_table(code, count=260, adjust="qfq", **_kw):
+            called["code"] = code
+            called["count"] = count
+            called["adjust"] = adjust
+            df = frame([9, 10], [11, 12], [10, 11])
+            df.attrs["adjust"] = called.get("force_adjust", "qfq")
+            return df
 
         fake_mod = types.ModuleType("custos.datasource.local_tdx.local_tdx_data")
         fake_mod.read_vipdoc_daily = fake_read_vipdoc_daily
+        fake_mod.get_ohlcv_table = fake_get_ohlcv_table
         saved = sys.modules.get("custos.datasource.local_tdx.local_tdx_data")
         sys.modules["custos.datasource.local_tdx.local_tdx_data"] = fake_mod
         return called, saved
@@ -228,6 +237,37 @@ class TestBjVipdocRouting(unittest.TestCase):
             self._restore_ltd(saved)
         assert called.get("code") == "600000.SH"
         assert len(df) == 2
+
+    def test_read_vipdoc_is_qfq_full_history_v0486(self):
+        """v0.486（owner「需要全部前复权」）：live 入口走 get_ohlcv_table 默认 qfq、全历史；
+        原始价只留 read_vipdoc_raw。"""
+        import custos.pipeline.market_timing.technical_monitor as tm
+
+        called, saved = self._intercept_ltd()
+        try:
+            tm.read_vipdoc("600000.SH")
+            assert called["adjust"] == "qfq" and called["count"] == tm.QFQ_LOAD_BARS
+            assert "raw" not in called
+            tm.read_vipdoc_raw("600000.SH")
+            assert called["raw"] == "600000.SH"
+        finally:
+            self._restore_ltd(saved)
+
+    def test_qfq_failure_warns(self):
+        import contextlib
+        import io
+
+        import custos.pipeline.market_timing.technical_monitor as tm
+
+        called, saved = self._intercept_ltd()
+        called["force_adjust"] = "none"
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(buf):
+                df = tm.read_vipdoc("600000.SH")
+        finally:
+            self._restore_ltd(saved)
+        assert len(df) == 2 and "前复权失败" in buf.getvalue()
 
 
 def _write_day(path, recs):

@@ -497,13 +497,18 @@
       ]
     },
     "technical_monitor": {
-      "version": 1,
-      "source_digest": "cf13544d7a83d7ad518a",
+      "version": 2,
+      "source_digest": "20acfa4f70b7a81a6262",
       "history": [
         {
           "version": 1,
           "date": "2026-11-03",
           "change": "初始版本：注册表外的持仓大形态检测器（N 结构 / 趋势三态 / 箱体）纳入版本跟踪；v0.485 参数提为模块常量，行为逐位不变（200 bar 对拍）"
+        },
+        {
+          "version": 2,
+          "date": "2026-11-03",
+          "change": "持仓/主题技术面改前复权（owner 2026-11-03「需要全部前复权」，v0.486）：除权缺口不再误触发 N 结构/箱体跌破"
         }
       ]
     }

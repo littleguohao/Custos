@@ -80,8 +80,8 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | 箱体（20 / 60 日，上沿 = 最高价 85% 分位、下沿 = 最低价 15% 分位） | 同上 | `trend_box` |
 
 - review 名单来源用持仓：`calib_probe --module n_structure --mode review --review-source holdings --since ... --until ...`。
-- **已知定义问题（待 owner 拍板，不在本轮改）**：
-  1. **持仓链用未复权价**：`technical_monitor.read_vipdoc` 读 vipdoc 原始日线，不走前复权（与「全链前复权」原则不符）。快照实测 592 个
+- **已知定义问题**：
+  1. ✅ **已修（v0.486，owner 拍板全部前复权，technical_monitor v2）**——原问题：**持仓链用未复权价**：`technical_monitor.read_vipdoc` 读 vipdoc 原始日线，不走前复权（与「全链前复权」原则不符）。快照实测 592 个
      as-of 截断里，收盘价未复权 ≠ 前复权 482 个；**N 结构判定因此不同 12 个（2.0%）、趋势 / 20 日箱体判定不同 17 个（2.9%）**——
      除权缺口会造出假的「跌破结构低点」。改为前复权是判定语义变更（持仓 P0 触发会变），须 owner 定。
   2. 「横盘震荡」是兜底类（上涨 / 下跌四条件任一不满足即落入），混有上升 / 下跌中继。
@@ -107,7 +107,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 
 ## 参数总表（生成）
 
-### P0H（17 个参数）
+### P0H（18 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -128,6 +128,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `technical_monitor` | `TREND_LONG_SLOPE_BARS` | 20 | 长线斜率回看根数（展示） | - | 未校准 |
 | `technical_monitor` | `TREND_HL_WINDOW` | 20 | 高低点比较窗口：近 N 根 vs 前 N 根 | - | 未校准 |
 | `technical_monitor` | `TREND_MIN_BARS` | 60 | 趋势判定最少 K 线数 | - | 未校准 |
+| `technical_monitor` | `QFQ_LOAD_BARS` | 100000 | - | - | 未校准 |
 
 ### P0（70 个参数）
 
