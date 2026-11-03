@@ -182,9 +182,67 @@ def test_non_trading_day_stays_silent_without_reading_ledgers(
         "_record_status",
         lambda _day: pytest.fail("非交易日不应读取台账"),
     )
-    artifact = reminder._run_for_day(DAY)
+    artifact = reminder._run_for_day(
+        DAY,
+        ingest_fn=lambda _ctx: pytest.fail("非交易日不应接收入站消息"),
+    )
     assert artifact["sent"] is False
     assert artifact["trading_day"] is False
+
+
+def test_ingest_precedes_status_check_and_can_suppress_reminder(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    events: list[str] = []
+    status = {"amv": False, "trades": False}
+
+    def ingest(_ctx):
+        events.append("ingest")
+        status.update(amv=True, trades=True)
+        return {
+            "artifact": {
+                "new_messages": 1,
+                "actions": ["今日无交易与 0AMV 已登记"],
+                "receipt_sent": True,
+            }
+        }
+
+    def read_status(_day):
+        events.append("status")
+        return status
+
+    monkeypatch.setattr(reminder, "_is_trading_day", lambda _day: True)
+    monkeypatch.setattr(reminder, "_record_status", read_status)
+    monkeypatch.setattr(
+        reminder,
+        "_send_text",
+        lambda _text: events.append("send"),
+    )
+    artifact = reminder._run_for_day(DAY, ingest_fn=ingest)
+
+    assert events == ["ingest", "status"]
+    assert artifact["sent"] is False
+    assert artifact["ingest"]["new_messages"] == 1
+
+
+def test_still_missing_after_ingest_sends_reminder(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    sent: list[str] = []
+    monkeypatch.setattr(reminder, "_is_trading_day", lambda _day: True)
+    monkeypatch.setattr(
+        reminder, "_record_status", lambda _day: {"amv": False, "trades": False}
+    )
+    monkeypatch.setattr(reminder, "_send_text", sent.append)
+    artifact = reminder._run_for_day(
+        DAY,
+        ingest_fn=lambda _ctx: {
+            "artifact": {"new_messages": 0, "actions": [], "receipt_sent": False}
+        },
+    )
+    assert artifact["sent"] is True
+    assert artifact["ingest"]["new_messages"] == 0
+    assert len(sent) == 1
 
 
 def test_complete_message_cannot_be_generated():

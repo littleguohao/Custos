@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""盘后补数检查提醒：交易日缺什么提醒什么，记录齐全则不发送。
+"""盘后补数：先接收入站回复，再检查台账，缺什么提醒什么。
 
-调度时点为交易日 15:30 / 16:00 / 16:30。脚本只读当天台账并发送飞书文本，
-不生成文件、不调用模型；飞书入站桥是否启用与本脚本无关。
+调度时点为交易日 15:30 / 16:00 / 16:30。每次先调用确定性入站桥读取新回复，
+随后只读当天台账；两项齐全不发送，缺项才发送飞书文本，不调用模型。
 """
 
 from __future__ import annotations
@@ -210,7 +210,7 @@ def _send_text(text: str) -> None:
     )
 
 
-def _run_for_day(day: str) -> dict:
+def _run_for_day(day: str, ingest_fn=None) -> dict:
     if not _is_trading_day(day):
         return {
             "date": day,
@@ -218,6 +218,9 @@ def _run_for_day(day: str) -> dict:
             "sent": False,
             "reason": "非交易日，未发送",
         }
+    ingest_artifact = None
+    if ingest_fn is not None:
+        ingest_artifact = ingest_fn({}).get("artifact", {})
     status = _record_status(day)
     missing = [name for name in ("amv", "trades") if not status[name]]
     artifact = {
@@ -228,6 +231,8 @@ def _run_for_day(day: str) -> dict:
         "trade_recorded": status["trades"],
         "missing": missing,
     }
+    if ingest_artifact is not None:
+        artifact["ingest"] = ingest_artifact
     if not missing:
         artifact["reason"] = "当日 0AMV 与交易记录均已确认，未发送"
         return artifact
@@ -240,5 +245,14 @@ def _run_for_day(day: str) -> dict:
 
 
 def run(ctx) -> dict:
+    # Automation 按绝对路径加载本文件，不保证仓库根在 sys.path；同目录桥也按路径加载。
+    import importlib.util
+
+    bridge_path = Path(__file__).with_name("feishu_inbound_bridge.py")
+    spec = importlib.util.spec_from_file_location("feishu_inbound_bridge", bridge_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"无法加载入站桥: {bridge_path}")
+    bridge = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bridge)
     day = datetime.now(CST).date().isoformat()
-    return {"artifact": _run_for_day(day)}
+    return {"artifact": _run_for_day(day, ingest_fn=bridge.run)}
