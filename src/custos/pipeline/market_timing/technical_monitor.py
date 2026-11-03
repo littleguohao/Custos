@@ -60,6 +60,25 @@ from custos.core.b1_thresholds import (
 
 OUT_DIR = MARKET_DIR
 
+# --- 大形态检测参数（v0.485 提为模块常量，行为逐位不变；TODO #121 定义校准 P0H 档：驱动 live 持仓 P0/P1） ---
+N_PIVOT_LEFT = 3  # 收盘分型左侧确认根数（N 结构）
+N_PIVOT_RIGHT = 3  # 收盘分型右侧确认根数
+N_LOOKBACK = 90  # N 结构分型搜索近端窗口（根）
+N_STALE_BREACH_BARS = 10  # 跌破关键位超过 N 根视为陈旧结构（不再触发新鲜 P0）
+BOX_UPPER_Q = 0.85  # 箱体上沿 = 窗口最高价分位
+BOX_LOWER_Q = 0.15  # 箱体下沿 = 窗口最低价分位
+BOX_SHORT = 20  # 短箱体窗口（持仓「跌破 20 日箱体」）
+BOX_LONG = 60  # 长箱体窗口
+TREND_MA_FAST = 25  # 趋势快线
+TREND_MA_SLOW = 60  # 趋势慢线
+TREND_MA_LONG1 = 144  # 展示：长期均线 1
+TREND_MA_LONG2 = 240  # 展示：长期均线 2
+TREND_FAST_SLOPE_BARS = 5  # 快线斜率回看根数（三态判定用）
+TREND_SLOW_SLOPE_BARS = 10  # 慢线斜率回看根数（展示）
+TREND_LONG_SLOPE_BARS = 20  # 长线斜率回看根数（展示）
+TREND_HL_WINDOW = 20  # 高低点比较窗口：近 N 根 vs 前 N 根
+TREND_MIN_BARS = 60  # 趋势判定最少 K 线数
+
 
 def _read_vipdoc_daily(tdx_code: str) -> pd.DataFrame:
     """统一走数据层 `local_tdx_data.read_vipdoc_daily` 读本地 vipdoc 日线。
@@ -98,8 +117,8 @@ def box(df: pd.DataFrame, n: int) -> dict[str, Any]:
     if len(df) < min(n, 10):
         return {"available": False}
     x = df.tail(n)
-    upper = float(x["high"].quantile(0.85))
-    lower = float(x["low"].quantile(0.15))
+    upper = float(x["high"].quantile(BOX_UPPER_Q))
+    lower = float(x["low"].quantile(BOX_LOWER_Q))
     mid = (upper + lower) / 2
     close = float(df["close"].iloc[-1])
     width = upper / lower - 1 if lower else None
@@ -442,10 +461,10 @@ def _latest_rising_n(
 
 def n_structure_state(
     df: pd.DataFrame,
-    left: int = 3,
-    right: int = 3,
-    lookback: int = 90,
-    stale_breach_bars: int = 10,
+    left: int = N_PIVOT_LEFT,
+    right: int = N_PIVOT_RIGHT,
+    lookback: int = N_LOOKBACK,
+    stale_breach_bars: int = N_STALE_BREACH_BARS,
 ) -> dict[str, Any]:
     """Find the latest rising-N structure using confirmed closing-price pivots.
 
@@ -529,10 +548,10 @@ def _latest_descending_n(
 
 def descending_n_structure_state(
     df: pd.DataFrame,
-    left: int = 3,
-    right: int = 3,
-    lookback: int = 90,
-    stale_breach_bars: int = 10,
+    left: int = N_PIVOT_LEFT,
+    right: int = N_PIVOT_RIGHT,
+    lookback: int = N_LOOKBACK,
+    stale_breach_bars: int = N_STALE_BREACH_BARS,
 ) -> dict[str, Any]:
     """Find the latest descending-N structure using confirmed closing-price pivots.
 
@@ -594,29 +613,30 @@ def descending_n_structure_state(
 def _trend_metrics(df: pd.DataFrame) -> dict[str, Any]:
     """趋势判定的原始输入：均线值/斜率与 20 日高低点。"""
     close = df["close"]
-    ma25 = close.rolling(25).mean()
-    ma60 = close.rolling(60).mean()
-    ma144 = close.rolling(144).mean()
-    ma240 = close.rolling(240).mean()
-    high20_now = float(df["high"].tail(20).max())
-    low20_now = float(df["low"].tail(20).min())
+    ma25 = close.rolling(TREND_MA_FAST).mean()
+    ma60 = close.rolling(TREND_MA_SLOW).mean()
+    ma144 = close.rolling(TREND_MA_LONG1).mean()
+    ma240 = close.rolling(TREND_MA_LONG2).mean()
+    w = TREND_HL_WINDOW
+    high20_now = float(df["high"].tail(w).max())
+    low20_now = float(df["low"].tail(w).min())
     return {
         "c": float(close.iloc[-1]),
         "ma25v": float(ma25.iloc[-1]),
         "ma60v": float(ma60.iloc[-1]),
         "ma144v": float(ma144.iloc[-1]) if pd.notna(ma144.iloc[-1]) else None,
         "ma240v": float(ma240.iloc[-1]) if pd.notna(ma240.iloc[-1]) else None,
-        "ma25_slope": slope(ma25.dropna(), 5),
-        "ma60_slope": slope(ma60.dropna(), 10),
-        "ma144_slope": slope(ma144.dropna(), 20),
-        "ma240_slope": slope(ma240.dropna(), 20),
+        "ma25_slope": slope(ma25.dropna(), TREND_FAST_SLOPE_BARS),
+        "ma60_slope": slope(ma60.dropna(), TREND_SLOW_SLOPE_BARS),
+        "ma144_slope": slope(ma144.dropna(), TREND_LONG_SLOPE_BARS),
+        "ma240_slope": slope(ma240.dropna(), TREND_LONG_SLOPE_BARS),
         "high20_now": high20_now,
-        "high20_prev": float(df["high"].iloc[-40:-20].max())
-        if len(df) >= 40
+        "high20_prev": float(df["high"].iloc[-2 * w : -w].max())
+        if len(df) >= 2 * w
         else high20_now,
         "low20_now": low20_now,
-        "low20_prev": float(df["low"].iloc[-40:-20].min())
-        if len(df) >= 40
+        "low20_prev": float(df["low"].iloc[-2 * w : -w].min())
+        if len(df) >= 2 * w
         else low20_now,
     }
 
@@ -641,8 +661,8 @@ def _trend_classify(m: dict[str, Any]) -> str:
 
 
 def trend_state(df: pd.DataFrame) -> dict[str, Any]:
-    if len(df) < 60:
-        return {"state": "数据不足", "reason": "少于60根K线"}
+    if len(df) < TREND_MIN_BARS:
+        return {"state": "数据不足", "reason": f"少于{TREND_MIN_BARS}根K线"}
     m = _trend_metrics(df)
     c = m["c"]
     ma25v, ma60v = m["ma25v"], m["ma60v"]
@@ -701,8 +721,8 @@ def analyze(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
         "n_structure": n_structure_state(df),
         "descending_n_structure": descending_n_structure_state(df),
         "price_volume": price_volume_state(df, code),
-        "box_20d": box(df, 20),
-        "box_60d": box(df, 60),
+        "box_20d": box(df, BOX_SHORT),
+        "box_60d": box(df, BOX_LONG),
         "daily": {"kdj": kdj(df), "macd": macd(df)},
         "weekly": {"kdj": kdj(weekly), "macd": macd(weekly)},
         "monthly": {"kdj": kdj(monthly), "macd": macd(monthly)},

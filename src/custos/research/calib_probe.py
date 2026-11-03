@@ -34,6 +34,38 @@ from typing import Any, Callable, Iterator, Optional
 
 #: 每个 P0 模块：参数定义模块 + 要核对的 cand 字段（路径用「.」分隔；值为布尔 / 档位字符串）
 MODULES: dict[str, dict[str, Any]] = {
+    # 持仓侧大形态（P0H，v0.485）：live 持仓链 technical_monitor.analyze，as-of 长历史帧（1200 根）
+    "n_structure": {
+        "defmod": "custos.pipeline.market_timing.technical_monitor",
+        "eval": "technical_monitor",
+        "fields": [
+            "n_structure.status",
+            "n_structure.fresh_breach",
+            "descending_n_structure.status",
+            "descending_n_structure.fresh_breach",
+        ],
+        "params": [
+            "N_PIVOT_LEFT",
+            "N_PIVOT_RIGHT",
+            "N_LOOKBACK",
+            "N_STALE_BREACH_BARS",
+        ],
+    },
+    "trend_box": {
+        "defmod": "custos.pipeline.market_timing.technical_monitor",
+        "eval": "technical_monitor",
+        "fields": ["trend.state", "box_20d.position", "box_60d.position"],
+        "params": [
+            "BOX_UPPER_Q",
+            "BOX_LOWER_Q",
+            "BOX_SHORT",
+            "BOX_LONG",
+            "TREND_MA_FAST",
+            "TREND_MA_SLOW",
+            "TREND_FAST_SLOPE_BARS",
+            "TREND_HL_WINDOW",
+        ],
+    },
     "b1_thresholds": {
         "defmod": "custos.core.b1_thresholds",
         "fields": [
@@ -114,6 +146,8 @@ def param_names(module: str) -> list[str]:
     import ast  # noqa: PLC0415
     import importlib  # noqa: PLC0415
 
+    if MODULES[module].get("params"):
+        return list(MODULES[module]["params"])
     mod = importlib.import_module(MODULES[module]["defmod"])
     src = Path(mod.__file__ or "").read_text(encoding="utf-8")
     out = []
@@ -242,7 +276,17 @@ def is_hit(v: Any) -> bool:
         return False
     if isinstance(v, (int, float)):
         return v != 0
-    return str(v) not in ("", "-", "none", "unknown", "neutral", "insufficient", "弱")
+    return str(v) not in (
+        "",
+        "-",
+        "none",
+        "unknown",
+        "neutral",
+        "insufficient",
+        "弱",
+        "横盘震荡",
+        "数据不足",
+    )
 
 
 def evaluate(
@@ -251,6 +295,15 @@ def evaluate(
     from custos.pipeline.screening import enrich_candidates as ec  # noqa: PLC0415
 
     df, df_long, index_asof, code = frames
+    spec = next(
+        (v for v in MODULES.values() if v["defmod"] == defmod and v.get("eval")), None
+    )
+    if spec is not None and spec["eval"] == "technical_monitor":
+        from custos.pipeline.market_timing import technical_monitor as tm  # noqa: PLC0415
+
+        with patched(defmod, overrides):
+            an = tm.analyze(df_long.reset_index(drop=True), code)
+            return {f: field_value(an, f) for f in fields}
     aliases = next(
         (v.get("aliases") for v in MODULES.values() if v["defmod"] == defmod), None
     )
@@ -474,10 +527,15 @@ def review_pool(
     """review 模式（owner 2026-11-03 定的校准循环）：读 ``[--since, --until]`` 的 1800 ``stock_pool``，
     每个 (代码, 选股日) 一根 bar（as-of 当日，与 live 同口径重算）。⚠️ 这些日期落在 holdout——只作定义校准，
     升版时须 ``factor_versions.py --holdout-use`` 登记窗口。"""
+    source = getattr(args, "review_source", "stock_pool")
     if pool_files is None:
-        from custos.core.paths import STOCK_POOL_DIR  # noqa: PLC0415
+        from custos.core.paths import HOLDINGS_DIR, STOCK_POOL_DIR  # noqa: PLC0415
 
-        pool_files = sorted(STOCK_POOL_DIR.glob("*_stock_pool.json"))
+        pool_files = (
+            sorted(HOLDINGS_DIR.glob("*_holding_technical_summary.json"))
+            if source == "holdings"
+            else sorted(STOCK_POOL_DIR.glob("*_stock_pool.json"))
+        )
     pairs: set[tuple[str, str]] = set()
     for f in pool_files:
         d = f.name[:10]
@@ -487,9 +545,10 @@ def review_pool(
             js = json.loads(f.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError):
             continue
-        for c in js.get("candidates") or []:
-            if c.get("code"):
-                pairs.add((str(c["code"]), d))
+        rows = js if isinstance(js, list) else (js.get("candidates") or [])
+        for c in rows:
+            if isinstance(c, dict) and c.get("code"):
+                pairs.add((str(c["code"]).split(".")[0], d))
     if load_fn is None:
         from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
 
@@ -831,6 +890,12 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--module", required=True, choices=sorted(MODULES))
     ap.add_argument(
         "--mode", choices=("sample", "sensitivity", "review"), default="sample"
+    )
+    ap.add_argument(
+        "--review-source",
+        choices=("stock_pool", "holdings"),
+        default="stock_pool",
+        help="review 名单来源：stock_pool=1800 选股池；holdings=持仓技术面汇总（n_structure / trend_box 用）",
     )
     ap.add_argument("--since", default="", help="review：1800 选股日起（含）")
     ap.add_argument("--until", default="9999-12-31", help="review：1800 选股日止（含）")

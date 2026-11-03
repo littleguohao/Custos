@@ -30,9 +30,22 @@ _FACTORS = _CORE / "factors"
 _SKIP = {"_template", "_util", "_shares", "__init__"}
 
 
+#: 注册表外、但驱动 live 判定的检测器模块（按文件路径登记，不 import——本模块是 L0）
+EXTRA_TRACKED = {
+    # 持仓侧大形态：上升 / 下降 N 结构、趋势三态、箱体（驱动 b1_holding_state P0/P1，v0.485）
+    "technical_monitor": _CORE.parent
+    / "pipeline"
+    / "market_timing"
+    / "technical_monitor.py",
+}
+
+
 def tracked_files() -> dict[str, Path]:
-    """{因子名: 源文件}：声明了 FACTOR 的因子模块（AST 判，不 import）+ b1_thresholds。"""
-    out: dict[str, Path] = {"b1_thresholds": _CORE / "b1_thresholds.py"}
+    """{因子名: 源文件}：声明了 FACTOR 的因子模块（AST 判，不 import）+ b1_thresholds + EXTRA_TRACKED。"""
+    out: dict[str, Path] = {
+        "b1_thresholds": _CORE / "b1_thresholds.py",
+        **EXTRA_TRACKED,
+    }
     for p in sorted(_FACTORS.glob("*.py")):
         if p.stem in _SKIP:
             continue

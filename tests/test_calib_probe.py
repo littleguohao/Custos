@@ -200,3 +200,53 @@ def test_review_rows_and_diff(tmp_path):
     ]
     md = cp._diff_md(diff, "b1_thresholds")
     assert "v1 → v2" in md and "消失 1" in md
+
+
+# ── P0H 持仓大形态（v0.485） ──────────────────────────────────────────
+
+
+def test_holding_modules_patch_live_function_defaults():
+    from custos.pipeline.market_timing import technical_monitor as tm
+
+    df = _df(5, n=500)
+    with cp.patched(
+        "custos.pipeline.market_timing.technical_monitor",
+        {"N_LOOKBACK": 30, "BOX_SHORT": 10},
+    ):
+        an = tm.analyze(df, "600000")
+        assert (an["n_structure"].get("pivot_window") or {}).get("lookback", 30) == 30
+        assert an["box_20d"]["period"] == 10
+    assert tm.analyze(df, "600000")["box_20d"]["period"] == 20
+
+
+@pytest.mark.parametrize("module", ["n_structure", "trend_box"])
+def test_holding_modules_run(module):
+    rep = cp.run_study(
+        _args("sensitivity", module=module, n_bars=12),
+        bars={"000001|2014": _df(1)},
+        index_df=_df(9),
+        spans=[("2015-01-01", "2016-12-31")],
+    )
+    assert rep["n_errors"] == 0 and set(rep["fields"]) == set(
+        cp.MODULES[module]["fields"]
+    )
+
+
+def test_review_pool_holdings_rows(tmp_path):
+    import json
+
+    df = _df(3, start="2025-01-02")
+    d1 = str(df["date"].iloc[400])[:10]
+    (tmp_path / f"{d1}_holding_technical_summary.json").write_text(
+        json.dumps([{"code": "600001.SH"}, {"name": "无代码"}]), encoding="utf-8"
+    )
+    args = argparse.Namespace(
+        since=d1, until=d1, count=100000, review_source="holdings"
+    )
+    _b, _i, keys = cp.review_pool(
+        args,
+        pool_files=[*tmp_path.glob("*.json")],
+        load_fn=lambda c: df,
+        index_df=_df(9),
+    )
+    assert keys == [("600001|full", 400)]

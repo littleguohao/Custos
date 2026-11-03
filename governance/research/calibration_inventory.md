@@ -8,7 +8,7 @@
 
 ## 现状
 
-- 共 229 个模块级数值参数：**P0 live 判定 70 个**（进技术分 / 进池门 / 封顶，9 个模块）、
+- **P0H 持仓大形态 17 个**（见下节）；另 229 个模块级数值参数：**P0 live 判定 70 个**（进技术分 / 进池门 / 封顶，9 个模块）、
   **P1 live 展示 92 个**（1800 证据标注，不进判定）、P2 研究 67 个。
 - **定义校准：0 / 229**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
 - **清单未覆盖**（需在逐因子校准时一并核）：①函数体内联常量（KDJ 9/3/3、BBI 周期、20 日相对强度窗口等）；
@@ -67,6 +67,26 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
   `REVERSAL_AMPLITUDE_PCT` 为 no_effect（前者 import 时派生 MIN/MAX，应改 `REVERSAL_CHANGE_MIN/MAX_PCT`）。
 - live 的资金意图阈值可被 `SCREEN_FORMULA_REGISTRY.json` `scoring.weights` 覆盖，校准时以 registry 实际生效值为准。
 
+## P0H 持仓大形态（v0.485 纳入，**排在 P0 之前**）
+
+注册表外、但直接驱动 live 持仓状态机（`b1_holding_state`）的检测器，`pipeline/market_timing/technical_monitor.py`，17 个参数
+（v0.485 从函数体 / 默认值提为模块常量，行为逐位不变：真实数据 200 个 as-of 截断对拍 0 差异）：
+
+| 检测器 | live 作用 | calib_probe 模块 |
+|---|---|---|
+| 上升 N 结构（收盘分型 L1→H1→更高 L2，站上 H1 = confirmed） | 收盘跌破 L1 ⇒ **P0 N 型主结构清仓评估** | `n_structure` |
+| 下降 N 结构（H1→L1→更低 H2，跌破 L1 确认） | 跌破结构低点 ⇒ **P0 清仓评估** | `n_structure` |
+| 趋势三态（上涨 / 下跌四条件全满足，其余一律「横盘震荡」） | 下跌 + 跌破 20 日箱体 ⇒ **P0**；下跌 ⇒ P1 反弹减仓 | `trend_box` |
+| 箱体（20 / 60 日，上沿 = 最高价 85% 分位、下沿 = 最低价 15% 分位） | 同上 | `trend_box` |
+
+- review 名单来源用持仓：`calib_probe --module n_structure --mode review --review-source holdings --since ... --until ...`。
+- **已知定义问题（待 owner 拍板，不在本轮改）**：
+  1. **持仓链用未复权价**：`technical_monitor.read_vipdoc` 读 vipdoc 原始日线，不走前复权（与「全链前复权」原则不符）。快照实测 592 个
+     as-of 截断里，收盘价未复权 ≠ 前复权 482 个；**N 结构判定因此不同 12 个（2.0%）、趋势 / 20 日箱体判定不同 17 个（2.9%）**——
+     除权缺口会造出假的「跌破结构低点」。改为前复权是判定语义变更（持仓 P0 触发会变），须 owner 定。
+  2. 「横盘震荡」是兜底类（上涨 / 下跌四条件任一不满足即落入），混有上升 / 下跌中继。
+  3. N 结构分型粒度细（左右 3 根、近 90 根），无幅度门槛，日线小波动也成 N；且只取最近一组，不看所处更大级别。
+
 ## P0 校准顺序（按对 live 的影响面）
 
 | 序 | 模块 | live 角色 | 参数数 | 改动后受影响的 R（需重跑或复核） |
@@ -86,6 +106,28 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
   `collect_all` 口径（全候选 margin）只受第 1 项影响；V0 分改动只影响依赖分数的读数（top-N / 组合层 / 分档）。
 
 ## 参数总表（生成）
+
+### P0H（17 个参数）
+
+| 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
+|---|---|---|---|---|---|
+| `technical_monitor` | `N_PIVOT_LEFT` | 3 | 收盘分型左侧确认根数（N 结构） | - | 未校准 |
+| `technical_monitor` | `N_PIVOT_RIGHT` | 3 | 收盘分型右侧确认根数 | - | 未校准 |
+| `technical_monitor` | `N_LOOKBACK` | 90 | N 结构分型搜索近端窗口（根） | - | 未校准 |
+| `technical_monitor` | `N_STALE_BREACH_BARS` | 10 | 跌破关键位超过 N 根视为陈旧结构（不再触发新鲜 P0） | - | 未校准 |
+| `technical_monitor` | `BOX_UPPER_Q` | 0.85 | 箱体上沿 = 窗口最高价分位 | - | 未校准 |
+| `technical_monitor` | `BOX_LOWER_Q` | 0.15 | 箱体下沿 = 窗口最低价分位 | - | 未校准 |
+| `technical_monitor` | `BOX_SHORT` | 20 | 短箱体窗口（持仓「跌破 20 日箱体」） | - | 未校准 |
+| `technical_monitor` | `BOX_LONG` | 60 | 长箱体窗口 | - | 未校准 |
+| `technical_monitor` | `TREND_MA_FAST` | 25 | 趋势快线 | - | 未校准 |
+| `technical_monitor` | `TREND_MA_SLOW` | 60 | 趋势慢线 | - | 未校准 |
+| `technical_monitor` | `TREND_MA_LONG1` | 144 | 展示：长期均线 1 | - | 未校准 |
+| `technical_monitor` | `TREND_MA_LONG2` | 240 | 展示：长期均线 2 | - | 未校准 |
+| `technical_monitor` | `TREND_FAST_SLOPE_BARS` | 5 | 快线斜率回看根数（三态判定用） | - | 未校准 |
+| `technical_monitor` | `TREND_SLOW_SLOPE_BARS` | 10 | 慢线斜率回看根数（展示） | - | 未校准 |
+| `technical_monitor` | `TREND_LONG_SLOPE_BARS` | 20 | 长线斜率回看根数（展示） | - | 未校准 |
+| `technical_monitor` | `TREND_HL_WINDOW` | 20 | 高低点比较窗口：近 N 根 vs 前 N 根 | - | 未校准 |
+| `technical_monitor` | `TREND_MIN_BARS` | 60 | 趋势判定最少 K 线数 | - | 未校准 |
 
 ### P0（70 个参数）
 

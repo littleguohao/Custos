@@ -33,6 +33,15 @@ DOC = BASE / "governance" / "research" / "calibration_inventory.md"
 
 #: b1_thresholds 的使用方（不是注册表因子，按 live 判定处理）
 THRESH_FACTOR = "b1_thresholds"
+#: 注册表外的 live 持仓检测器（P0H：驱动持仓 P0/P1 清仓 / 减仓评估）
+HOLDING_MODULES = {
+    "technical_monitor": BASE
+    / "src"
+    / "custos"
+    / "pipeline"
+    / "market_timing"
+    / "technical_monitor.py",
+}
 
 
 def _num(v: ast.AST) -> Any:
@@ -87,6 +96,21 @@ def tier_of(meta: dict) -> str:
 
 def inventory() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    for mod, path in HOLDING_MODULES.items():
+        for name, v, cm, ln in constants(path):
+            rows.append(
+                {
+                    "tier": "P0H",
+                    "factor": mod,
+                    "param": name,
+                    "value": v,
+                    "note": cm,
+                    "line": ln,
+                    "live_use": "holding_state",
+                    "status": "-",
+                    "refs": "",
+                }
+            )
     for name, v, cm, ln in constants(THRESH):
         rows.append(
             {
@@ -126,7 +150,7 @@ def inventory() -> list[dict[str, Any]]:
 
 def render(rows: list[dict[str, Any]]) -> str:
     out = []
-    for tier in ("P0", "P1", "P2"):
+    for tier in ("P0H", "P0", "P1", "P2"):
         sel = [r for r in rows if r["tier"] == tier]
         out.append(f"### {tier}（{len(sel)} 个参数）\n")
         out.append(
@@ -147,7 +171,7 @@ def check(rows: list[dict[str, Any]]) -> list[str]:
     return [
         f"{r['factor']}.{r['param']}"
         for r in rows
-        if r["tier"] in ("P0", "P1")
+        if r["tier"] in ("P0H", "P0", "P1")
         and f"| `{r['factor']}` | `{r['param']}` |" not in doc
     ]
 
