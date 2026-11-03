@@ -103,23 +103,43 @@ def _index_series(ctx: Ctx, sector: str) -> list:
 
 
 def _read_stock_daily(code: str) -> list:
-    """vipdoc 未复权日线 → [(date, close)] 升序。读不到返回 []。
+    """个股日线 → [(date, 未复权收盘, 除权参考前收)] 升序。读不到返回 []。
 
-    ⚠️ 必须是**未复权**价：涨跌停幅度按前收未复权计算，用 qfq 价会把
-    除权后的涨停误判/漏判。``read_vipdoc_daily`` 直读 .day 原始价，不经过复权。
+    v0.487（owner 2026-11-03「需要全部前复权」）：涨跌停按交易所口径 = **除权参考价** × (1 ± 限幅) 取整到分，
+    与当日未复权收盘比。原实现用「未复权前收」作基准，除权日（分红 / 送转）会把真涨停判漏、把平盘判成跌停。
+    参考前收由前复权序列推出：``ref_prev[t] = qfq_close[t-1] × raw_close[t] / qfq_close[t]``（qfq 相邻两日之比
+    就是含除权的真实涨跌，换回 t 日未复权单位）；非除权日它等于未复权前收，逐位不变。
+    前复权失败（无 raw_close / attrs adjust≠qfq）⇒ WARN 并退回未复权前收（旧口径）。
     """
     from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
 
     try:
-        df = local_tdx_data.read_vipdoc_daily(code)
+        df = local_tdx_data.get_ohlcv_table(code, count=100000)
     except Exception:  # noqa: BLE001 —— 单票缺失不拖垮整榜，记入 missing_stock_bars
         return []
     if df is None or df.empty:
         return []
-    rows = sorted(
-        (str(d)[:10], float(c)) for d, c in zip(df["date"], df["close"], strict=True)
+    df = df.sort_values("date").reset_index(drop=True)
+    dates = [str(d)[:10] for d in df["date"]]
+    q = [float(x) for x in df["close"]]
+    if df.attrs.get("adjust") == "qfq" and "raw_close" in df.columns:
+        raw = [float(x) for x in df["raw_close"]]
+        out = []
+        for t, d in enumerate(dates):
+            ref = raw[t - 1] if t else 0.0
+            if t and q[t] > 0 and raw[t] > 0 and raw[t - 1] > 0:
+                # 除权比 = f[t-1]/f[t]（f = qfq/raw）；非除权日 ≈1 ⇒ 精确取未复权前收，
+                # 避免浮点噪声在 round(前收×1.1, 2) 的半分边界上翻转判定
+                r = (q[t - 1] / raw[t - 1]) / (q[t] / raw[t])
+                if abs(r - 1.0) > 1e-9:
+                    ref = raw[t - 1] * r
+            out.append((d, raw[t], ref))
+        return out
+    print(
+        f"[WARN] sector_daily_rank: {code} 前复权不可用，涨跌停退回未复权前收口径",
+        file=sys.stderr,
     )
-    return rows
+    return [(d, c, q[t - 1] if t else 0.0) for t, (d, c) in enumerate(zip(dates, q))]
 
 
 def _stock_bars(ctx: Ctx, code: str) -> tuple:
@@ -127,7 +147,7 @@ def _stock_bars(ctx: Ctx, code: str) -> tuple:
     if code not in ctx._bars_cache:
         reader = ctx.read_daily or _read_stock_daily
         bars = reader(code) or []
-        ctx._bars_cache[code] = (bars, {d: i for i, (d, _c) in enumerate(bars)})
+        ctx._bars_cache[code] = (bars, {b[0]: i for i, b in enumerate(bars)})
     return ctx._bars_cache[code]
 
 
@@ -194,7 +214,7 @@ def _limit_pct(code: str, stock_names: dict) -> float:
 def limit_counts(ctx: Ctx, date: str) -> tuple:
     """涨/跌停家数 → ({sector: [up, down]}, 缺数据股票列表)。
 
-    ⚠️ 每只股票**只算一次**当日涨跌（未复权当日 close vs 前一交易日 close），
+    ⚠️ 每只股票**只算一次**当日涨跌（未复权当日 close vs 除权参考前收，v0.487），
     再按 code2secs 聚合到板块 —— 不按板块×成员重复读盘、不重复计数。
     判定：close ≥ round2(前收 × (1 + limit/100)) 为涨停（跌停镜像）。
     """
@@ -205,10 +225,16 @@ def limit_counts(ctx: Ctx, date: str) -> tuple:
     for code in stocks:
         bars, pos = _stock_bars(ctx, code)
         idx = pos.get(date)
-        if idx is None or idx == 0 or bars[idx - 1][1] <= 0:
+        # 三元组 = (日, 未复权收盘, 除权参考前收)（v0.487）；注入读者的二元组按旧口径取上一根收盘
+        prev = (
+            bars[idx][2]
+            if idx is not None and len(bars[idx]) > 2
+            else (bars[idx - 1][1] if idx else 0.0)
+        )
+        if idx is None or idx == 0 or prev <= 0:
             missing.append(code)
             continue
-        prev, close = bars[idx - 1][1], bars[idx][1]
+        close = bars[idx][1]
         lim = _limit_pct(code, ctx.stock_names) / 100.0
         up = close >= round(prev * (1 + lim), 2)
         down = close <= round(prev * (1 - lim), 2)

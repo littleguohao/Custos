@@ -383,3 +383,49 @@ class TestWiredIntoDailyChain:
         seg = self.SRC[i : i + 300]
         assert "不中断" in seg
         assert "return 1" not in seg, "采集器失败不该中断盘后链"
+
+
+def test_read_stock_daily_uses_ex_right_reference_v0487(monkeypatch):
+    """除权日：涨停基准 = 除权参考价（qfq 推出），不是未复权前收；非除权日逐位等于未复权前收。"""
+    import pandas as pd
+
+    from custos.datasource.local_tdx import local_tdx_data
+    from custos.pipeline.market_timing import sector_daily_rank as sdr
+
+    raw = [10.00, 10.33, 9.47, 10.42]
+    f = [1 / 1.2, 1 / 1.2, 1.0, 1.0]  # 第 3 日起除权，之前的价格前复权 ÷1.2
+    df = pd.DataFrame(
+        {
+            "date": pd.to_datetime(
+                ["2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04"]
+            ),
+            "close": [r * k for r, k in zip(raw, f)],
+            "raw_close": raw,
+        }
+    )
+    df.attrs["adjust"] = "qfq"
+    monkeypatch.setattr(local_tdx_data, "get_ohlcv_table", lambda code, count=0: df)
+    bars = sdr._read_stock_daily("600000")
+    assert bars[1][2] == 10.00  # 非除权日：精确等于未复权前收
+    assert abs(bars[2][2] - 10.33 / 1.2) < 1e-9  # 除权日：参考价
+    assert bars[3][2] == 9.47
+    # 除权日按参考价 8.608 算：9.47 ≥ round(8.608×1.1, 2)=9.47 ⇒ 涨停（旧口径按 10.33 会判跌停区间外的大跌）
+    assert bars[2][1] >= round(bars[2][2] * 1.1, 2)
+
+
+def test_read_stock_daily_falls_back_when_no_qfq(monkeypatch, capsys):
+    import pandas as pd
+
+    from custos.datasource.local_tdx import local_tdx_data
+    from custos.pipeline.market_timing import sector_daily_rank as sdr
+
+    df = pd.DataFrame(
+        {"date": pd.to_datetime(["2026-06-01", "2026-06-02"]), "close": [10.0, 11.0]}
+    )
+    df.attrs["adjust"] = "none"
+    monkeypatch.setattr(local_tdx_data, "get_ohlcv_table", lambda code, count=0: df)
+    assert sdr._read_stock_daily("600000") == [
+        ("2026-06-01", 10.0, 0.0),
+        ("2026-06-02", 11.0, 10.0),
+    ]
+    assert "前复权不可用" in capsys.readouterr().err
