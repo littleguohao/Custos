@@ -223,7 +223,10 @@ class TestGateNeverAltersSelection:
         text = ct.render_table(_pool(), "2026-08-03", gate=gate)
         # v0.50（#37 阶段 A）：可买定义改为「A + 市场/基本面/技术三面共振」，
         # 板块相位降为情境标注列（不再计入可买定义）。
-        assert "- **可买（A + 市场/基本面/技术三面共振）**：600000 股600000" in text
+        assert (
+            "- **可买（现行规则：技术×资金双强 + 市场/基本面/技术三面共振）**：600000 股600000"
+            in text
+        )
 
     @pytest.mark.parametrize("gate", GATES)
     def test_candidate_count_unchanged(self, gate, tmp_path, monkeypatch):

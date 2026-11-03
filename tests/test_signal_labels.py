@@ -391,7 +391,7 @@ class TestTableRendering:
 
     def test_main_table_has_label_column(self):
         txt = ct.render_table(self._pool(), "2026-08-04")
-        assert "| 4面共振 | 平台回踩 | 标注 | 分层 |" in txt
+        assert "| 证据标记 | 研究标注 | 风险 |" in txt  # v0.478 单表
         assert "3/9 QG·RS·B2" in txt
 
     def test_no_signals_section_when_absent(self):
@@ -435,8 +435,9 @@ class TestLabelsNeverAlterSelection:
                 cells = line.split("|")
                 # v0.51：主表加 ADX25/S反转 两列 ⇒ 标注列 raw index 17→19
                 # v0.56：再加 W底/红肥绿瘦 两列 ⇒ 19→21
-                if len(cells) > 22:
-                    del cells[21]  # 抹掉标注列
+                # v0.478 单表：| 代码 | 名称 | 技术分 | 资金意图 | 状态 | 触发 | 证据标记 | 研究标注 | ... ⇒ raw 8
+                if len(cells) == 14:
+                    del cells[8]  # 抹掉研究标注列
                     line = "|".join(cells)
             out.append(line)
         return "\n".join(out)
@@ -460,19 +461,19 @@ class TestLabelsNeverAlterSelection:
 
     @pytest.mark.parametrize("signals", VARIANTS)
     def test_bucket_and_next_step_unchanged(self, signals):
-        """只看 A/B 池主表（24 列——v0.51 加 ADX25/S反转、v0.56 加 W底/红肥绿瘦）——报告里还有 10 列的「牛股候选」表，会撞列号。"""
-        txt = ct.render_table(self._pool_with(signals), "2026-08-04")
-        checked = 0
-        for ln in txt.split("\n"):
-            if not ln.startswith("| 600000"):
-                continue
-            cells = [c.strip() for c in ln.split("|")[1:-1]]
-            if len(cells) != 24:
-                continue
-            assert cells[21] == "A", f"分层被改写: {cells[21]}"
-            assert cells[23] == "buy_review", f"next_step 被改写: {cells[23]}"
-            checked += 1
-        assert checked >= 1, "未找到 A 池主表行（24 列）"
+        """v0.478 单表：「状态」列（判定结果）不随标注变化；分层仍在产物里、不进报告。"""
+
+        def statuses(txt):
+            out = {}
+            for ln in txt.split("\n"):
+                cells = [c.strip() for c in ln.split("|")[1:-1]]
+                if len(cells) == 12 and cells[0] in ("600000", "000001"):
+                    out[cells[0]] = cells[4]
+            return out
+
+        base = statuses(ct.render_table(self._pool_with(_sig()), "2026-08-04"))
+        got = statuses(ct.render_table(self._pool_with(signals), "2026-08-04"))
+        assert base and got == base, f"状态被标注改写: {base} → {got}"
 
     def test_score_candidates_passes_signals_through(self):
         """必须**透传** signals——它是显式字段白名单，不加就会被丢掉。

@@ -190,7 +190,8 @@ def _pool_row(code, total, bucket="C"):
     }
 
 
-def test_top5_sorted_by_total_desc():
+def test_unified_table_sorted_by_technical_desc():
+    """v0.478：Top5 并入候选总表——全部候选按技术分降序，不截断。"""
     pool = {
         "date": "2026-07-22",
         "status": "ok",
@@ -198,14 +199,10 @@ def test_top5_sorted_by_total_desc():
         "candidates": [_pool_row(f"60000{i}", float(i)) for i in range(7)],
     }
     md = ct.render_table(pool, "2026-07-22")
-    top = md.split("## 得分 Top 5")[1].split("## ")[0]
-    rows = [
-        l
-        for l in top.splitlines()
-        if l.startswith("| ") and "排名" not in l and "---" not in l
-    ]
-    assert len(rows) == 5
-    assert "600006" in rows[0] and "600005" in rows[1]  # 总分降序
+    top = md.split("## 📋 候选总表")[1].split("\n## ")[0]
+    rows = [l for l in top.splitlines() if l.startswith("| 6") and "---" not in l]
+    assert len(rows) == 7
+    assert "600006" in rows[0] and "600005" in rows[1]  # 技术分降序
 
 
 # ---------- v0.60 周/月红柱腿长历史（2026-08-16 review 修复）----------

@@ -271,11 +271,7 @@ class TestRenderTableUnits:
 
         for name in (
             "_signal_overview",
-            "_fundamental_bulls",
-            "_capped_but_resonant",
-            "_bear_outposts",
-            "_top5",
-            "_bucket_pools",
+            "_unified_table",  # v0.478：分池 / Top5 / 三子区并为单表
         ):
             params = list(inspect.signature(getattr(ct, name)).parameters)
             assert params[0] == "lines", f"{name} 的首参应是 lines，实际 {params}"

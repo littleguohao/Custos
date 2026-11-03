@@ -136,7 +136,7 @@ def _signal_labels_section(candidates: list[dict]) -> list[str]:
         return []
 
     lines = [
-        "## 🏷️ 信号标注一览（研究因子·只标注，不影响上方分层）",
+        "## 🏷️ 信号标注一览（研究因子·只标注，不影响判定）",
         "",
         "> 盈亏比/胜率列是 R27 交易层双窗读数（trade-sim：0AMV做多+J<13 基底、s3000、"
         "pct12+分批止盈+BBI跌破2根出场；跨窗 2022-2024｜主窗 2024-08~2026-09），"
@@ -323,9 +323,11 @@ def _signal_overview(lines, is_bear, watch):
     # v0.229（TODO #64，owner 拍板=门内提醒）：可买/观察价位两档名单内 RD 证据
     # 命中的候选亮 ⚡RD（仅提示）；待0AMV做多档是等待区不是行动区，不亮灯。
     lines.append(
-        f"- **可买（A + 市场/基本面/技术三面共振）**：{_action_names_or_none(_buy)}"
+        f"- **可买（现行规则：技术×资金双强 + 市场/基本面/技术三面共振）**：{_action_names_or_none(_buy)}"
     )
-    lines.append(f"- **观察价位（B + 三面共振）**：{_action_names_or_none(_obs)}")
+    lines.append(
+        f"- **观察价位（现行规则：次一档 + 三面共振）**：{_action_names_or_none(_obs)}"
+    )
     lines.append(f"- **待0AMV做多（基本面+技术已共振）**：{_names_or_none(_wait)}")
     if any(_rd_hit(c) for c in [*_buy, *_obs]):
         lines.append(
@@ -335,161 +337,6 @@ def _signal_overview(lines, is_bear, watch):
             "−7%/−10% 不同，是否联动另行拍板（本轮不启动任何止损联动）。"
         )
     lines.append("")
-
-
-def _fundamental_bulls(lines, watch):
-    """🐂 基本面牛股候选（共振观察区）。三面已共振 + 0AMV 做多 = 可买。"""
-    lines.append("## 🐂 基本面牛股候选（共振观察区）")
-    lines.append("")
-    lines.append(
-        "> 基本面优 + 技术强（板块相位 v0.50 起仅作情境标注、不再计入）；再叠 0AMV做多即为可买牛股候选（🐂）。单独列出供持续观察（基本面为当前快照、非回测验证，仅辅助）。"
-    )
-    lines.append("")
-    if not watch:
-        lines.append("（今日无基本面牛股候选）")
-        lines.append("")
-    else:
-        lines.append(
-            "| 代码 | 名称 | 板块 | 基本面 | 4面共振 | 技术分 | 资金意图 | 分层 | 建议止损位 | 标记 |"
-        )
-        lines.append("|---|---|---|---|---|---:|---|---|---:|---|")
-        for c in watch:
-            r4 = c.get("resonance_4leg") or {}
-            if not r4.get("bull_candidate"):
-                mark = "待0AMV做多"
-            elif c.get("bucket") == "A":
-                mark = "🐂可买"
-            else:
-                mark = "🐂观察价位(B)"  # 四腿命中但分层 B:next_step=观察价位,非直接可买
-            lines.append(
-                f"| {c.get('code')} | {c.get('name')}"
-                f" | {c.get('industry') or c.get('sector', '未知')}"
-                f" | {(c.get('fundamental_quality') or {}).get('tier', '-')}"
-                f" | {r4.get('label', '-')}"
-                f" | {_fmt((c.get('score_detail') or {}).get('technical_score'))}"
-                f" | {(c.get('capital_intent') or {}).get('level', '-')}"
-                f" | {c.get('bucket', '-')}"
-                f" | {_fmt((c.get('stop_loss_ref') or {}).get('price'))}"
-                f" | {mark} |"
-            )
-        lines.append("")
-
-
-def _capped_but_resonant(lines, watch_capped):
-    """🔍 共振成立但分层受限 —— **重点研究观察，非可买**。
-
-    分层受限（bucket 落到 C/D）意味着技术或资金面有硬伤，共振不覆盖它。
-    """
-    if watch_capped:
-        lines.append("## 🔍 共振成立但分层受限（重点研究观察·非可买）")
-        lines.append("")
-        lines.append(
-            "> 以下标的同样三面/四面共振成立，但被风控降档/硬封（分层 C=长期跟踪 / D=回避）——**不是可买信号，是重点研究观察对象**："
-            "若研究确认受限因素解除或误判，是潜在的最强候选。持续跟踪，不进入买入计划。"
-        )
-        lines.append("")
-        lines.append(
-            "| 代码 | 名称 | 板块 | 基本面 | 4面共振 | 技术分 | 分层 | 受限因素 | 建议止损位 |"
-        )
-        lines.append("|---|---|---|---|---|---:|---|---|---:|")
-        for c in watch_capped:
-            r4 = c.get("resonance_4leg") or {}
-            flags = "、".join(c.get("risk_flags") or []) or "-"
-            lines.append(
-                f"| {c.get('code')} | {c.get('name')}"
-                f" | {c.get('industry') or c.get('sector', '未知')}"
-                f" | {(c.get('fundamental_quality') or {}).get('tier', '-')}"
-                f" | {r4.get('label', '-')}"
-                f" | {_fmt((c.get('score_detail') or {}).get('technical_score'))}"
-                f" | {c.get('bucket', '-')}"
-                f" | {flags}"
-                f" | {_fmt((c.get('stop_loss_ref') or {}).get('price'))} |"
-            )
-        lines.append("")
-
-
-def _bear_outposts(lines, _watch_key, candidates, is_bear, watch_all):
-    """📡 空头前哨（提前埋伏观察·非可买）。只在 0AMV 空头时出现。"""
-    if is_bear:
-        _watch_codes = {c.get("code") for c in watch_all}
-        outposts = sorted(
-            (
-                c
-                for c in candidates
-                if (c.get("fundamental_quality") or {}).get("tier") == "优"
-                and (c.get("resonance_4leg") or {}).get("technical")
-                and c.get("code") not in _watch_codes
-            ),
-            key=_watch_key,
-            reverse=True,
-        )
-        if outposts:
-            lines.append("## 📡 空头前哨（提前埋伏观察·非可买）")
-            lines.append("")
-            lines.append(
-                "> 0AMV 空头期：基本面优 + 技术强，但板块/市场腿未到位（空头里滞后属正常）——"
-                "**重点研究观察对象，不是可买信号**。回测显示赢家起涨多在空头尾部；"
-                "跟踪其板块相位何时转有利、0AMV 何时转多：两腿补齐即升级 🐂 共振区。"
-                "参与仅限人工研究确认后的小仓试错，不进入买入计划。"
-            )
-            lines.append("")
-            lines.append(
-                "| 代码 | 名称 | 板块 | 基本面 | 技术分 | 板块腿 | 市场腿 | 分层 | 建议止损位 |"
-            )
-            lines.append("|---|---|---|---|---:|---|---|---|---:|")
-            for c in outposts:
-                r4 = c.get("resonance_4leg") or {}
-                sec_leg = "有利" if r4.get("sector") else "未到位"
-                mkt_leg = "做多" if r4.get("market") else "空头"
-                lines.append(
-                    f"| {c.get('code')} | {c.get('name')}"
-                    f" | {c.get('industry') or c.get('sector', '未知')}"
-                    f" | {(c.get('fundamental_quality') or {}).get('tier', '-')}"
-                    f" | {_fmt((c.get('score_detail') or {}).get('technical_score'))}"
-                    f" | {sec_leg}"
-                    f" | {mkt_leg}"
-                    f" | {c.get('bucket', '-')}"
-                    f" | {_fmt((c.get('stop_loss_ref') or {}).get('price'))} |"
-                )
-            lines.append("")
-
-
-def _top5(lines, candidates):
-    """得分 Top 5（与分层无关的纯排序视图）。
-
-    ⚠️ v0.52（#37 阶段 C）：标注排序口径——总分=技术分（v0.50 起板块分移出），
-    **未校准启发式，不是 alpha 排序**；S** 是 s_shape 展示列（v0.50 起不进分层）。
-    """
-    top5 = sorted(
-        candidates,
-        key=lambda c: (c.get("score_detail") or {}).get("total") or 0,
-        reverse=True,
-    )[:5]
-    if top5:
-        lines.append("## 得分 Top 5")
-        lines.append("")
-        lines.append(
-            "> 排序口径：总分=技术分（v0.50 起板块分不参与），**未校准启发式、非 alpha 排序**；"
-            "S**/建议为 s_shape 展示列（不进分层）。"
-        )
-        lines.append("")
-        lines.append(
-            "| 排名 | 代码 | 名称 | 总分 | 技术分 | S** | 建议 | 分层 | 公式命中 | 风险标记 |"
-        )
-        lines.append("|---:|---|---|---:|---:|---:|---|---|---|---|")
-        for i, c in enumerate(top5, 1):
-            detail = c.get("score_detail") or {}
-            lines.append(
-                f"| {i} | {c.get('code')} | {c.get('name')}"
-                f" | {_fmt(detail.get('total'))}"
-                f" | {_fmt(detail.get('technical_score'))}"
-                f" | {_fmt(c.get('s_star'))}"
-                f" | {c.get('suggestion') or '-'}"
-                f" | {c.get('bucket', '-')}"
-                f" | {'、'.join(c.get('formula_hits') or []) or '-'}"
-                f" | {'、'.join(c.get('risk_flags') or []) or '-'} |"
-            )
-        lines.append("")
 
 
 def _pool_tags(c):
@@ -546,60 +393,140 @@ def _pool_row_quality(c):
     )
 
 
-def _bucket_pool_row(c, bucket):
-    """分层池明细表中单只候选的一行。"""
+def _status_of(c: dict, watch_codes: set, capped_codes: set, outpost_codes: set) -> str:
+    """单表「状态」列：与 ⭐ 一览同一套判定（现行规则，未经回测；只展示不改判定）。"""
+    code = c.get("code")
+    r4 = c.get("resonance_4leg") or {}
+    if code in watch_codes:
+        if not r4.get("bull_candidate"):
+            return "待0AMV做多"
+        return "🐂可买" if c.get("bucket") == "A" else "🐂观察价位"
+    if code in capped_codes:
+        return "🔍受限·非可买"
+    if code in outpost_codes:
+        return "📡空头前哨·非可买"
+    return "-"
+
+
+def _trigger_cell(c: dict) -> str:
+    """触发：公式命中 · 模式标签 · CZ 标签 · 波浪（合成一格，空项不显示）。"""
+    parts = [
+        "、".join(c.get("formula_hits") or []),
+        _pool_tags(c) if _pool_tags(c) != "-" else "",
+        _cz_tags(c) if _cz_tags(c) != "-" else "",
+        WAVE_LABELS.get(str((c.get("wave") or {}).get("wave_type")), ""),
+    ]
+    return " · ".join(p for p in parts if p) or "-"
+
+
+def _evidence_cell(c: dict) -> str:
+    """证据标记（只标注，不进判定）：命中才显示，未命中不占位。"""
     detail = c.get("score_detail") or {}
-    stop = (c.get("stop_loss_ref") or {}).get("price")
     fit = detail.get("factor_contrib", {}).get("perfect_b1_fit")
-    return (
-        (
-            f"| {c.get('code')} | {c.get('name')}"
-            f" | {'、'.join(c.get('formula_hits') or []) or '-'}"
-            f" | {_pool_tags(c)}"
-            f" | {WAVE_LABELS.get((c.get('wave') or {}).get('wave_type'), '-')}"
-            f" | {_cz_tags(c)}"
-            f" | {_fmt(detail.get('technical_score'))}"
-            f" | {_fmt(fit)}"
-        )
-        + _pool_row_evidence(c)
-        + (
-            f" | {(c.get('capital_intent') or {}).get('level', '-')}"
-            f" | {c.get('industry') or c.get('sector', '未知')}"
-            f" | {(c.get('sector_heat_filter') or {}).get('sector_state', '未知')}"
-        )
-        + _pool_row_quality(c)
-        + (
-            f" | {_signal_cell(c)}"
-            f" | {bucket}"
-            f" | {_fmt(stop)}"
-            f" | {c.get('next_step', '-')} |"
-        )
+    sr = (c.get("s_reversal") or {}).get("s_reversal")
+    pp = (c.get("platform_pullback") or {}).get("platform_high")
+    tags = [
+        f"贴合{fit}" if fit else "",
+        "ADX25" if c.get("adx25") else "",
+        f"S反转{sr}" if sr is not None else "",
+        "W底" if (c.get("w_bottom") or {}).get("hit") else "",
+        "红肥绿瘦" if (c.get("red_fat_green_thin") or {}).get("hit") else "",
+        f"平台回踩✓@{_fmt(pp)}" if pp else "",
+    ]
+    return "、".join(t for t in tags if t) or "-"
+
+
+#: 单表列含义（v0.478 改版；口径以代码为准，改判定须同步本表）
+COLUMN_LEGEND = [
+    (
+        "技术分",
+        "八段 patterns 累加分（score_candidates.technical_score）；**未校准启发式**，R6/R19/R42 证排序无效，只作参考",
+    ),
+    (
+        "资金意图",
+        "强/中/弱：量能持续 2、放量点火 1、反转 K 1、回调缩量 2、个股主力净流入在榜 2 累加分档；派发 / MACD 顶背离判弱（未单独回测）",
+    ),
+    (
+        "状态",
+        "现行规则：🐂可买 = 内部 A 档 + 市场允许 + 基本面优 + 技术强；🐂观察价位 = 同上但 B 档；待0AMV做多 = 基本面优 + 板块与技术腿到位、市场腿未到；🔍受限 = 共振成立但被风控封顶；📡前哨 = 空头期基本面优 + 技术强（均非回测验证）",
+    ),
+    (
+        "触发",
+        "公式命中 · 模式标签（BBI上/低J/缩量/反转K/强RS）· CZ 标签（五日/龙头量/底部巨量/撤退）· 波浪（建仓/拉升/冲刺）",
+    ),
+    (
+        "证据标记",
+        "只标注不进判定：贴合=完美 B1 贴合分；ADX25；S反转=S 型反转分；W底；红肥绿瘦；平台回踩✓@平台高（平台高即自然止损位）",
+    ),
+    (
+        "研究标注",
+        "signal_labels 研究因子命中摘要（命中数/可评 + 缩写，⚠️=负向）；跨窗终审已否决，只作观察记录",
+    ),
+    ("风险", "risk_flags：风控降档 / 封顶原因（顶背离、出货、量能撤退、无止损位等）"),
+    (
+        "板块",
+        "TDX 细分行业（缺则主题族）+ 板块状态（主升/修复/震荡/分歧/退潮，只提示不进分）",
+    ),
+    ("基本面", "公司品质档 优/中/差（当前快照，非 PIT；⚠三无=三无标记）"),
+]
+
+
+def _unified_table(lines, candidates, is_bear, watch, watch_capped, watch_all):
+    """v0.478（owner 2026-11-03）：去掉 A/B/C/D 分池与 Top5，全部候选一张表（技术分降序）。
+    分层仍在 stock_pool 产物里计算（下游契约不变），报告不再按它分组；判定结果收进「状态」列。"""
+    watch_codes = {c.get("code") for c in watch}
+    capped_codes = {c.get("code") for c in watch_capped}
+    outpost_codes: set = set()
+    if is_bear:
+        all_codes = {c.get("code") for c in watch_all}
+        outpost_codes = {
+            c.get("code")
+            for c in candidates
+            if (c.get("fundamental_quality") or {}).get("tier") == "优"
+            and (c.get("resonance_4leg") or {}).get("technical")
+            and c.get("code") not in all_codes
+        }
+    rows = sorted(
+        candidates,
+        key=lambda c: (
+            -((c.get("score_detail") or {}).get("technical_score") or 0),
+            str(c.get("code")),
+        ),
     )
-
-
-def _bucket_pool_section(lines, bucket, rows, counts):
-    lines.append(f"## {bucket} 池（{counts.get(bucket, 0)} 只）")
+    lines.append(f"## 📋 候选总表（{len(rows)} 只，按技术分降序）")
     lines.append("")
     if not rows:
         lines.append("（空）")
         lines.append("")
         return
     lines.append(
-        "| 代码 | 名称 | 公式命中 | 模式标签 | 波浪 | CZ标签 | 技术分 | 贴合 | ADX25 | S反转 | W底 | 红肥绿瘦 | 资金意图 | 板块 | 板块状态 | 交易属性 | 共振 | 基本面 | 4面共振 | 平台回踩 | 标注 | 分层 | 建议止损位 | next_step |"
+        "| 代码 | 名称 | 技术分 | 资金意图 | 状态 | 触发 | 证据标记 | 研究标注 | 风险 | 板块 | 基本面 | 建议止损位 |"
     )
-    lines.append(
-        "|---|---|---|---|---|---|---:|---:|---:|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
-    )
+    lines.append("|---|---|---:|---|---|---|---|---|---|---|---|---:|")
     for c in rows:
-        lines.append(_bucket_pool_row(c, bucket))
+        sector = c.get("industry") or c.get("sector", "未知")
+        state = (c.get("sector_heat_filter") or {}).get("sector_state")
+        lines.append(
+            f"| {c.get('code')} | {c.get('name')}"
+            f" | {_fmt((c.get('score_detail') or {}).get('technical_score'))}"
+            f" | {(c.get('capital_intent') or {}).get('level', '-')}"
+            f" | {_status_of(c, watch_codes, capped_codes, outpost_codes)}"
+            f" | {_trigger_cell(c)}"
+            f" | {_evidence_cell(c)}"
+            f" | {_signal_cell(c)}"
+            f" | {'、'.join(c.get('risk_flags') or []) or '-'}"
+            f" | {sector}{f'（{state}）' if state else ''}"
+            f" | {_fq_disp(c)}"
+            f" | {_fmt((c.get('stop_loss_ref') or {}).get('price'))} |"
+        )
     lines.append("")
 
 
-def _bucket_pools(lines, candidates, counts):
-    """A/B/C/D 四个分层池的明细表。"""
-    for bucket in ("A", "B", "C", "D"):
-        rows = [c for c in candidates if c.get("bucket") == bucket]
-        _bucket_pool_section(lines, bucket, rows, counts)
+def _legend_section() -> list[str]:
+    out = ["## 📖 列含义", ""]
+    out += [f"- **{k}**：{v}" for k, v in COLUMN_LEGEND]
+    out.append("")
+    return out
 
 
 def _header_lines(pool: dict, date: str) -> list[str]:
@@ -620,8 +547,7 @@ def _header_lines(pool: dict, date: str) -> list[str]:
         f"> 选股链状态：{pool.get('status', '未知')}"
         + (f"（{pool['degraded_reason']}）" if pool.get("degraded_reason") else "")
         + f"；0AMV：{pool.get('amv_state', '未知')}；市场许可：{pool.get('market_permission', '未知')}",
-        "> 本表为证据层候选，不构成买入计划；A/B 池亦须经总控与风控审批。",
-        "> 「平台回踩」列：✓@平台高 = 平台突破回踩形态命中（回踩不破前期平台高点）；平台高即自然止损位（证据层，非进场条件）。",
+        "> 本表为证据层候选，不构成买入计划；可买 / 观察价位亦须经总控与风控审批。列含义见文末。",
         "",
     ]
 
@@ -662,7 +588,6 @@ def _split_watch(watch_all: list[dict]) -> tuple[list[dict], list[dict]]:
 
 def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
     lines = _header_lines(pool, date)
-    counts = pool.get("bucket_counts") or {}
     candidates = pool.get("candidates") or []
     # 先看全景分组(供置顶信号一览 + 后续各区复用)
     watch_all = _resonant_watch(candidates)
@@ -674,19 +599,12 @@ def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
     lines += _gate_advisory_section(date, gate)
     # ⭐ 置顶:今日信号一览——可买/观察价位/待0AMV做多 三档,一眼看清"今天哪些是真信号"
     _signal_overview(lines, is_bear, watch)
+    # v0.478（owner 2026-11-03）：去掉 A/B/C/D 分池、Top5 与 🐂/🔍/📡 三个子区，全部候选并成一张总表，
+    # 判定结果收进「状态」列；信号标注一览与门内提醒保留；文末列含义。
+    _unified_table(lines, candidates, is_bear, watch, watch_capped, watch_all)
     lines += _signal_labels_section(candidates)
-    _fundamental_bulls(lines, watch)
-    _capped_but_resonant(lines, watch_capped)
-    # 📡 空头前哨(0AMV 空头期启用)：回测显示大量优秀股票起涨点在空头(领先 0AMV 转多 ~12 交易日,
-    # 治理文档结论#11)——空头里板块/市场腿天然未到位(滞后),严格四面共振永远不会在空头触发,
-    # 故空头期单列"基本面优+技术强"的提前埋伏观察对象,跟踪其板块/市场腿何时补齐。
-    _bear_outposts(lines, _watch_key, candidates, is_bear, watch_all)
-    # 📌 门内提醒（v0.89，owner）：池内（已过 J<13 硬门槛）且异动强的票——
-    # 取代 v0.51 的门槛外观察区（J≥13 票不再单列，只进 excluded 留痕）。
     lines += _in_gate_reminder_section(candidates)
-    # 得分 Top5：按总分降序（跨分层），供快速浏览当日最强候选
-    _top5(lines, candidates)
-    _bucket_pools(lines, candidates, counts)
+    lines += _legend_section()
     return "\n".join(lines)
 
 
@@ -706,7 +624,7 @@ def _in_gate_reminder_section(candidates: list) -> list[str]:
         "## 📌 门内提醒（震荡池 · J≤13）",
         "",
         "> 震荡池（POOL_ZHENDANG）内、J≤13 的票（v0.160 起不再要求异动强）。"
-        "**仅提醒**，不改变分层与排序；按日 J 从小到大最多列前 "
+        "**仅提醒**，不改变判定与排序；按日 J 从小到大最多列前 "
         f"{_IN_GATE_REMINDER_TOP_N} 只。",
         "",
     ]
@@ -720,8 +638,8 @@ def _in_gate_reminder_section(candidates: list) -> list[str]:
         out.append("（今日无）")
         out.append("")
         return out
-    out.append("| 代码 | 名称 | 日J | 涨跌幅 | 异动判据 | 分层 | 技术分 |")
-    out.append("|---|---|---:|---:|---|---|---:|")
+    out.append("| 代码 | 名称 | 日J | 涨跌幅 | 异动判据 | 技术分 |")
+    out.append("|---|---|---:|---:|---|---:|")
     hits.sort(key=lambda c: c.get("daily_j"))
     for c in hits[:_IN_GATE_REMINDER_TOP_N]:
         triggers = "、".join(
@@ -737,7 +655,6 @@ def _in_gate_reminder_section(candidates: list) -> list[str]:
             f" | {_fmt(c.get('daily_j'))}"
             f" | {_fmt(c.get('change_pct'))}"
             f" | {triggers or '-'}"
-            f" | {c.get('bucket') or '-'}"
             f" | {_fmt((c.get('score_detail') or {}).get('technical_score'))} |"
         )
     if len(hits) > _IN_GATE_REMINDER_TOP_N:
