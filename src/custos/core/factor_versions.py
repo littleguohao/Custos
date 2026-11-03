@@ -79,8 +79,16 @@ class _StripDoc(ast.NodeTransformer):
 
 
 def source_digest(path: Path) -> str:
-    """规范化 AST 摘要：注释、空白、docstring 改动不影响；任何代码改动都会变。"""
+    """规范化 AST 摘要：注释、空白、docstring 改动不影响；任何代码改动都会变。
+
+    跨 Python 版本稳定：3.12+ 给 def/class 节点新增 ``type_params`` 字段（PEP 695），
+    为空时（未用泛型语法）从 dump 剔除——否则同一份源码在 3.11 与 3.12+ 摘要不同
+    （v0.486 曾因此全表漂移：表在 3.11 生成、生产机 3.12 复核全红）。"""
     tree = _StripDoc().visit(ast.parse(path.read_text(encoding="utf-8")))
+    for node in ast.walk(tree):
+        tp = getattr(node, "type_params", None)
+        if tp is not None and not tp:
+            del node.type_params
     return hashlib.blake2b(
         ast.dump(tree, include_attributes=False).encode(), digest_size=10
     ).hexdigest()

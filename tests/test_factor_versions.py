@@ -42,6 +42,16 @@ def test_digest_ignores_comments_and_docstrings_but_not_code(tmp_path):
     assert fv.source_digest(a) != d0
 
 
+def test_digest_stable_across_python_versions(tmp_path):
+    """同一源码摘要跨 Python 版本恒定（3.12+ 的空 type_params 字段剔除；本期望值 = 3.11 口径）。"""
+    a = tmp_path / "a.py"
+    a.write_text(
+        "X = 1\n\ndef f(x):\n    return x + X\n\nclass C:\n    pass\n",
+        encoding="utf-8",
+    )
+    assert fv.source_digest(a) == "10892e7b01a34668d017"
+
+
 def test_tracked_covers_registry_and_thresholds():
     from custos.core import factors
 

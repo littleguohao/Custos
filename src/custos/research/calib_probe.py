@@ -610,7 +610,7 @@ def run_study(
         )
     frames = {k: frames_of(bars, index_df, k) for k in pool}
     params = param_names(args.module)
-    from custos.core import b1_thresholds  # noqa: F401,PLC0415 — 预加载以便 patch 找到全部绑定
+    from custos.core import b1_thresholds  # noqa: PLC0415,F401 — 预加载以便 patch 找到全部绑定
     import importlib  # noqa: PLC0415
 
     importlib.import_module("custos.pipeline.screening.enrich_candidates")
