@@ -196,6 +196,12 @@ TOOLS: dict[str, tuple[str, str]] = {
         "R48 B1 大单入场特征（v0.439）：0AMV 做多 + J<13 × 现行出场交易集，7 个 as-of 特征（小盘/深回撤/涨停活跃/"
         "基本面优/技术分≥60/三面共振/四面共振腿数 + v0.443 超卖 4 项）逐个检验大单命中率 lift，簇级置换 max-of-11，只读挖掘段",
     ),
+    "calib_probe": (
+        "diagnostic",
+        "信号参数定义校准探针（TODO #121，A 类：检测器是否测出规则原文形态，不拿收益寻优）：挖掘段 as-of bar 池"
+        "（live compute_metrics 同口径）；--mode sample 出命中/未命中/边界抽检图（纯 SVG）+ 标注表 labels.csv，"
+        "--mode sensitivity 逐参数改动报命中数与 Jaccard（只描述）；生产机运行",
+    ),
     "swing_recall_study": (
         "study",
         "R50 ≥20% 波段逆向匹配（v0.456，探索）：ZigZag 双阈值波段（+20% 成立/−10% 确认 T1，前复权收盘，"

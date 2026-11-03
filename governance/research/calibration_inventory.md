@@ -23,6 +23,25 @@
 4. **结论**：定义没问题 ⇒ 标 ✅；定义有偏差 ⇒ 改代码（改判定语义 = 语义变更，CHANGELOG 记版本、按下文登记受影响 R）。
 5. owner 待确认的定义问题在该轮一起定（例：**MACD「小绿」分三类：大绿后小绿 / 大红后小绿 / 小红后小绿**，随 `macd_technics` 一轮确认）。
 
+## 工具（v0.479，`research/calib_probe.py`，生产机运行）
+
+```bash
+# 抽检图 + 标注表（命中 / 未命中 / 边界各 N 例；边界 = 任一参数 ×0.8 或 ×1.2 后判定翻转）
+uv run python -m custos.research calib_probe --module <模块> --mode sample --universe-sample 1000 --workers 8 --tag v1
+# 敏感性（逐参数 ×0.5/0.75/0.9/1.1/1.25/1.5，报命中数与 Jaccard；只描述不挑最优）
+uv run python -m custos.research calib_probe --module <模块> --mode sensitivity --universe-sample 1000 --workers 8 --tag v1
+```
+
+- 产物：`artifacts/reports/calibration/<模块>__<tag>/`——`gallery.html`（纯 SVG：K 线 + 量 + J + MACD，**只画到 as-of 当根**）、
+  `labels.csv`（owner 填「对 / 错 / 不确定」，回传后按 id 汇总精度 / 召回）、`sensitivity.md`、`summary.json`。
+- bar 池：挖掘 A ∪ B 段内随机 bar（判定段 / holdout 不抽）；`--pool jlow`（默认，只取日 J<13，即 live 进池门之后）/
+  `--pool all`（**校准 J 门槛本身必须用 all**——jlow 池里放宽 J 不会多出命中）。
+- 参数改动覆盖：定义模块常量 + 所有 `from x import NAME` 绑定 + 源码默认值写该常量名的函数默认参数 + 抄进默认权重表的别名
+  （如 `capital_intent.CAP_STRONG` → `DEFAULT_EVIDENCE_WEIGHTS`）。**函数体内联常量、import 时派生的常量改不到**——
+  报告 `no_effect`（全部步长零变化）须人工确认是不敏感还是没改到。开发机快照冒烟已知：`b1_thresholds.REVERSAL_CHANGE_PCT` /
+  `REVERSAL_AMPLITUDE_PCT` 为 no_effect（前者 import 时派生 MIN/MAX，应改 `REVERSAL_CHANGE_MIN/MAX_PCT`）。
+- live 的资金意图阈值可被 `SCREEN_FORMULA_REGISTRY.json` `scoring.weights` 覆盖，校准时以 registry 实际生效值为准。
+
 ## P0 校准顺序（按对 live 的影响面）
 
 | 序 | 模块 | live 角色 | 参数数 | 改动后受影响的 R（需重跑或复核） |
