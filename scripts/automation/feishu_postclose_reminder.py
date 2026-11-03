@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""盘后补数单任务：15:00 缺项提醒一次，10 分钟轮询，收齐即停，17:00 截止。
+"""盘后补数单任务：15:15 缺项提醒一次，10 分钟轮询，收齐即停，17:00 截止。
 
 每日只运行这一轮；开始时已齐则不提醒也不轮询。入站接收、台账登记、状态检查
 均为确定性脚本，不调用模型，不保留常驻 10 分钟轮询。
@@ -250,9 +250,9 @@ def _run_collection_day(
     ingest_fn,
     *,
     sleep_fn=None,
-    max_polls: int = 12,
+    max_polls: int = 11,
 ) -> dict:
-    """15:00 缺项提醒一次，随后每 10 分钟接收；收齐即停，12 轮后到 17:00 截止。"""
+    """15:15 缺项提醒一次，随后每 10 分钟接收；收齐即停，11 轮后到 17:00 截止。"""
     if not _is_trading_day(day):
         return {
             "date": day,
@@ -277,7 +277,7 @@ def _run_collection_day(
             "trade_recorded": True,
             "initial_missing": [],
             "missing": [],
-            "reason": "15:00 两项已齐，未提醒、未启动轮询",
+            "reason": "15:15 两项已齐，未提醒、未启动轮询",
         }
 
     _send_text(_message(day, initial_missing))
