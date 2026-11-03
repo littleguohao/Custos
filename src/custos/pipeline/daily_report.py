@@ -534,9 +534,18 @@ def _section_overseas(overseas: dict[str, Any]) -> list[str]:
         ("kospi", "韩国"),
     ]:
         item = details.get(key) or {}
+        data_kind = clean(item.get("data_kind"), "待确认")
+        if item.get("stale") is True:
+            data_kind += "（陈旧）"
         lines.append(
-            f"| {market_name} | {clean(item.get('name'))} | {num(item.get('price'))} | {pct_point(item.get('change_pct'))} | {clean(item.get('data_kind'), '待确认')} | {clean(item.get('last_time_local_hint'))} |"
+            f"| {market_name} | {clean(item.get('name'))} | {num(item.get('price'))} | {pct_point(item.get('change_pct'))} | {data_kind} | {clean(item.get('last_time_local_hint'))} |"
         )
+    stale_symbols = list(overseas.get("stale_symbols") or [])
+    if stale_symbols:
+        stale_names = [
+            str((details.get(key) or {}).get("name") or key) for key in stale_symbols
+        ]
+        lines.append("- ⚠️ 单项数据陈旧或时间异常：" + "、".join(stale_names))
     lines += [
         "",
         f"- 外围综合判断：**{clean(overseas.get('overall_signal'))}**。{clean(overseas.get('overseas_summary'))}",

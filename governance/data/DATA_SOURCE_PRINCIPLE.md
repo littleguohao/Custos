@@ -83,7 +83,7 @@ ST 识别正确）。而当时的应对——引入东财 HTTP——反而把系
 | PIT 财务 | ✅ | 东财 datacenter | 单期约 24 页 |
 | 真市值/总股本 | ✅ | 东财 datacenter | 单期约 11 页 |
 | 资金流向 | ✅ | 东财 push2 | — |
-| 海外行情 | ✅ | Kimi Work Yahoo；A50=东财、CNH=Wind EDB | 12 标的零错误；旧通道仅显式应急 |
+| 海外行情 | ✅ | Kimi Work Yahoo 最新报价 + 日 K 兜底；A50/CNH=Wind EDB | 12 标的零错误；单项陈旧显式标记；旧通道仅显式应急 |
 
 ---
 
@@ -184,7 +184,7 @@ apply_qfq(df, []) → attrs: {'adjust': 'qfq', 'adjust_events': 0}
 
 ### ③ 海外行情：Kimi Work 内置源主路径（2026-10-30 修订）
 
-本机 Yahoo 直连依赖特定网络环境，2026-10-30 盘前 12 个标的全部 SSL 失败并耗时 199 秒。现 12 个外围指数/个股统一走 `kimiwork_data` 的内置 Yahoo 日 K；A50 改用 Wind 固定代码 `L5471360`（富时中国 A50 指数，**非期货、显式 proxy**），CNH 走 Wind EDB `M0290205`。妙想自然语言 A50 查询已退出 live，不能证明后端不含 LLM。最近两根真实收盘计算涨跌幅，`source/as_of/quality` 留痕，产物 schema 不变。
+本机 Yahoo 直连依赖特定网络环境，2026-10-30 盘前 12 个标的全部 SSL 失败并耗时 199 秒。现 12 个外围指数/个股统一走 `kimiwork_data`：结构化 `get_stock_info` 最新报价与日 K 双路取数，采用时间较新者；日 K 兜底只标交易日，不冒充真实收盘时刻。单项超过 4 天或时间显著未来即标 `stale`，门控与报告显式暴露，不能由全组最大时间戳掩盖。A50 改用 Wind 固定代码 `L5471360`（富时中国 A50 指数，**非期货、显式 proxy**），CNH 走 Wind EDB `M0290205`。妙想自然语言 A50 查询已退出 live，不能证明后端不含 LLM。`source/source_api/as_of/quality` 留痕，产物 schema 不变。
 A50/CNH 均校验价格合理区间与最近交易日，旧数据不填值；A50 代理身份不得被读成期货。旧 Yahoo chart 与 TDX ext 仅 `CUSTOS_LEGACY_OVERSEAS=1` 时应急启用，默认不再尝试。财联社补位华尔街见闻 403，7/7 新闻源成功。
 
 **A50 代理对账结论（2026-10-30）**：新增 `scripts/dev/a50_proxy_shadow_diff.py`。Wind 固定指数与旧东财诊断源的有效交集为 14 日，14/14 收盘价一致、13/13 日涨跌一致、比例恒为 1、相关系数 1.0；当日 2026-10-30 也一致。旧 Yahoo `CFF=A50` 返回 404、`XIN9.FGI` 无历史，不能提供独立期货长历史；60 日自然语言请求返回稀疏错位序列，未纳入。结论仅是**有限样本支持保留显式代理**，不是长期无偏差证明；代理继续带 `proxy/proxy_note`，并保留新鲜度校验与对账工具，产物在 `artifacts/logs/a50_proxy_shadow/`。

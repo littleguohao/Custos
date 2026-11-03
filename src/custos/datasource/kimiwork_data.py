@@ -108,6 +108,22 @@ def yahoo_daily(symbol: str) -> list[dict[str, str]]:
     return _csv_records(raw)
 
 
+def yahoo_quote(symbol: str) -> dict[str, str]:
+    """内置 Yahoo 结构化最新报价，含真实报价时间、前收和市场状态。"""
+    raw = call_api(
+        "yahoo_finance",
+        "get_stock_info",
+        {
+            "ticker": symbol,
+            "file_path": str(_cache_path("yahoo_info", symbol)),
+        },
+    )
+    header, rows = csv_table(raw)
+    if not rows:
+        raise KimiWorkDataError(f"Yahoo 最新报价为空: {symbol}")
+    return dict(zip(header, rows[0]))
+
+
 def dongcai_a50_daily() -> list[dict[str, str]]:
     """仅供诊断的东财自然语言 A50 查询，禁止进入 live 主链。
 

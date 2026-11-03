@@ -66,7 +66,26 @@ def test_cls_adapter_filters_hidden_and_deleted(monkeypatch):
     assert [x["id"] for x in kd.cls_telegraphs(limit=3)] == [1]
 
 
-def test_overseas_chart_from_kimiwork_daily(monkeypatch):
+def test_yahoo_quote_adapter_reads_structured_row(monkeypatch):
+    monkeypatch.setattr(
+        kd,
+        "call_api",
+        lambda *args, **kwargs: _csv_raw(
+            "regularMarketPrice,regularMarketPreviousClose,regularMarketTime\n"
+            "101.5,100,1793667340\n"
+        ),
+    )
+    row = kd.yahoo_quote("^KS11")
+    assert row["regularMarketPrice"] == "101.5"
+    assert row["regularMarketTime"] == "1793667340"
+
+
+def test_overseas_chart_falls_back_to_daily_when_quote_fails(monkeypatch):
+    monkeypatch.setattr(
+        kd,
+        "yahoo_quote",
+        lambda symbol: (_ for _ in ()).throw(kd.KimiWorkDataError("quote down")),
+    )
     monkeypatch.setattr(
         kd,
         "yahoo_daily",
@@ -80,7 +99,103 @@ def test_overseas_chart_from_kimiwork_daily(monkeypatch):
     assert out["previous_close"] == 100
     assert out["change_pct"] == 1.5
     assert out["source"] == "Kimi Work / Yahoo Finance"
-    assert out["last_timestamp"]
+    assert out["source_api"] == "get_historical_stock_prices"
+    assert out["data_kind"] == "收盘"
+    assert out["last_time_local_hint"] == "2026-10-29"
+
+
+def test_overseas_chart_prefers_fresh_structured_quote(monkeypatch):
+    monkeypatch.setattr(
+        kd,
+        "yahoo_daily",
+        lambda symbol: [
+            {"Date": "2026-10-28T04:00:00Z", "Close": "100", "currency": "USD"},
+            {"Date": "2026-10-29T04:00:00Z", "Close": "101.5", "currency": "USD"},
+        ],
+    )
+    monkeypatch.setattr(
+        kd,
+        "yahoo_quote",
+        lambda symbol: {
+            "regularMarketPrice": "5653.79",
+            "regularMarketPreviousClose": "5859.08",
+            "regularMarketChangePercent": "-3.503793",
+            "regularMarketTime": "1793667340",
+            "marketState": "REGULAR",
+            "currency": "KRW",
+            "fullExchangeName": "KSE",
+        },
+    )
+    out = omc._fetch_kimiwork_chart("^KS11", "kr")
+    assert out["price"] == 5653.79
+    assert out["previous_close"] == 5859.08
+    assert out["source_api"] == "get_stock_info"
+    assert out["data_kind"] == "最新"
+    assert out["recent_closes"] == [100, 101.5]
+
+
+def test_overseas_chart_does_not_replace_newer_daily_with_older_quote(monkeypatch):
+    monkeypatch.setattr(
+        kd,
+        "yahoo_daily",
+        lambda symbol: [
+            {"Date": "2026-11-02T04:00:00Z", "Close": "100", "currency": "USD"},
+            {"Date": "2026-11-03T04:00:00Z", "Close": "101.5", "currency": "USD"},
+        ],
+    )
+    monkeypatch.setattr(
+        kd,
+        "yahoo_quote",
+        lambda symbol: {
+            "regularMarketPrice": "99",
+            "regularMarketPreviousClose": "100",
+            "regularMarketTime": "1000",
+            "marketState": "CLOSED",
+        },
+    )
+    out = omc._fetch_kimiwork_chart("^GSPC")
+    assert out["price"] == 101.5
+    assert out["source_api"] == "get_historical_stock_prices"
+    assert out["last_time_local_hint"] == "2026-11-03"
+
+
+def test_overseas_marks_stale_symbols_and_gate_and_report_expose_them():
+    now = omc.datetime(2026, 11, 3, 9, 0, tzinfo=omc.ZoneInfo("Asia/Shanghai"))
+    details = {
+        "nikkei": {
+            "name": "日经225",
+            "change_pct": -2.12,
+            "last_timestamp": 1793286000.0,
+            "data_kind": "最新",
+        },
+        "kospi": {
+            "name": "韩国KOSPI",
+            "change_pct": -3.5,
+            "last_timestamp": 1793667340.0,
+            "data_kind": "最新",
+        },
+    }
+    assert omc._mark_stale_details(details, now=now) == ["nikkei"]
+    assert details["nikkei"]["stale"] is True
+    assert "stale" not in details["kospi"]
+
+    from custos.core import runtime_guards as rg
+    from custos.pipeline import daily_report
+
+    market = {
+        "overseas_market": {
+            "nikkei_change_pct": -2.12,
+            "as_of": "2026-11-03T08:58:30+08:00",
+            "stale_symbols": ["nikkei"],
+            "details": details,
+        }
+    }
+    check = rg._overseas_check(market)
+    assert check["quality"] == "stale"
+    assert check["stale_symbols"] == ["nikkei"]
+    report = "\n".join(daily_report._section_overseas(market["overseas_market"]))
+    assert "最新（陈旧）" in report
+    assert "单项数据陈旧或时间异常：日经225" in report
 
 
 def test_incremental_a50_and_cnh_from_builtin(monkeypatch):

@@ -418,14 +418,22 @@ def _overseas_check(market: dict[str, Any]) -> dict[str, Any]:
             "hstech_change_pct",
         )
     ]
+    has_values = any(v is not None for v in overseas_values)
+    stale_symbols = list(overseas.get("stale_symbols") or [])
+    quality = (
+        "stale"
+        if has_values and stale_symbols
+        else (
+            "confirmed"
+            if has_values and overseas.get("as_of")
+            else ("candidate" if has_values else "missing")
+        )
+    )
     return {
         "field": "overseas",
-        "quality": "confirmed"
-        if any(v is not None for v in overseas_values) and overseas.get("as_of")
-        else (
-            "candidate" if any(v is not None for v in overseas_values) else "missing"
-        ),
+        "quality": quality,
         "as_of": overseas.get("as_of"),
+        "stale_symbols": stale_symbols,
     }
 
 

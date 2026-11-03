@@ -167,8 +167,8 @@ def _fetch_chart_legacy(symbol: str, region: str = "") -> dict[str, Any]:
     )
 
 
-def _fetch_kimiwork_chart(symbol: str, region: str = "") -> dict[str, Any]:
-    """内置 Yahoo 日 K → 原有 chart 结构；涨跌幅按最近两根真实收盘计算。"""
+def _fetch_kimiwork_daily(symbol: str) -> dict[str, Any]:
+    """内置 Yahoo 日 K 兜底；日 K 时间只表示交易日，不冒充真实收盘时刻。"""
     from custos.datasource import kimiwork_data  # noqa: PLC0415
 
     rows = []
@@ -187,20 +187,107 @@ def _fetch_kimiwork_chart(symbol: str, region: str = "") -> dict[str, Any]:
     prev = rows[-2][1]
     change_pct = pct_change(price, prev, digits=2)
     last_dt = datetime.fromisoformat(last_day.replace("Z", "+00:00"))
-    last_ts = last_dt.timestamp()
-    local_now = datetime.now(ZoneInfo("Asia/Shanghai"))
-    asia_live = region in {"jp", "kr"} and 8 <= local_now.hour < 15
-    # 交易所与实时市场状态若源未提供就留空，不猜测。
     meta = {
         "currency": None if currency in (None, "", "NA") else currency,
         "exchangeName": None,
-        "marketState": None,
+        "marketState": "CLOSED",
     }
     result = _chart_result_dict(
-        symbol, meta, price, prev, change_pct, last_ts, closes, asia_live
+        symbol, meta, price, prev, change_pct, last_dt.timestamp(), closes, False
     )
+    result["data_kind"] = "收盘"
+    result["last_time_local_hint"] = last_day[:10]
     result["source"] = "Kimi Work / Yahoo Finance"
+    result["source_api"] = "get_historical_stock_prices"
     return result
+
+
+def _fetch_kimiwork_quote(symbol: str) -> dict[str, Any]:
+    """内置 Yahoo 结构化最新报价，保留真实报价时间与市场状态。"""
+    from custos.datasource import kimiwork_data  # noqa: PLC0415
+
+    row = kimiwork_data.yahoo_quote(symbol)
+    try:
+        price = float(row["regularMarketPrice"])
+        prev = float(row["regularMarketPreviousClose"])
+        last_ts = float(row["regularMarketTime"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"Yahoo 最新报价字段不完整: {symbol}") from exc
+    change_raw = row.get("regularMarketChangePercent")
+    change_pct = (
+        float(change_raw)
+        if change_raw not in (None, "")
+        else pct_change(price, prev, digits=2)
+    )
+    state = str(row.get("marketState") or "")
+    meta = {
+        "currency": row.get("currency"),
+        "exchangeName": row.get("fullExchangeName") or row.get("exchange"),
+        "marketState": state,
+    }
+    result = _chart_result_dict(
+        symbol, meta, price, prev, change_pct, last_ts, [prev, price], False
+    )
+    result["data_kind"] = {
+        "REGULAR": "最新",
+        "PRE": "盘前",
+        "POST": "盘后",
+        "POSTPOST": "盘后",
+        "CLOSED": "收盘",
+    }.get(state, "待确认")
+    result["source"] = "Kimi Work / Yahoo Finance"
+    result["source_api"] = "get_stock_info"
+    return result
+
+
+def _fetch_kimiwork_chart(symbol: str, region: str = "") -> dict[str, Any]:
+    """最新报价与日 K 双路取数，采用时间较新者，均失败才报缺数。"""
+    daily = None
+    quote = None
+    daily_error = None
+    quote_error = None
+    try:
+        daily = _fetch_kimiwork_daily(symbol)
+    except Exception as exc:  # noqa: BLE001 — 双路兜底，错误随最终失败抛出
+        daily_error = exc
+    try:
+        quote = _fetch_kimiwork_quote(symbol)
+    except Exception as exc:  # noqa: BLE001
+        quote_error = exc
+    if daily is None and quote is None:
+        raise RuntimeError(f"quote={quote_error!r}; daily={daily_error!r}")
+    if quote is None:
+        return daily or {}
+    if daily is None:
+        return quote
+    quote["recent_closes"] = daily.get("recent_closes") or quote["recent_closes"]
+    if float(daily.get("last_timestamp") or 0) > float(
+        quote.get("last_timestamp") or 0
+    ):
+        return daily
+    return quote
+
+
+def _mark_stale_details(
+    details: dict[str, Any], *, now: datetime | None = None
+) -> list[str]:
+    """标记超过 4 天或显著未来的单项数据，禁止全组最大时间戳掩盖陈旧。"""
+    current = now or datetime.now(ZoneInfo("Asia/Shanghai"))
+    stale = []
+    for key, item in details.items():
+        if not isinstance(item, dict):
+            continue
+        item.pop("stale", None)
+        ts = item.get("last_timestamp")
+        if item.get("change_pct") is None or not isinstance(ts, (int, float)):
+            continue
+        age_seconds = (
+            current - datetime.fromtimestamp(ts, ZoneInfo("Asia/Shanghai"))
+        ).total_seconds()
+        if age_seconds > 4 * 86400 or age_seconds < -900:
+            item["stale"] = True
+            stale.append(key)
+    return stale
 
 
 def fetch_chart(symbol: str, region: str = "") -> dict[str, Any]:
@@ -339,6 +426,7 @@ def main():
                 }
         time.sleep(0.2)
 
+    stale_symbols = _mark_stale_details(details)
     overseas = data.setdefault("overseas_market", {})
     for key, field in FIELD_MAP.items():
         overseas[field] = details.get(key, {}).get("change_pct")
@@ -346,6 +434,7 @@ def main():
     overseas["overseas_summary"] = impact_summary(details)
     overseas["details"] = details
     overseas["errors"] = errors
+    overseas["stale_symbols"] = stale_symbols
     source_names = sorted(
         {
             str(d.get("source"))
@@ -389,7 +478,7 @@ def main():
         overseas["collected_at"] = datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(
             timespec="seconds"
         )
-    overseas["quality"] = "auto" if not errors else "degraded"
+    overseas["quality"] = "auto" if not errors and not stale_symbols else "degraded"
 
     dq = data.setdefault("data_quality", {})
     dq.setdefault("sources", []).append("overseas_market_collector:kimiwork")
@@ -399,6 +488,10 @@ def main():
         )
     else:
         dq.setdefault("notes", []).append("外围市场由 Kimi Work 内置数据源自动采集。")
+    if stale_symbols:
+        dq.setdefault("notes", []).append(
+            f"外围市场单项数据陈旧或时间异常：{', '.join(stale_symbols)}"
+        )
 
     MARKET_DIR.mkdir(parents=True, exist_ok=True)
     # ⚠️ 落盘前校验：本采集器只负责 overseas_market / data_quality 两节，
@@ -413,6 +506,7 @@ def main():
                 "overall_signal": overseas.get("overall_signal"),
                 "summary": overseas.get("overseas_summary"),
                 "errors": errors,
+                "stale_symbols": stale_symbols,
             },
             ensure_ascii=False,
             indent=2,
