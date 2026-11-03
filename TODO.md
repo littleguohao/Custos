@@ -25,7 +25,7 @@
 | 118 | R49 逆向画像跑数：工具已落地 v0.443（`tail_explore_study`）；与 R47/R48 同排第二批，命令见 runbook「第二批预告」；线索两窗复现 + 过 q95 者另行预注册 | P2 | 生产机 | 第一批读完后跑 r49_v1 + 摘要入库 | [R49](governance/research/R49_tail_reverse_profile.md) |
 | 119 | R50 ≥20% 波段逆向匹配工具 `swing_recall_study`（ZigZag 波段 + B1 L1~L4 / QN 12 门召回、精度 lift、提前量、漏斗、兑现）；排期在第二批之后最后跑 | P3 | 生产机 | 工具已落地 v0.456（校准两连测 + 成簇 + iid + 逐笔哨兵齐）；第二批读完后跑 r50_v1（`uv run python -m custos.research swing_recall_study --tag r50_v1`，只读挖掘段、不用批次门）+ 摘要入库 | [R50](governance/research/R50_swing_winner_recall.md) |
 | 120 | holdout 跟踪月报：汇总选股练习台账 / plan 影子台账 / trade_counterfactual，按月报现行规则在 2026-09-05 后的表现（大单率 / 大亏率 / 胜率 / 盈亏比 / 与回测分布对照）；纯描述、不作判据、不改规则 | P2 | 生产机 | 工具已落地 v0.455（月报附录 + 伴生 JSON，契约已登记）；生产机月度节点跑 `monthly_review` 自动生成，首月（2026-10）复核格式与读数 | owner 2026-10-26 |
-| 121 | 信号参数**定义校准**（A 类：检测器是否测对形态，不拿收益寻优；B 类效果校准待 A 全部完成再议）：P0 live 判定 70 个参数 / 9 个模块优先，逐模块抽检图 + owner 标注 + 敏感性描述；定义改动按清单登记受影响 R 重跑 | P0 | 生产机 | P0H 持仓大形态（N 结构 / 趋势 / 箱体，v0.485）排最先：owner 先拍板持仓链改前复权与否（未复权致 N 结构判定 2.0% 不同）；再跑 `calib_probe --module n_structure --mode review --review-source holdings` 出持仓名单标注；之后按 P0 顺序 | [清单](governance/research/calibration_inventory.md) |
+| 121 | 信号参数**定义校准**（A 类：检测器是否测对形态，不拿收益寻优；B 类效果校准待 A 全部完成再议）：P0 live 判定 70 个参数 / 9 个模块优先，逐模块抽检图 + owner 标注 + 敏感性描述；定义改动按清单登记受影响 R 重跑 | P0 | 生产机 | 前复权已落地（v0.486/v0.487）；下一步：生产机跑 `calib_probe --module n_structure --mode review --review-source holdings --since 2026-09-05 --until <今>` 出持仓名单交 owner 标注，之后 trend_box → P0 选股因子 | [清单](governance/research/calibration_inventory.md) |
 
 ## 已闭环索引
 
