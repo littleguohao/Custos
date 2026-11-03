@@ -64,6 +64,9 @@ BASE_MODULES = {
     # `runtime_gate.py` 是运行时门控判定模块（src/custos/README.md 本就把它
     # 列为 core 基础模块）；2026-08-24 解耦审计补登记，对齐分层映射。
     "runtime_gate.py",
+    # `factor_versions.py`（v0.480，TODO #121）：因子版本表的只读入口，被 L3 产物（stock_pool /
+    # holdout 月报）与 L4 研究 provenance 读。只依赖 `paths`（L0）与 stdlib（AST 扫因子文件，不 import 因子）。
+    "factor_versions.py",
 }
 LAYER_OF_DIR = {
     "datasource/local_tdx": 1,

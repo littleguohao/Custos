@@ -154,7 +154,15 @@ def build(
         "data_source": "snapshot" if is_snapshot_mode() else None,
         "snapshot_sha": snapshot_manifest_sha(),
         "cmdline": getattr(args, "cmdline", None),
+        # v0.481（TODO #121）：跑数时的因子版本表——R 结果可按因子版本对比 / 判断是否需重跑
+        "factor_versions": _factor_versions(),
     }
+
+
+def _factor_versions() -> dict:
+    from custos.core import factor_versions as fv  # noqa: PLC0415
+
+    return fv.versions()
 
 
 # ---------------------------------------------------------------------------

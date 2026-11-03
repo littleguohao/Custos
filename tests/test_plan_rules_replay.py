@@ -844,7 +844,13 @@ class TestLegacyR40Compat:
         ):
             rep.pop(k, None)
         prov = dict(rep["provenance"])
-        for k in ("git_sha", "git_dirty", "pre_reg_blob_hash", "objective_version"):
+        for k in (
+            "git_sha",
+            "git_dirty",
+            "pre_reg_blob_hash",
+            "objective_version",
+            "factor_versions",  # v0.481：随因子升版而变，非读数
+        ):
             prov.pop(k, None)
         rep["provenance"] = prov
         # v0.466 受命新增字段：C4.early_stop（本夹具跑满 ⇒ skipped=False），其余逐位同基准

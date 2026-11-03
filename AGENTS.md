@@ -163,6 +163,11 @@ uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 �
 - 规范入口 `detect(df, code, ctx=)` / `score()`，live 标注与研究 SCORERS 同源
   （改判定语义 = 语义变更，须立项 + 回测）。
 
+**因子版本表**（v0.481，`governance/contracts/FACTOR_VERSIONS.json`，`tests/test_factor_versions.py`）：每个因子模块 + `b1_thresholds`
+一个整数版本（每升一次 = 判定语义变一次）+ 规范化 AST 源码摘要。改了因子代码不处理版本即红：语义变跑
+`scripts/dev/factor_versions.py --bump <因子> --reason ...`，纯重构跑 `--refactor`；用 holdout 期 1800 结果做校准须 `--holdout-use` 登记。
+stock_pool / 研究 provenance / holdout 月报都落当时的版本表。
+
 **append-only 台账**（四本；写入只走各自唯一入口，每日首写前自动快照
 `.bak_YYYYMMDD`，**严禁覆盖式写入**——2026-09-21 曾误用 write 工具覆写 0AMV 台账，
 8215 行全历史灭失，靠备份救回）：

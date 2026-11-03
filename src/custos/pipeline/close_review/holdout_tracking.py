@@ -174,6 +174,12 @@ def _finite(v: Any) -> Any:
     return v
 
 
+def _fv():
+    from custos.core import factor_versions as fv  # noqa: PLC0415
+
+    return fv
+
+
 def _month_index(month: str) -> int:
     """month（YYYY-MM）是 holdout 期第几个自然月；早于起点返回 0。"""
     y0, m0 = int(HOLDOUT_START[:4]), int(HOLDOUT_START[5:7])
@@ -605,6 +611,9 @@ def build_report(
             "min_n_month": MIN_N_MONTH,
             "min_n_cumulative": MIN_N_CUMULATIVE,
         },
+        # v0.481（TODO #121）：因子版本表 + holdout 期参与过定义校准的因子（其窗口内读数非独立证据）
+        "factor_versions": _fv().versions(),
+        "calibration_holdout_use": _fv().holdout_calibration_use(),
         "actual_trades": actual,
         "pick_practice": pick,
         "plan_shadow": shadow,

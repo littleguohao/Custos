@@ -15,6 +15,16 @@
   ②打分权重与分档（`DEFAULT_TECH_WEIGHTS`、`tech_strong/mid` 60/30、资金意图 `ci_*` 与 `CAP_STRONG/MID`——属打分，R35 终局 A 已收口，
   不在 A 类范围，只在因子定义改动时同步核对）；③出场规则（`EXIT_RULES.json`，R10/R44/R47 测过效果）与 0AMV 状态机（R4），另议。
 
+## 校准循环与版本（owner 2026-11-03 定）
+
+1. 选定一个因子；owner 看它在**最近几个月 1800 选股结果**里的命中名单，指出「不该命中」与「漏了」，**每条写成形态理由**
+   （如「DIF 离零轴还远，不算小绿」），不写「后来涨了 / 跌了」——防止把 holdout 结果带进定义。
+2. coder 按理由改定义，出 v(n+1) 候选：新旧命中差异清单 + 挖掘段 `calib_probe` 抽检图，owner 确认；不满意再迭代，确认后才升版。
+3. 升版：`scripts/dev/factor_versions.py --bump <因子> --reason ...`（版本表 `governance/contracts/FACTOR_VERSIONS.json`，
+   整数版本，每升一次 = 判定语义变一次）；同时 `--holdout-use <因子> --window <用到的 1800 日期区间>` 登记——该因子在该窗口内的
+   holdout 读数不再是独立证据（holdout 月报自动带上此表）。CHANGELOG 列受影响 R。
+4. 追踪：stock_pool / 研究 provenance / holdout 月报都落当时的 `factor_versions`；R 可按版本各跑一遍对比效果。
+
 ## 校准方法（每个因子一轮，生产机执行）
 
 1. **对照原文**：列出规则出处（`governance/strategy/**`）与代码转译，标出转译时做过的取舍（如 `FIVE_DAY_SPIKE_RATIO` 注释里的「前一交易日均量」歧义）。

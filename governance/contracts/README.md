@@ -18,6 +18,7 @@
 | [RSS_SOURCE_REGISTRY.json](RSS_SOURCE_REGISTRY.json) | 102 | 1 | ✅ | `news/rss_collector.py` |
 | [RSS_FILTER_CONFIG.json](RSS_FILTER_CONFIG.json) | 84 | 1 | ✅ | `news/rss_filter.py` |
 | [RSSHUB_PRIVATE_ROUTE_CANDIDATES.json](RSSHUB_PRIVATE_ROUTE_CANDIDATES.json) | 23 | 1 | ✅ | `news/` 私有路由候选 |
+| [FACTOR_VERSIONS.json](FACTOR_VERSIONS.json) | 501 | 1 | — | `core/factor_versions.py`（因子版本表，v0.481；只经 `scripts/dev/factor_versions.py` 写，产物落版本） |
 | [EXIT_RULES.json](EXIT_RULES.json) | 57 | 1 | ✅ | `core/exit_rules.py`（止盈/止损规则目录的参数覆盖层，v0.81；默认值==代码默认表） |
 
 ⚠️ **配置路径只在 `src/custos/core/paths.py` 定义一次**，模块不得自己拼 `"governance"`

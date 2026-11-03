@@ -1244,7 +1244,15 @@ def _score_all_shell(
             **resolve_tech_weights(weights),
             **resolve_capital_weights(weights),
         },
+        # v0.481（TODO #121）：当时生效的因子版本表——选股结果可追溯到因子版本
+        "factor_versions": _factor_versions(),
     }
+
+
+def _factor_versions() -> dict:
+    from custos.core import factor_versions as fv  # noqa: PLC0415
+
+    return fv.versions()
 
 
 def _mark_partial(result: dict, note: str) -> None:

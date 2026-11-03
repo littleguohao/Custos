@@ -1,0 +1,501 @@
+{
+  "schema": "factor_versions/v1",
+  "factors": {
+    "b1_thresholds": {
+      "version": 1,
+      "source_digest": "779808f105dd725e320c",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "alpha101": {
+      "version": 1,
+      "source_digest": "d0224c19b5bf8fa52975",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "alpha_pvcorr": {
+      "version": 1,
+      "source_digest": "d261799c711f6207bd99",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "b1_dual_factor": {
+      "version": 1,
+      "source_digest": "14e9aeba095393f7f598",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "b1_pullback_fit": {
+      "version": 1,
+      "source_digest": "7383d947c5ce2ceabebd",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "b1_structure": {
+      "version": 1,
+      "source_digest": "e13ef9925883fd2a4bef",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "b2_surge_factor": {
+      "version": 1,
+      "source_digest": "c102e5a898145f5d8135",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "baseline": {
+      "version": 1,
+      "source_digest": "f58cd5d0ee82be1fff91",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "bottom_patterns": {
+      "version": 1,
+      "source_digest": "a2a39d74fd0fb2ad00d4",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "capital_intent": {
+      "version": 1,
+      "source_digest": "529fe1b1cb4f57fafaae",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "distribution": {
+      "version": 1,
+      "source_digest": "e4c50e6626bfd824b0e3",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "entry_patterns": {
+      "version": 1,
+      "source_digest": "1e4c9f4450c77fd421bb",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "fundamentals": {
+      "version": 1,
+      "source_digest": "e1bacfdfee62d6ce50ce",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "ignition": {
+      "version": 1,
+      "source_digest": "0fa06842701a74775ed7",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "j_low_gate": {
+      "version": 1,
+      "source_digest": "10adc63cb733251436d9",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "kdj_j": {
+      "version": 1,
+      "source_digest": "0063d3f05b060cf87210",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "low_vol": {
+      "version": 1,
+      "source_digest": "0c6231d13e6edca2149a",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "macd_technics": {
+      "version": 1,
+      "source_digest": "6295bca2642ae52d837e",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "main_rally_factor": {
+      "version": 1,
+      "source_digest": "040dce183d03e5d62416",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "mcap": {
+      "version": 1,
+      "source_digest": "10e801bcfeb06123a5cd",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "momentum": {
+      "version": 1,
+      "source_digest": "3a3563df3cfd3d46f019",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "perfect_b1_fit": {
+      "version": 1,
+      "source_digest": "4d3b4863e9b039e754bb",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "platform_pullback": {
+      "version": 1,
+      "source_digest": "62e69de1ba7ffc3d5ed6",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "qn_adx_extreme": {
+      "version": 1,
+      "source_digest": "533d2f055dc2c41ec07c",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "qn_box_target": {
+      "version": 1,
+      "source_digest": "fed4d5f55524707586cd",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "qn_bullish_engulf": {
+      "version": 1,
+      "source_digest": "ba8865a5ea14ee014895",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "qn_kdj_neg_day": {
+      "version": 1,
+      "source_digest": "4e783bd6be46372af06d",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "qn_ma144_launch": {
+      "version": 1,
+      "source_digest": "e8379498c2ec5c1f0b0c",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "qn_ma25_state": {
+      "version": 1,
+      "source_digest": "30848d29e5cdfbb7d8b3",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "qn_ma_converge": {
+      "version": 1,
+      "source_digest": "3038ff54b91f9c4b4af1",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "qn_macd_bar_shift": {
+      "version": 1,
+      "source_digest": "7db4b0cbebc0bdf191f0",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "qn_shrink_limit_up": {
+      "version": 1,
+      "source_digest": "9d6c3938dd149bc8d31a",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "qn_three_red": {
+      "version": 1,
+      "source_digest": "b86717673310e706b4f4",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "qn_volume_surge_cut": {
+      "version": 1,
+      "source_digest": "b2bf716703036aac5630",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "qn_weekly180_setup": {
+      "version": 1,
+      "source_digest": "cafcdda136a4edb1ef0e",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "qsx_resonance": {
+      "version": 1,
+      "source_digest": "6e266be42f3389ca0991",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "reversal_quality": {
+      "version": 1,
+      "source_digest": "025844dc022922902847",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "reversal_quality_inv": {
+      "version": 1,
+      "source_digest": "ac5b32d5b06070090f78",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "rsi_state": {
+      "version": 1,
+      "source_digest": "9b59f39e0e40d454bcbc",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "s_shape": {
+      "version": 1,
+      "source_digest": "0b9499ea3af90bf8b327",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "sector_mainstream": {
+      "version": 1,
+      "source_digest": "1150c626fb49642f32f6",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "sector_phase": {
+      "version": 1,
+      "source_digest": "5f0eab0aa9339a3731f3",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "volume_detectors": {
+      "version": 1,
+      "source_digest": "c8a9ea8d74472a26a028",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "wave_type": {
+      "version": 1,
+      "source_digest": "cdefa011648519193a5b",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    },
+    "weekly_j": {
+      "version": 1,
+      "source_digest": "6d3516861215dfb8a247",
+      "history": [
+        {
+          "version": 1,
+          "date": "2026-11-03",
+          "change": "初始版本（定义校准前基线，TODO #121）"
+        }
+      ]
+    }
+  },
+  "calibration_holdout_use": []
+}

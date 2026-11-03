@@ -59,7 +59,7 @@ src/
 强制，AST 依赖图 + 无环 + 同名唯一性）。
 
 - **L0** `core/` 顶层：`paths` `code_utils` `indicators` `contracts` `pipeline_kit`
-  `runtime_guards` `runtime_gate` `b1_thresholds` `report_audit` `positions_history`
+  `runtime_guards` `runtime_gate` `b1_thresholds` `report_audit` `positions_history` `factor_versions`
   `fmt` `net_retry`
 - **L1** `datasource/`：采集与数据刷新。L2/L3 不得被它 import
 - **L2** `core/factors/` `core/trades/`：因子实现全项目唯一一份（因子 + 注册表）
