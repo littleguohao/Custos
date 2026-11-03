@@ -484,6 +484,7 @@
 | 2026-11-03 | v0.479 | **定义校准探针 `calib_probe`**（TODO #121）：挖掘段 as-of bar 池走 live compute_metrics；sample 模式出命中/未命中/边界抽检图（纯 SVG，只画到当根）+ 标注表，sensitivity 模式逐参数改动报命中数与 Jaccard（只描述不挑最优）；改动覆盖 from-import 绑定、默认参数与权重表别名，改不到的标 no_effect；9 个 P0 模块已登记 | owner 2026-11-03 | 钉测 +9 |
 | 2026-11-03 | v0.480 | **盘后补数闭环回修**：三时点提醒前先调用确定性入站桥读取新回复，再检查台账并决定提醒；入站代码迁入仓库且沿用原游标/凭据/消息目录，避免回放，原 10 分钟轮询仍独立关闭 | owner 2026-11-03（回复未识别） | 钉测 +2；完整链验证 |
 | 2026-11-03 | v0.481 | **因子版本表**（owner 定，TODO #121）：`FACTOR_VERSIONS.json` 登记 45 个因子模块 + b1_thresholds，全部 v1；规范化 AST 源码摘要，改代码不 --bump / --refactor 即测试红；holdout 期校准使用登记；stock_pool、研究 provenance、holdout 月报落当时版本表；新 L0 模块 `core/factor_versions.py` | owner 2026-11-03 | 钉测 +5 |
+| 2026-11-03 | v0.482 | **calib_probe review 模式**（TODO #121 校准循环）：读 `[--since, --until]` 的 1800 stock_pool，逐 (代码, 选股日) as-of 重算，列全部命中 + 近似命中（任一参数 ±20% 翻转）+ 抽检图 + 标注表（应命中 Y/N + 形态理由）；`--diff` 出新旧版本命中差异；summary 带因子版本 | owner 2026-11-03 | 钉测 +2 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

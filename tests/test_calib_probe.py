@@ -137,3 +137,66 @@ def test_process_pool_equals_serial():
         a["sensitivity"] == b["sensitivity"]
         and a["no_effect_params"] == b["no_effect_params"]
     )
+
+
+# ── review 模式（近月 1800 选股池）与新旧版本差异 ─────────────────────────
+
+
+def test_review_pool_reads_stock_pool_dates(tmp_path):
+    import json
+
+    df = _df(3, start="2025-01-02")
+    d1, d2 = str(df["date"].iloc[400])[:10], str(df["date"].iloc[450])[:10]
+    for d, codes in (
+        (d1, ["600001"]),
+        (d2, ["600001", "600002"]),
+        ("2024-01-02", ["600001"]),
+    ):
+        (tmp_path / f"{d}_stock_pool.json").write_text(
+            json.dumps({"candidates": [{"code": c} for c in codes]}), encoding="utf-8"
+        )
+    args = argparse.Namespace(since=d1, until=d2, count=100000)
+    bars, idx, keys = cp.review_pool(
+        args,
+        pool_files=sorted(tmp_path.glob("*.json")),
+        load_fn=lambda c: None if c == "600002" else df,
+        index_df=_df(9),
+    )
+    assert keys == [
+        ("600001|full", 400),
+        ("600001|full", 450),
+    ]  # 无数据的票跳过；窗外日期不取
+
+
+def test_review_rows_and_diff(tmp_path):
+    bars = {"000001|full": _df(1)}
+    since, until = (
+        str(bars["000001|full"]["date"].iloc[300])[:10],
+        str(bars["000001|full"]["date"].iloc[340])[:10],
+    )
+    a = _args("review", since=since, until=until, pool="all")
+    rep = cp.run_study(a, bars=bars, index_df=_df(9))
+    assert rep["n_bars"] == 41 and rep["factor_version"] == 1
+    rows = rep["samples"]["patterns.j_low"]
+    assert {r["class"] for r in rows} <= {"hit", "near_miss"}
+    assert sum(r["class"] == "hit" for r in rows) == sum(
+        bool(v["patterns.j_low"]) for v in rep["values"]
+    )
+    d = cp.write_outputs(dict(rep), tmp_path)
+    assert (
+        (d / "labels.csv")
+        .read_text(encoding="utf-8-sig")
+        .splitlines()[0]
+        .endswith("形态理由（写形态，不写后来涨跌）")
+    )
+    old = __import__("json").loads((d / "summary.json").read_text(encoding="utf-8"))
+    new = __import__("copy").deepcopy(old)
+    new["factor_version"] = 2
+    flip = next(v for v in new["values"] if v["patterns.j_low"])
+    flip["patterns.j_low"] = False
+    diff = cp.diff_reports(old, new)
+    assert diff["fields"]["patterns.j_low"]["removed"] == [
+        (flip["key"][0].split("|")[0], flip["date"])
+    ]
+    md = cp._diff_md(diff, "b1_thresholds")
+    assert "v1 → v2" in md and "消失 1" in md

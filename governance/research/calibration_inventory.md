@@ -25,6 +25,21 @@
    holdout 读数不再是独立证据（holdout 月报自动带上此表）。CHANGELOG 列受影响 R。
 4. 追踪：stock_pool / 研究 provenance / holdout 月报都落当时的 `factor_versions`；R 可按版本各跑一遍对比效果。
 
+**命令（生产机）**：
+
+```bash
+# ① 近月 1800 选股池的命中 / 近似命中名单（全部列出，不抽样）+ 抽检图 + 标注表
+uv run python -m custos.research calib_probe --module b1_structure --mode review --since 2026-09-05 --until 2026-11-03 --workers 8 --tag v1
+#    → artifacts/reports/calibration/b1_structure__v1/{gallery.html, labels.csv, summary.json}
+#    labels.csv：「应命中(Y/N)」+「形态理由」由 owner 填；近似命中 = 未命中但任一参数 ±20% 即翻成命中
+# ② coder 改定义后，同批日期出新旧差异（新增 / 消失 / 取值变）
+uv run python -m custos.research calib_probe --module b1_structure --mode review --since 2026-09-05 --until 2026-11-03 --workers 8 --tag v2cand \
+  --diff artifacts/reports/calibration/b1_structure__v1/summary.json
+# ③ 挖掘段确认新定义（sample 模式），owner 确认后升版 + 登记 holdout 使用
+uv run python scripts/dev/factor_versions.py --bump b1_structure --reason "..."
+uv run python scripts/dev/factor_versions.py --holdout-use b1_structure --window 2026-09-05~2026-11-03 --reason "1800 命中名单标注校准"
+```
+
 ## 校准方法（每个因子一轮，生产机执行）
 
 1. **对照原文**：列出规则出处（`governance/strategy/**`）与代码转译，标出转译时做过的取舍（如 `FIVE_DAY_SPIKE_RATIO` 注释里的「前一交易日均量」歧义）。

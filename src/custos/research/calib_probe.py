@@ -464,6 +464,60 @@ def _load(args: Any) -> tuple[dict[str, Any], Any, list[tuple[str, str]]]:
     return bars, index_df, [(str(a), str(b)) for a, b in spans]
 
 
+def review_pool(
+    args: Any,
+    *,
+    pool_files: Optional[list[Path]] = None,
+    load_fn: Optional[Callable[[str], Any]] = None,
+    index_df: Any = None,
+) -> tuple[dict[str, Any], Any, list[tuple[str, int]]]:
+    """review 模式（owner 2026-11-03 定的校准循环）：读 ``[--since, --until]`` 的 1800 ``stock_pool``，
+    每个 (代码, 选股日) 一根 bar（as-of 当日，与 live 同口径重算）。⚠️ 这些日期落在 holdout——只作定义校准，
+    升版时须 ``factor_versions.py --holdout-use`` 登记窗口。"""
+    if pool_files is None:
+        from custos.core.paths import STOCK_POOL_DIR  # noqa: PLC0415
+
+        pool_files = sorted(STOCK_POOL_DIR.glob("*_stock_pool.json"))
+    pairs: set[tuple[str, str]] = set()
+    for f in pool_files:
+        d = f.name[:10]
+        if not (args.since <= d <= args.until):
+            continue
+        try:
+            js = json.loads(f.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            continue
+        for c in js.get("candidates") or []:
+            if c.get("code"):
+                pairs.add((str(c["code"]), d))
+    if load_fn is None:
+        from custos.datasource.local_tdx import local_tdx_data  # noqa: PLC0415
+
+        def load_fn(code: str) -> Any:  # noqa: F811
+            df = local_tdx_data.get_ohlcv_table(code, count=args.count)
+            return (
+                None
+                if df is None or not len(df)
+                else df.sort_values("date").reset_index(drop=True)
+            )
+
+    if index_df is None:
+        from custos.research import score_return_study as srs  # noqa: PLC0415
+
+        index_df = load_fn(srs.INDEX_CODE)
+    bars: dict[str, Any] = {}
+    keys: list[tuple[str, int]] = []
+    for code in sorted({c for c, _d in pairs}):
+        df = load_fn(code)
+        if df is None:
+            continue
+        bk = f"{code}|full"
+        bars[bk] = df
+        pos = {str(x)[:10]: i for i, x in enumerate(df["date"])}
+        keys += [(bk, pos[d]) for c, d in sorted(pairs) if c == code and d in pos]
+    return bars, index_df, sorted(keys)
+
+
 def run_study(
     args: Any,
     *,
@@ -474,11 +528,23 @@ def run_study(
 ) -> dict[str, Any]:
     spec = MODULES[args.module]
     defmod, fields = spec["defmod"], spec["fields"]
-    if bars is None:
-        bars, index_df, spans = _load(args)
-    assert spans is not None
     rng = random.Random(args.seed)
-    pool = bar_pool(bars, spans, args.n_bars, rng, jlow_only=(args.pool == "jlow"))
+    if args.mode == "review":
+        if bars is None:
+            bars, index_df, pool = review_pool(args)
+        else:  # 注入：bars 内 [since, until] 的全部 bar
+            pool = sorted(
+                (k, i)
+                for k, df in bars.items()
+                for i in range(len(df))
+                if args.since <= str(df["date"].iloc[i])[:10] <= args.until
+            )
+        spans = [(args.since, args.until)]
+    else:
+        if bars is None:
+            bars, index_df, spans = _load(args)
+        assert spans is not None
+        pool = bar_pool(bars, spans, args.n_bars, rng, jlow_only=(args.pool == "jlow"))
     if not pool:
         raise RuntimeError(
             "空结果护栏：抽样 bar 池为空（宇宙 / 段 / J 门槛无 bar）——不落盘"
@@ -491,7 +557,7 @@ def run_study(
     importlib.import_module("custos.pipeline.screening.enrich_candidates")
     defm = importlib.import_module(defmod)
     base_vals = {p: getattr(defm, p) for p in params}
-    steps = BOUNDARY_STEPS if args.mode == "sample" else tuple(args.steps)
+    steps = BOUNDARY_STEPS if args.mode in ("sample", "review") else tuple(args.steps)
     variants: list[tuple[str, float, dict]] = [("__base__", 1.0, {})]
     for p in params:
         for k in steps:
@@ -550,6 +616,22 @@ def run_study(
         "sensitivity": sens if args.mode == "sensitivity" else None,
         "note": "定义校准（A 类）：只描述命中集合随参数的变化，不挑最优；no_effect = 全部步长零变化（不敏感或改不到，须人工确认）",
     }
+    if args.mode == "review":
+        rep["values"] = [
+            {
+                "key": list(k),
+                "date": str(frames[k][0]["date"].iloc[-1])[:10],
+                **{f: base[k].get(f) for f in fields},
+            }
+            for k in pool
+        ]
+        rep["factor_version"] = _version_of(args.module)
+        rep["samples"] = _review_rows(pool, base, hits, flips, fields)
+        rep["_frames"] = {
+            k: frames[k]
+            for s in rep["samples"].values()
+            for k in [tuple(x["key"]) for x in s]
+        }
     if args.mode == "sample":
         rep["samples"] = _samples(pool, base, hits, flips, fields, args, rng)
         rep["_frames"] = {
@@ -558,6 +640,79 @@ def run_study(
             for k in [tuple(x["key"]) for x in s]
         }
     return rep
+
+
+def _version_of(module: str) -> Optional[int]:
+    from custos.core import factor_versions as fv  # noqa: PLC0415
+
+    return fv.versions().get(module)
+
+
+def _review_rows(pool, base, hits, flips, fields) -> dict[str, list[dict]]:
+    """review：**全部**命中 + 全部近似命中（未命中但任一参数 ±20% 即翻成命中），不抽样。"""
+    out: dict[str, list[dict]] = {}
+    for f in fields:
+        boundary = (
+            set().union(*[v for (ff, _p), v in flips.items() if ff == f])
+            if flips
+            else set()
+        )
+        rows = []
+        for c, keys in (
+            ("hit", sorted(hits[f])),
+            ("near_miss", sorted(boundary - hits[f])),
+        ):
+            for key in keys:
+                ps = sorted(p for (ff, p), v in flips.items() if ff == f and key in v)
+                rows.append(
+                    {
+                        "key": list(key),
+                        "class": c,
+                        "value": base[key].get(f),
+                        "flip_params": ps,
+                    }
+                )
+        out[f] = rows
+    return out
+
+
+def diff_reports(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+    """新旧版本（同一批 (代码, 日)）逐字段差异：新增命中 / 消失命中 / 取值变化。"""
+    ov = {(v["key"][0].split("|")[0], v["date"]): v for v in old.get("values") or []}
+    nv = {(v["key"][0].split("|")[0], v["date"]): v for v in new.get("values") or []}
+    common = sorted(set(ov) & set(nv))
+    out: dict[str, Any] = {
+        "n_common": len(common),
+        "old_version": old.get("factor_version"),
+        "new_version": new.get("factor_version"),
+        "fields": {},
+    }
+    for f in new.get("fields") or []:
+        add = [k for k in common if is_hit(nv[k].get(f)) and not is_hit(ov[k].get(f))]
+        gone = [k for k in common if is_hit(ov[k].get(f)) and not is_hit(nv[k].get(f))]
+        chg = [
+            k
+            for k in common
+            if nv[k].get(f) != ov[k].get(f) and k not in add and k not in gone
+        ]
+        out["fields"][f] = {"added": add, "removed": gone, "changed": chg}
+    return out
+
+
+def _diff_md(d: dict[str, Any], module: str) -> str:
+    lines = [
+        f"# {module} 新旧版本命中差异（v{d['old_version']} → v{d['new_version']}，共同 {d['n_common']} 个 (代码, 日)）",
+        "",
+    ]
+    for f, v in d["fields"].items():
+        lines.append(
+            f"## {f}：新增 {len(v['added'])} / 消失 {len(v['removed'])} / 取值变 {len(v['changed'])}"
+        )
+        for tag in ("added", "removed", "changed"):
+            if v[tag]:
+                lines.append(f"- {tag}：" + "、".join(f"{c} {d_}" for c, d_ in v[tag]))
+        lines.append("")
+    return "\n".join(lines)
 
 
 def _samples(pool, base, hits, flips, fields, args, rng) -> dict[str, list[dict]]:
@@ -593,7 +748,7 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
     d = out_dir / f"{rep['module']}__{rep['tag']}"
     d.mkdir(parents=True, exist_ok=True)
     frames = rep.pop("_frames", {})
-    if rep["mode"] == "sample":
+    if rep["mode"] in ("sample", "review"):
         parts = [
             f"<html><meta charset='utf-8'><title>{rep['module']} 抽检</title><body>",
             f"<h1>{html.escape(rep['module'])} 定义校准抽检（{rep['n_bars']} bar 池，{html.escape(rep['pool'])}）</h1>",
@@ -610,9 +765,12 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
                     "类别",
                     "检测值",
                     "边界翻转参数",
-                    "判定(对/错/不确定)",
-                    "备注",
                 ]
+                + (
+                    ["应命中(Y/N)", "形态理由（写形态，不写后来涨跌）"]
+                    if rep["mode"] == "review"
+                    else ["判定(对/错/不确定)", "备注"]
+                )
             )
             n = 0
             for f, rows in rep["samples"].items():
@@ -671,7 +829,14 @@ def _build_parser() -> argparse.ArgumentParser:
         description="信号参数定义校准探针（TODO #121；生产机运行）"
     )
     ap.add_argument("--module", required=True, choices=sorted(MODULES))
-    ap.add_argument("--mode", choices=("sample", "sensitivity"), default="sample")
+    ap.add_argument(
+        "--mode", choices=("sample", "sensitivity", "review"), default="sample"
+    )
+    ap.add_argument("--since", default="", help="review：1800 选股日起（含）")
+    ap.add_argument("--until", default="9999-12-31", help="review：1800 选股日止（含）")
+    ap.add_argument(
+        "--diff", default="", help="review：与旧版 summary.json 对比，写 diff.md"
+    )
     ap.add_argument(
         "--pool",
         choices=("jlow", "all"),
@@ -714,6 +879,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         rep,
         Path(args.out_dir) if args.out_dir else ARTIFACTS / "reports" / "calibration",
     )
+    if args.mode == "review" and args.diff:
+        old = json.loads(Path(args.diff).read_text(encoding="utf-8-sig"))
+        new = json.loads((d / "summary.json").read_text(encoding="utf-8"))
+        (d / "diff.md").write_text(
+            _diff_md(diff_reports(old, new), rep["module"]), encoding="utf-8"
+        )
+        print(f"[calib_probe] 差异 ⇒ {d / 'diff.md'}")
     print(
         f"[calib_probe] {rep['module']} {rep['mode']} n_bars={rep['n_bars']} errors={rep['n_errors']} "
         f"no_effect={rep['no_effect_params']} ⇒ {d}"
