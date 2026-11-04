@@ -158,6 +158,9 @@ git commit -m "batch b1 reads" && git push
 
 ## 第二批预告（不在第一批，第一批判定段读完后再跑）
 
+> **顺序（owner 2026-11-04）**：R40 跑完 → **#121 定义校准**（持仓 N 结构 → `b1_thresholds` → 其余 P0 选股因子，升版后）→ 第二批 R47/R48/R49 → R50。
+> 第二批读数对应校准后的因子版本（provenance `factor_versions` 可查），免先跑后重跑。
+
 - R47 浮盈保护扫描（只读挖掘 A∪B）：`uv run python -m custos.research plan_rules_replay --scan-protect --trade-dist --load-workers 4 --score-workers 8 --tag r47_scan`，
   然后 `result_digest r47_scan <产物>/_plan_protect_scan__r47_scan.json --tag r47_scan --write --backfill`（报告自动生成）。
 - R48 + R49 一条命令（只读挖掘 A∪B；v0.444：R49 内部完整跑一遍 R48 含 200 臂池，同次落 R48 产物，读数与单独跑一致——**不要再单独跑 R48**，否则全宇宙加载 + 重放重复一次）：
