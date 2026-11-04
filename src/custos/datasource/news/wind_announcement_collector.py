@@ -46,16 +46,37 @@ def _query_text(name: str, code: str, start: datetime, end: datetime) -> str:
     )
 
 
-def announcement_records(raw: dict[str, Any], *, content_limit: int = CONTENT_LIMIT):
-    """按 CSV 表头解析，不按列位置；正文只截选，明确保留完整缓存位置。"""
+def announcement_records(
+    raw: dict[str, Any],
+    *,
+    content_limit: int = CONTENT_LIMIT,
+    cache_path: Path | None = None,
+):
+    """按表头解析；完整 CSV 由本脚本落盘，不依赖插件附件实际持久化。"""
     header, rows = csv_table(raw)
     required = {"content", "date", "title", "url"}
     if not required.issubset(header):
         raise KimiWorkDataError(f"公告响应缺少表头: {sorted(required - set(header))}")
     files = raw.get("files") or []
-    cache_file = (
-        str(files[0].get("name") or "") if files and isinstance(files[0], dict) else ""
-    )
+    if cache_path is None:
+        cache_file = (
+            str(files[0].get("name") or "")
+            if files and isinstance(files[0], dict)
+            else ""
+        )
+    else:
+        content = (
+            str(files[0].get("content") or "")
+            if files and isinstance(files[0], dict)
+            else ""
+        )
+        if not content.strip():
+            raise KimiWorkDataError("公告成功响应缺少完整 CSV 内容")
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = cache_path.with_suffix(cache_path.suffix + ".tmp")
+        temporary.write_bytes(content.encode("utf-8"))
+        temporary.replace(cache_path)
+        cache_file = str(cache_path)
     records = []
     for row in rows:
         item = dict(zip(header, row))
@@ -128,7 +149,7 @@ def collect(
                     "file_path": str(cache_file),
                 },
             )
-            records = announcement_records(raw)
+            records = announcement_records(raw, cache_path=cache_file)
         except KimiWorkDataError as exc:
             stopped = True
             message = f"{type(exc).__name__}: {exc}"
