@@ -361,7 +361,15 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 | 交易日 17:00 | `automation_44f0790b-93f4-48f4-a7ec-1e366bb8fdde` | `run_1700` + 最终复盘飞书投递；日历门退出码 3 静默跳过 |
 | 每周五 14:35 | `automation_a0d643ef-60f3-4fa0-a042-b9f20a01d9ea` | 本地通达信交易日历 `--require-refresh` |
 
-报告投递统一验收 `artifacts/reports/daily/YYYY-MM-DD/` 下非空文件，缺失或投递失败即任务失败，不得以旧路径/空报告冒充成功。原同名 `local_conversation(reuse)` 任务均停用保留作历史与回退，**不得与对应新任务同时启用**。定时触发实测可能不带 `defaultInput`，脚本以 `TASK_PIPELINES` 按上述任务 ID 选择管线；更换任务 ID 必须同步该映射。08:50 公告/RSS 语义研判不在本次无聊天迁移范围内。
+报告投递统一验收 `artifacts/reports/daily/YYYY-MM-DD/` 下非空文件，缺失或投递失败即任务失败，不得以旧路径/空报告冒充成功。原同名 `local_conversation(reuse)` 任务均停用保留作历史与回退，**不得与对应新任务同时启用**。定时触发实测可能不带 `defaultInput`，脚本以 `TASK_PIPELINES` 按上述任务 ID 选择管线；更换任务 ID 必须同步该映射。
+
+### 08:50 无聊天独立研判（v0.490）
+
+活动任务 `automation_ff0b95c4-7019-4af7-8892-e40d3499c831`，每日 08:50 以独立后台运行（无聊天窗口、无跨日对话历史），万得插件与模型研判仍按次消耗 credits：
+
+1. `scripts/automation/premarket_pipeline.py collect` 依次执行 `run_0850` 和 `wind_announcement_collector`；后者以固定 Wind 工具逐持仓查询公告，按 CSV 表头解析，任一失败即停且不紧密重试，其余持仓标 `skipped`，材料落 `artifacts/cache/premarket/`，完整公告落 `artifacts/cache/kimiwork/`。
+2. 模型只读当日 RSS 候选、主题聚类与公告摘要；长公告仅重大风险需要时读完整缓存。写出情报后必须以 `premarket_pipeline.py validate` 验收，未通过不得报成功；研判不进入交易权限。
+3. 当日有效情报已存在时返回 `already_completed`，不重复采集、不调用插件、不覆盖文件；人工确需重做才用 `collect --force`。原 08:50 `local_conversation(reuse)` 任务已停用保留，禁止与新任务同时启用。
 
 所有任务必须先检查交易日或统计周期完整性。任务失败应记录原因并告警，不得以空报告冒充成功。
 
