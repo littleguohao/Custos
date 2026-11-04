@@ -78,20 +78,33 @@ class _StripDoc(ast.NodeTransformer):
     visit_Module = visit_FunctionDef = visit_AsyncFunctionDef = visit_ClassDef = _strip
 
 
+def _canon(node: object) -> str:
+    """AST → 规范串：只列非空字段（None / 空列表一律省略），不依赖 ``ast.dump`` 的版本默认。
+
+    为什么不用 ``ast.dump``：3.12+ 给 def/class 加了 ``type_params`` 字段（PEP 695），
+    3.13 起 ``ast.dump`` 默认 ``show_empty=False`` 省略空列表与 None——同一份源码在
+    3.11 / 3.12 / 3.13 得到三种 dump（v0.486 3.11 生成表、生产机 3.12 全红；v0.488 只剔
+    type_params 后 3.13 仍全红）。自己序列化、统一省略空值，三版本逐字节一致。
+    """
+    if isinstance(node, ast.AST):
+        parts = []
+        for f in node._fields:
+            v = getattr(node, f, None)
+            if v is None or (isinstance(v, list) and not v):
+                continue
+            parts.append(f"{f}={_canon(v)}")
+        return f"{type(node).__name__}({','.join(parts)})"
+    if isinstance(node, list):
+        return "[" + ",".join(_canon(x) for x in node) + "]"
+    return repr(node)
+
+
 def source_digest(path: Path) -> str:
     """规范化 AST 摘要：注释、空白、docstring 改动不影响；任何代码改动都会变。
 
-    跨 Python 版本稳定：3.12+ 给 def/class 节点新增 ``type_params`` 字段（PEP 695），
-    为空时（未用泛型语法）从 dump 剔除——否则同一份源码在 3.11 与 3.12+ 摘要不同
-    （v0.486 曾因此全表漂移：表在 3.11 生成、生产机 3.12 复核全红）。"""
+    跨 Python 版本稳定（3.11 / 3.12 / 3.13 钉测同一期望值），口径见 ``_canon``。"""
     tree = _StripDoc().visit(ast.parse(path.read_text(encoding="utf-8")))
-    for node in ast.walk(tree):
-        tp = getattr(node, "type_params", None)
-        if tp is not None and not tp:
-            delattr(node, "type_params")
-    return hashlib.blake2b(
-        ast.dump(tree, include_attributes=False).encode(), digest_size=10
-    ).hexdigest()
+    return hashlib.blake2b(_canon(tree).encode(), digest_size=10).hexdigest()
 
 
 def load() -> dict[str, Any]:
