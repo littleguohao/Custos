@@ -112,7 +112,6 @@ def test_default_uses_push2_and_never_calls_natural_language(monkeypatch, tmp_pa
         (tmp_path / "2026-10-30_fund_flow_rank.json").read_text(encoding="utf-8")
     )
     assert out["stock_source"] == "eastmoney_direct_api"
-    assert out["stock_fallback"] is False
     assert out["source"] == "eastmoney_direct_api"
     assert out["sector_rank_status"]["industry"]["status"] == "ok"
 
@@ -134,7 +133,6 @@ def test_kimiwork_source_is_explicit_diagnostic_only(monkeypatch, tmp_path):
     )
     assert seen["target_date"] == "2026-10-30"
     assert out["stock_source"] == "kimiwork_dongcai_screener"
-    assert out["stock_fallback"] is False
 
 
 def test_shadow_compare_tracks_order_and_rounding():

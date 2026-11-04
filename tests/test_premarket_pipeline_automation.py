@@ -85,6 +85,29 @@ def test_full_content_cache_is_written_by_collector(tmp_path: Path):
     assert records[0]["full_content_cache"] == str(cache_path)
 
 
+def test_empty_first_file_shell_falls_through_to_content_file(tmp_path: Path):
+    """files[0] 是空壳、files[1] 才有表：解析与缓存写入口径一致（都取首个非空）。"""
+    raw = _raw(
+        [
+            {
+                "content": "完整公告正文",
+                "date": DAY,
+                "doc_type": "announcement",
+                "title": "标题",
+                "url": "https://example",
+            }
+        ]
+    )
+    raw["files"] = [{"name": "empty.csv", "content": ""}] + raw["files"]
+    cache_path = tmp_path / "actual.csv"
+
+    records = collector.announcement_records(raw, cache_path=cache_path)
+
+    assert records[0]["title"] == "标题"
+    assert cache_path.read_bytes() == raw["files"][1]["content"].encode("utf-8")
+    assert records[0]["full_content_cache"] == str(cache_path)
+
+
 def test_announcement_failure_stops_without_retry(monkeypatch, tmp_path: Path):
     positions = tmp_path / "positions.json"
     positions.write_text(

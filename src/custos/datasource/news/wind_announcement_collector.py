@@ -58,23 +58,23 @@ def announcement_records(
     if not required.issubset(header):
         raise KimiWorkDataError(f"公告响应缺少表头: {sorted(required - set(header))}")
     files = raw.get("files") or []
+    # 与 csv_table 同一选择口径：第一个**非空**附件（files[0] 可能为空壳）。
+    full = next(
+        (
+            f
+            for f in files
+            if isinstance(f, dict) and str(f.get("content") or "").strip()
+        ),
+        None,
+    )
     if cache_path is None:
-        cache_file = (
-            str(files[0].get("name") or "")
-            if files and isinstance(files[0], dict)
-            else ""
-        )
+        cache_file = str(full.get("name") or "") if full else ""
     else:
-        content = (
-            str(files[0].get("content") or "")
-            if files and isinstance(files[0], dict)
-            else ""
-        )
-        if not content.strip():
+        if full is None:
             raise KimiWorkDataError("公告成功响应缺少完整 CSV 内容")
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         temporary = cache_path.with_suffix(cache_path.suffix + ".tmp")
-        temporary.write_bytes(content.encode("utf-8"))
+        temporary.write_bytes(str(full["content"]).encode("utf-8"))
         temporary.replace(cache_path)
         cache_file = str(cache_path)
     records = []

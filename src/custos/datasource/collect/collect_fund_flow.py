@@ -121,7 +121,6 @@ def main(argv=None) -> int:
     OUT = MARKET_DIR / f"{today}_fund_flow_rank.json"
 
     # 自然语言妙想不再进入 live 主链；auto 仅为旧配置兼容别名。
-    stock_fallback = False
     if args.source == "kimiwork":
         stocks = kimiwork_stock_rows(target_date=today)
         stock_source = "kimiwork_dongcai_screener"
@@ -172,7 +171,6 @@ def main(argv=None) -> int:
             else "eastmoney_direct_api"
         ),
         "stock_source": stock_source,
-        "stock_fallback": stock_fallback,
     }
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
