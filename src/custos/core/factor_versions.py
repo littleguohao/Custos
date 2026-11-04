@@ -88,7 +88,7 @@ def source_digest(path: Path) -> str:
     for node in ast.walk(tree):
         tp = getattr(node, "type_params", None)
         if tp is not None and not tp:
-            del node.type_params
+            delattr(node, "type_params")
     return hashlib.blake2b(
         ast.dump(tree, include_attributes=False).encode(), digest_size=10
     ).hexdigest()
