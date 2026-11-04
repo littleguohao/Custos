@@ -18,7 +18,6 @@
 | 117 | 组合层新方向（单元待立，编号届时分配；R49 已用于逆向画像）：选股无区分力 + 收益靠右尾 ⇒ 铺宽还是集中（top-N / 持仓数 / 单票仓位）× 0AMV 状态化仓位（含 #86 ④盈亏比排序服务仓位）；R3「召回瓶颈未研究」的接续 | P2 | 挂起 | 第二批（R47/R48/R49）读完后起草预注册；工具准备已做（v0.460：`exposure_fn` 状态化仓位 + `scan_portfolio_grid` 网格与平分区间），能力盘点与局限见准备文档 | owner 2026-10-21 方向盘点；[R3](governance/research/R3_selection_discriminability_recall.md)；[准备文档](governance/research/portfolio_layer_prep.md) |
 | 109 | R40 v2 重跑：按 R40「v2 重跑修订」节在挖掘 A∪B 选型（代码口径 v0.382~0.387），过 C1~C4 再入判定段批次 | P2 | 生产机 | 现在发车：runbook ③ 命令（带 `--load-workers 4 --score-workers 8`，与 R45 共用 V0 分缓存）；R45 已判 falsified，第一批只剩 R40 | R40 v2 重跑修订节 |
 | 60 | plan 信号并入 SIGNAL_ORDER 与否。判据（两条同时成立）：①实现一致性——影子台账非 default 事件 ≥5 个交易日无异常；②规则有效性——R41 已判 falsified（v0.351）路径关闭，只剩 `plan_shadow_review` 累计 K=20 个独立事件（段头计、≥5 只持仓）均值 Δret₅ ≥ 0（凑不满 K ⇒ ②不成立 ⇒ 不并轨）。default 来源永不出 plan 信号；并轨=独立提交、只改 SIGNAL_ORDER | P2 | 观察中 | 影子事件持续累计，攒满或 60 交易日到期后 owner 定夺 | [R41](governance/research/R41_position_plan_rules_replay.md)；owner 2026-10-09 判据；v0.310/0.311/0.314/0.351 |
-| 76 | #67 接口收敛的最后保险：1800 候选表标注列影子对照，非 BJ 宇宙逐位一致攒满 10 个交易日即闭环（进度 3/10，09-24 为止） | P3 | 生产机 | v0.450 起挂进 run_1800 末尾自动跑（WARN-only），无需手工；攒满即闭环 | [设计稿](governance/strategy/_factors/interface_unification_plan.md)；v0.239 / v0.295 / v0.450 |
 | 80 | LLM 转岗：从「提数值表达式」改为「读失败模式、提机制假设」（证据：表达式提案不比随机好，Phase 1 诊断是机制级洞察）；原落点 R43 已 falsified | P3 | 挂起 | 落点改为 R49 线索清单 / R50 漏斗与兑现表（owner 2026-10-26）：两者出读数后由 LLM 读 `a_only`/漏斗流失段提机制假设、不碰数值，假设须另行预注册 | owner 2026-10-14 / 2026-10-26 |
 | 114 | R47 挖掘段扫描：工具已落地 v0.434（`plan_rules_replay --scan-protect`）；第一批判定段读完后跑，命令见 runbook「第二批预告」 | P2 | 生产机 | 排在 #121 定义校准（P0 选股因子升版）之后跑（owner 2026-11-04：校准先于第二批，免重跑）；之后 r47_scan + 摘要入库 | [R47](governance/research/R47_profit_protection_breakeven_trail.md) |
 | 115 | R48 挖掘段跑数：工具已落地 v0.439（`tail_feature_study`）；与 R47 同排第二批，命令见 runbook「第二批预告」 | P2 | 生产机 | 排在 #121 定义校准之后（owner 2026-11-04）；之后 r48_v1（随 R49 `--r48-tag` 同次落）+ 摘要入库 | [R48](governance/research/R48_tail_entry_features.md) |
@@ -33,6 +32,7 @@
 编号被别处引用（如「TODO #73」）时从这里追。2026-10-12 改版前的全文见 `git show a10d326:TODO.md`。
 
 | # | 原事项 | 闭环日期 | 去处 |
+| 76 | #67 接口收敛最后保险：1800 标注列影子对照 | 2026-11-04 | v0.495：owner 选 (a) 闭环（进度停在 3/10；#67 一月无回归、#121 有意改判定后旧基线失效、v0.478 单表改版致抽取半失效），run_1800 摘除调用 |
 | 116 | 开发机挖掘段数据快照 | 2026-10-29 | v0.453 导出+快照模式+硬闸；验收三轮后 owner 选 (b) 接受 tick 级微差，v0.468 容差口径对拍通过（严格 0 / 翻转 0 / 缺 0）；正式读数仍以生产机为准 |
 | 104 | R10 margin 按已实现口径重算 | 2026-10-30 | report-only 重算（v0.383+ 剔 open_end）：「可用 margin 只在叠 0AMV」仍成立（纯出场全负）；pct_12_amv +5.6→+2.9pp 跌破可用线，可用清单收窄为 4 个；回填 R10 头部审计注记 |
 | 107 | R1/R2 组合层 baseline 对照 tie-seed 0~19 重跑报区间 | 2026-10-30 | 4 跑 + tie_seed_summary（tie_seed_r1r2/）：baseline CAGR p50 +1.0%（A）/+3.2%（B）区间宽；配对 reversal_quality−baseline Δ p50 −99.2%/−47.3%（种子胜率 0%/15%）——rqi 组合层稳定负贡献；审计注记已回填（commit 542c323） |

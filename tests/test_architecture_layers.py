@@ -472,7 +472,7 @@ class TestNoStaleScriptPaths:
             for m in re.finditer(r'/\s*"([a-z_0-9]+)"\s*/\s*"([a-z_0-9]+\.py)"', src):
                 d, name = m.group(1), m.group(2)
                 # scripts/<dir>/<name>.py 也是合法引用位（运维/开发脚本，如
-                # run_1800 的影子对照 scripts/dev/shadow_1800_compare.py）
+                # scripts/dev/*.py 这类运维/开发脚本）
                 if (
                     (d, name) not in existing
                     and not (ROOT / d / name).exists()
