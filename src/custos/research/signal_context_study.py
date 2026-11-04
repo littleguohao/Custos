@@ -14,8 +14,9 @@ pct12_so5_bbi2（pct12 止损 + 分批止盈 0.5 + BBI 连破 2 根清仓，cost
   ⚠️ pinned 批（amv_long_only=True）只在做多期进场，市场腿恒为做多，该批内此维度
   实际退化为「基本面优 ∧ 技术强」（报告 meta 里给出实际做多占比作证）。
 - **空头前哨 bear_outpost** = 0AMV 空头 ∧ 基本面优 ∧ 技术强——live 定义见
-  candidate_table._bear_outposts（is_bear ∧ tier=优 ∧ resonance_4leg.technical，
-  其中 technical = tech_level==强 = 技术分≥60）。只可能存在于 nopin 批
+  candidate_table 单表「状态」列的 outpost_codes 计算（is_bear ∧ tier=优 ∧
+  resonance_4leg.technical，其中 technical = tech_level==强 = 技术分≥60，
+  且不在 watch_all；v0.478 前为 _bear_outposts 分池函数）。只可能存在于 nopin 批
   （pinned 批没有空头期成交），是其专属数据源。
 - **技术高分 tech_high** = as-of 技术分 ≥60 单独看。
 

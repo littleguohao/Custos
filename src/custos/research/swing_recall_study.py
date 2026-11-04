@@ -1459,7 +1459,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--min-n",
         type=int,
         default=MIN_N,
-        help="线索筛选信号数门槛（写死 1000，测试注入用）",
+        help="测试注入簇数门（生产勿动：缺省走 v0.477 的 MIN_CLUSTERS=30；"
+        "传与 MIN_N 不同的值会把它当成簇数门，不是信号数门）",
     )
     ap.add_argument("--seed", type=int, default=20261023)
     ap.add_argument(
