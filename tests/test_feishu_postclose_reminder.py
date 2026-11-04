@@ -143,7 +143,12 @@ def test_missing_records_send_targeted_reminder(
     monkeypatch.setattr(reminder, "_record_status", lambda _day: status)
     monkeypatch.setattr(reminder, "_send_text", sent.append)
 
-    artifact = reminder._run_for_day(DAY)
+    artifact = reminder._run_collection_day(
+        DAY,
+        lambda _ctx: {"artifact": {"new_messages": 0, "actions": []}},
+        sleep_fn=lambda _s: None,
+        max_polls=1,
+    )
 
     assert artifact["sent"] is True
     assert artifact["missing"] == expected_missing
@@ -151,46 +156,37 @@ def test_missing_records_send_targeted_reminder(
     assert expected_text in sent[0]
 
 
-def test_complete_records_stay_silent(monkeypatch: pytest.MonkeyPatch):
-    sent: list[str] = []
+def test_complete_message_cannot_be_generated():
+    with pytest.raises(ValueError, match="记录齐全"):
+        reminder._message(DAY, [])
+
+
+def test_collection_already_complete_does_not_remind_or_poll(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    ingests: list[int] = []
     monkeypatch.setattr(reminder, "_is_trading_day", lambda _day: True)
     monkeypatch.setattr(
         reminder, "_record_status", lambda _day: {"amv": True, "trades": True}
     )
-    monkeypatch.setattr(reminder, "_send_text", sent.append)
 
-    artifact = reminder._run_for_day(DAY)
+    def ingest(_ctx):
+        ingests.append(1)
+        return {"artifact": {"new_messages": 0, "actions": []}}
 
-    assert artifact == {
-        "date": DAY,
-        "trading_day": True,
-        "sent": False,
-        "amv_confirmed": True,
-        "trade_recorded": True,
-        "missing": [],
-        "reason": "当日 0AMV 与交易记录均已确认，未发送",
-    }
-    assert sent == []
-
-
-def test_non_trading_day_stays_silent_without_reading_ledgers(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.setattr(reminder, "_is_trading_day", lambda _day: False)
-    monkeypatch.setattr(
-        reminder,
-        "_record_status",
-        lambda _day: pytest.fail("非交易日不应读取台账"),
-    )
-    artifact = reminder._run_for_day(
+    artifact = reminder._run_collection_day(
         DAY,
-        ingest_fn=lambda _ctx: pytest.fail("非交易日不应接收入站消息"),
+        ingest,
+        sleep_fn=lambda _seconds: pytest.fail("已齐时不应等待"),
     )
+    assert len(ingests) == 1  # 初次接收仍执行：回复可能在 15:15 前已到
+    assert artifact["completed"] is True
+    assert artifact["stopped_reason"] == "already_complete"
     assert artifact["sent"] is False
-    assert artifact["trading_day"] is False
+    assert artifact["poll_count"] == 0
 
 
-def test_ingest_precedes_status_check_and_can_suppress_reminder(
+def test_collection_initial_ingest_precedes_status_and_can_suppress_reminder(
     monkeypatch: pytest.MonkeyPatch,
 ):
     events: list[str] = []
@@ -209,63 +205,40 @@ def test_ingest_precedes_status_check_and_can_suppress_reminder(
 
     def read_status(_day):
         events.append("status")
-        return status
+        return dict(status)
 
     monkeypatch.setattr(reminder, "_is_trading_day", lambda _day: True)
     monkeypatch.setattr(reminder, "_record_status", read_status)
-    monkeypatch.setattr(
-        reminder,
-        "_send_text",
-        lambda _text: events.append("send"),
+    monkeypatch.setattr(reminder, "_send_text", lambda _text: events.append("send"))
+    artifact = reminder._run_collection_day(
+        DAY, ingest, sleep_fn=lambda _s: pytest.fail("已收齐不应轮询")
     )
-    artifact = reminder._run_for_day(DAY, ingest_fn=ingest)
 
     assert events == ["ingest", "status"]
     assert artifact["sent"] is False
-    assert artifact["ingest"]["new_messages"] == 1
+    assert artifact["stopped_reason"] == "already_complete"
+    assert artifact["initial_ingest"]["new_messages"] == 1
 
 
-def test_still_missing_after_ingest_sends_reminder(
+def test_collection_still_missing_after_initial_ingest_sends_reminder(
     monkeypatch: pytest.MonkeyPatch,
 ):
     sent: list[str] = []
+    ingests: list[int] = []
     monkeypatch.setattr(reminder, "_is_trading_day", lambda _day: True)
     monkeypatch.setattr(
         reminder, "_record_status", lambda _day: {"amv": False, "trades": False}
     )
     monkeypatch.setattr(reminder, "_send_text", sent.append)
-    artifact = reminder._run_for_day(
-        DAY,
-        ingest_fn=lambda _ctx: {
-            "artifact": {"new_messages": 0, "actions": [], "receipt_sent": False}
-        },
-    )
-    assert artifact["sent"] is True
-    assert artifact["ingest"]["new_messages"] == 0
-    assert len(sent) == 1
-
-
-def test_complete_message_cannot_be_generated():
-    with pytest.raises(ValueError, match="记录齐全"):
-        reminder._message(DAY, [])
-
-
-def test_collection_already_complete_does_not_remind_or_poll(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.setattr(reminder, "_is_trading_day", lambda _day: True)
-    monkeypatch.setattr(
-        reminder, "_record_status", lambda _day: {"amv": True, "trades": True}
-    )
     artifact = reminder._run_collection_day(
         DAY,
-        lambda _ctx: pytest.fail("已齐时不应启动入站轮询"),
-        sleep_fn=lambda _seconds: pytest.fail("已齐时不应等待"),
+        lambda _ctx: ingests.append(1) or {"artifact": {"new_messages": 0}},
+        sleep_fn=lambda _s: None,
+        max_polls=1,
     )
-    assert artifact["completed"] is True
-    assert artifact["stopped_reason"] == "already_complete"
-    assert artifact["sent"] is False
-    assert artifact["poll_count"] == 0
+    assert artifact["sent"] is True
+    assert len(sent) == 1
+    assert len(ingests) == 2  # 初次接收 + 第 1 轮轮询
 
 
 def test_collection_stops_immediately_after_second_poll(
@@ -278,7 +251,7 @@ def test_collection_stops_immediately_after_second_poll(
 
     def ingest(_ctx):
         polls["count"] += 1
-        if polls["count"] == 2:
+        if polls["count"] == 3:  # 初次接收 + 第 2 轮轮询
             status.update(amv=True, trades=True)
         return {"artifact": {"new_messages": 1, "actions": [], "receipt_sent": False}}
 
@@ -324,6 +297,11 @@ def test_collection_non_trading_day_does_not_remind_or_poll(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(reminder, "_is_trading_day", lambda _day: False)
+    monkeypatch.setattr(
+        reminder,
+        "_record_status",
+        lambda _day: pytest.fail("非交易日不应读取台账"),
+    )
     artifact = reminder._run_collection_day(
         DAY,
         lambda _ctx: pytest.fail("非交易日不应接收"),

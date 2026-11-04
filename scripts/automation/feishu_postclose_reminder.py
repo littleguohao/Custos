@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""盘后补数单任务：15:15 缺项提醒一次，10 分钟轮询，收齐即停，17:00 截止。
+"""盘后补数单任务：15:15 先接收入站回复、再查台账，缺项提醒一次，10 分钟轮询，收齐即停，17:00 截止。
 
-每日只运行这一轮；开始时已齐则不提醒也不轮询。入站接收、台账登记、状态检查
-均为确定性脚本，不调用模型，不保留常驻 10 分钟轮询。
+每日只运行这一轮；首次接收后已齐则不提醒也不轮询（15:15 前已到的回复会先落台账，
+不产生多余提醒）。入站接收、台账登记、状态检查均为确定性脚本，不调用模型，
+不保留常驻 10 分钟轮询。
 """
 
 from __future__ import annotations
@@ -211,40 +212,6 @@ def _send_text(text: str) -> None:
     )
 
 
-def _run_for_day(day: str, ingest_fn=None) -> dict:
-    if not _is_trading_day(day):
-        return {
-            "date": day,
-            "trading_day": False,
-            "sent": False,
-            "reason": "非交易日，未发送",
-        }
-    ingest_artifact = None
-    if ingest_fn is not None:
-        ingest_artifact = ingest_fn({}).get("artifact", {})
-    status = _record_status(day)
-    missing = [name for name in ("amv", "trades") if not status[name]]
-    artifact = {
-        "date": day,
-        "trading_day": True,
-        "sent": bool(missing),
-        "amv_confirmed": status["amv"],
-        "trade_recorded": status["trades"],
-        "missing": missing,
-    }
-    if ingest_artifact is not None:
-        artifact["ingest"] = ingest_artifact
-    if not missing:
-        artifact["reason"] = "当日 0AMV 与交易记录均已确认，未发送"
-        return artifact
-    _send_text(_message(day, missing))
-    labels = {"amv": "0AMV", "trades": "交易记录"}
-    artifact["reason"] = (
-        "缺少" + "、".join(labels[name] for name in missing) + "，已发送提醒"
-    )
-    return artifact
-
-
 def _run_collection_day(
     day: str,
     ingest_fn,
@@ -252,7 +219,7 @@ def _run_collection_day(
     sleep_fn=None,
     max_polls: int = 11,
 ) -> dict:
-    """15:15 缺项提醒一次，随后每 10 分钟接收；收齐即停，11 轮后到 17:00 截止。"""
+    """15:15 先接收入站回复、再查台账；缺项提醒一次，随后每 10 分钟接收；收齐即停，11 轮后到 17:00 截止。"""
     if not _is_trading_day(day):
         return {
             "date": day,
@@ -263,6 +230,9 @@ def _run_collection_day(
             "stopped_reason": "non_trading_day",
             "reason": "非交易日，未提醒、未轮询",
         }
+    # 先接收一次（v0.493 回修）：15:15 前已到的回复先落台账再查状态，
+    # 否则已回复的 owner 会收到一条多余提醒，且回复要等 10 分钟后才被接收。
+    initial_ingest = ingest_fn({}).get("artifact", {})
     status = _record_status(day)
     initial_missing = [name for name in ("amv", "trades") if not status[name]]
     if not initial_missing:
@@ -277,7 +247,8 @@ def _run_collection_day(
             "trade_recorded": True,
             "initial_missing": [],
             "missing": [],
-            "reason": "15:15 两项已齐，未提醒、未启动轮询",
+            "initial_ingest": initial_ingest,
+            "reason": "15:15 首次接收后两项已齐，未提醒、未启动轮询",
         }
 
     _send_text(_message(day, initial_missing))
@@ -300,6 +271,7 @@ def _run_collection_day(
                 "trade_recorded": True,
                 "initial_missing": initial_missing,
                 "missing": [],
+                "initial_ingest": initial_ingest,
                 "ingest": last_ingest,
                 "reason": f"第 {poll_count} 次轮询后两项收齐，已停止",
             }
@@ -317,6 +289,7 @@ def _run_collection_day(
         "trade_recorded": status["trades"],
         "initial_missing": initial_missing,
         "missing": missing,
+        "initial_ingest": initial_ingest,
         "ingest": last_ingest,
         "reason": "截至 17:00 仍未收齐：" + "、".join(labels[name] for name in missing),
     }

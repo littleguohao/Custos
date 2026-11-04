@@ -3,11 +3,16 @@
 
 每轮（Automation 调用 run(ctx)）：
 1. 拉取单聊最近消息，筛出上次游标之后的**用户**消息，append 落 inbox.jsonl；
-2. 严格格式确定性登记：
-   - 「无交易」类确认 → data/trades/position_confirmations.json[当日]；
+2. 严格格式确定性登记（**归属日 = 消息发送日的 CST 日期，不是运行日**——桥只在
+   15:15–17:00 运行，晚间回复次日才被接收，按运行日会把昨日值写成次日 confirmed）：
+   - 「无交易」类确认 → data/trades/position_confirmations.json[消息日]；
    - 0AMV 数值（文本含 amv 后取数字，或整条消息就是数字）→ 官方唯一写入口
-     amv_state.append_observation（uv run 子进程，cwd=仓库根）；
-   两者同日已登记则跳过（幂等）。
+     amv_state.append_observation（uv run 子进程，cwd=仓库根）；**极值守卫**：
+     |值| > EXTREME_AMV_PCT（±15%）一律不自动登记，回执转人工 --confirm-extreme
+     （owner 手滑发个大数不能直入方向主过滤器台账）；
+   两者同日已登记则跳过（幂等；0AMV 幂等看「消息日已有 confirmed 未 superseded」）。
+   残留歧义：次晨回复严格说在补前一日，按消息日会落到次日——低概率场景，
+   台账支持人工 supersede 修正（owner 2026-11-04 拍板消息日归属方案）。
 3. 文件消息：下载落 inbox_files/；是成交表（含必需列）→ 规范化后走唯一入口
    incremental_ledger.py 入库（幂等可重导）；缺列/非表格 → 只留痕待人工处理。
 4. 飞书回执：登记结果 / 未识别提示。自由文本成交描述**不自动写台账**。
@@ -18,6 +23,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import subprocess
@@ -51,6 +57,10 @@ MESSAGES_URL = "https://open.feishu.cn/open-apis/im/v1/messages"
 
 CST = timezone(timedelta(hours=8))
 HTTP_TIMEOUT = 15
+
+#: 与 market_timing_collector.EXTREME_AMV_PCT 同值：|amv| 超阈值必须人工二次确认，
+#: 桥内不自动登记（脚本无共享 import 路径，两边各一份，改动须同步）。
+EXTREME_AMV_PCT = 15.0
 
 NO_TRADE_RE = re.compile(r"(无|没|未|没有)\s*(交易|成交|操作|买卖)|无交易动作")
 AMV_VALUE_RE = re.compile(
@@ -302,6 +312,42 @@ def _fetch_new_user_messages(token: str, state: dict) -> list[dict]:
     return sorted(out, key=lambda x: x["ts"])
 
 
+def _msg_day(m: dict) -> str:
+    """消息归属日 = 消息发送时间的 CST 日期（不按运行日，防跨日污染台账）。"""
+    return datetime.fromtimestamp(int(m["ts"]) / 1000, CST).date().isoformat()
+
+
+def _has_confirmed_amv(day: str) -> bool:
+    """该日已有 confirmed、未 superseded 且数值有限的 0AMV ⇒ 幂等跳过。
+
+    判定口径与 feishu_postclose_reminder._has_confirmed_amv 一致；两侧各有一份
+    （Automation 按路径加载脚本、无共享 import 路径），改动须同步。
+    """
+    path = REPO / "data" / "market" / "0amv_observations.jsonl"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    for line in lines:
+        try:
+            obs = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(obs, dict) or obs.get("date") != day:
+            continue
+        value = obs.get("amv_change_pct")
+        if (
+            obs.get("quality") == "confirmed"
+            and obs.get("superseded") is not True
+            and str(obs.get("as_of") or day)[:10] == day
+            and isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+        ):
+            return True
+    return False
+
+
 def _register_no_trade(day: str, note: str) -> str:
     data = (
         json.loads(CONFIRM_PATH.read_text(encoding="utf-8"))
@@ -372,21 +418,36 @@ def run(ctx) -> dict:
 
     new_msgs = _fetch_new_user_messages(token, state)
     for m in new_msgs:
+        msg_day = _msg_day(m)
         with INBOX_PATH.open("a", encoding="utf-8", newline="\n") as fh:
-            fh.write(json.dumps({"date": day, **m}, ensure_ascii=False) + "\n")
+            fh.write(
+                json.dumps({"date": msg_day, "run_date": day, **m}, ensure_ascii=False)
+                + "\n"
+            )
         state["last_seen_ms"] = str(max(int(state["last_seen_ms"]), m["ts"]))
         state.setdefault("seen_ids", []).append(m["message_id"])
         if m["msg_type"] == "file":
-            actions.append(_handle_file(token, day, m))
+            actions.append(_handle_file(token, msg_day, m))
             continue
         if m["msg_type"] != "text" or not m["text"]:
             notes.append(f"非文本消息已留痕（type={m['msg_type']}）")
             continue
         kind, amv = _classify(m["text"])
         if kind in ("no_trade", "both"):
-            actions.append(_register_no_trade(day, f"飞书确认（{m['text'][:60]}）"))
+            actions.append(_register_no_trade(msg_day, f"飞书确认（{m['text'][:60]}）"))
         if kind in ("amv", "both") and amv is not None:
-            actions.append(_register_amv(day, amv))
+            if abs(amv) > EXTREME_AMV_PCT:
+                notes.append(
+                    f"0AMV {amv}% 超 ±{EXTREME_AMV_PCT:g}% 极值（疑似看错行/小数点错位），"
+                    "未自动登记；确认无误请人工录入："
+                    f"market_timing_collector --amv {amv} --confirm-extreme"
+                )
+            elif _has_confirmed_amv(msg_day):
+                actions.append(
+                    f"{msg_day} 0AMV 已有 confirmed 记录，本次 {amv}% 跳过（幂等）"
+                )
+            else:
+                actions.append(_register_amv(msg_day, amv))
         if kind == "unknown":
             notes.append(f"未识别（已留痕待核对）：{m['text'][:60]}")
     state["seen_ids"] = state.get("seen_ids", [])[-200:]  # 幂等集合封顶
