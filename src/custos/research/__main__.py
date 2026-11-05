@@ -553,6 +553,9 @@ def _freeze_env() -> dict[str, str]:
     except (OSError, subprocess.SubprocessError):
         head, dirty = "", ""
     env[cf.ENV] = str(path)
+    # 冻结 finder 在 import 期打 WARN，早于各工具 main() 的 stdout/stderr reconfigure；
+    # Windows 控制台默认编码下中文会被转义 ⇒ 子进程一律 UTF-8（与工具自身 reconfigure 同口径）
+    env.setdefault("PYTHONIOENCODING", "utf-8")
     env[cf.ENV + "_HEAD"] = head + ("+dirty" if dirty else "")
     print(
         f"[code-freeze] 代码已冻结 {path.stem}（HEAD {env[cf.ENV + '_HEAD'] or '?'}）"

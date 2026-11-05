@@ -53,7 +53,8 @@ print(json.dumps({
 
 
 def _run(env_extra: dict) -> subprocess.CompletedProcess:
-    env = {**os.environ, **env_extra}
+    # Windows CI 子进程 stderr 默认非 UTF-8（中文 WARN 被转成 \\u 转义）⇒ 显式 UTF-8
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", **env_extra}
     return subprocess.run(
         [sys.executable, "-c", PROBE],
         env=env,
