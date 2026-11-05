@@ -145,7 +145,9 @@ class TestListingAndDispatch:
             **_RUN,
             timeout=180,
         )
-        assert r.returncode == 0 and "backtest_factors.py" in r.stdout
+        # v0.497 起真实 CLI 冻结启动、子工具以 -m 运行 ⇒ usage 里是模块名而非文件名
+        assert r.returncode == 0 and "backtest_factors" in r.stdout.split("\n", 1)[0]
+        assert "[code-freeze]" in r.stderr  # 真实入口默认冻结
 
     def test_dispatch_uses_subprocess_not_import(self):
         """⚠️ 必须 subprocess 而非 import：
