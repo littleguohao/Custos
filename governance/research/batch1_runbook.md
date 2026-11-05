@@ -6,7 +6,7 @@
 
 ## 公共约定
 
-- **开工前 `git pull`**，记下 `git log -1 --oneline`（贴回时附上）；跑数期间不要在同一工作目录 pull（懒加载模块会混跑新旧代码）。
+- **开工前 `git pull`**，记下 `git log -1 --oneline`（贴回时附上）；🔄 原「跑数期间不要在同一工作目录 pull」已放宽：v0.497 起经入口启动即冻结代码，跑数期间可以 pull（见下「代码冻结」）；**确认 stderr 首行有 `[code-freeze]`**，没有就是没冻结，仍勿 pull。
 - 长任务一律脱钩后台（Windows：`Start-Process`；见 R36 附录 2026-09-25 教训），stdout/stderr 落文件。
 - 每条命令的 stderr 里 `[TIME]` / `[MEM]` 行一起贴回（#112 加载 / 评估耗时占比）。
 - **分布画像（v0.422，描述性副读数，不进判据）**：R39 / R40 / R44 / R45 命令加 `--trade-dist`，跑完多出一份摘要：
@@ -97,6 +97,8 @@ uv run python -m custos.research factor_exit_study --tag r39_v2_pre \
 #   （artifacts/cache/v0_score/<源码哈希>/，键 = as-of 帧内容摘要，代码一改自动换目录）——R40/R45/R44/R47~R50
 #   同票同信号日只算一次，后跑的研究大部分命中。磁盘量级：每 bar 约 50 字节。CUSTOS_V0_SCORE_CACHE=off 可关。
 # ③ R40 预演（46 门 × 5 档；随机臂成簇抽样 v0.399/0.409）
+#   2026-11-05 首跑失败（10-26 前旧代码进程 + 跑数中 pull ⇒ 报告阶段 ImportError，无产物）⇒ 按本命令以 v0.497+ 重跑；
+#   --warm-procs 取物理核数 − 2（预热进程并行，读数逐位不变、不进配置哈希；旧 --load-workers 线程受 GIL 只吃 ~1 核）
 uv run python -m custos.research bear_regime_study --tag r40_v2_pre --gates all --warm-procs <物理核数-2> --score-workers 8 \
   --mining-start <SEG_A_START> --mining-end 2016-12-31 \
   --judgment-start 2022-01-01 --judgment-end 2026-09-04
