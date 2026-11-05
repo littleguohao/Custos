@@ -1172,3 +1172,64 @@ class TestFetchBatchReusesConnection:
         out = af.fetch_xdxr_batch(["600000", "000001", "600519"], on_error="skip")
         assert "000001" not in out
         assert set(out) == {"600000", "600519"}
+
+
+# ---------------------------------------------------------------------------
+# 网络挂死兜底（2026-11-05 1800 事故）：mootdx 默认 auto_retry 遇错重连重试 +
+# 对端慢吐包时单点可挂数小时 ⇒ 连接显式 auto_retry=False / raise_exception=True，
+# 批量带整批硬上限（须小于外层 stage 600s 杀树锤）
+# ---------------------------------------------------------------------------
+
+
+def _fake_quotes_factory(monkeypatch, captured: dict, per_call):
+    """把 mootdx Quotes.factory 换成记录参数的假连接；per_call = get_xdxr_info 行为。"""
+    import mootdx.quotes
+
+    class _Client:
+        def get_xdxr_info(self, market, code):
+            return per_call(code)
+
+    class _FakeQuotes:
+        def __init__(self, **kw):
+            captured.update(kw)
+            self.client = _Client()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        mootdx.quotes.Quotes,
+        "factory",
+        staticmethod(lambda **kw: _FakeQuotes(**kw)),
+    )
+
+
+def test_batch_disables_pytdx_auto_retry(monkeypatch, tmp_path):
+    monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+    captured: dict = {}
+    _fake_quotes_factory(monkeypatch, captured, per_call=lambda code: [])
+    af.fetch_xdxr_batch(["600000"], progress_every=0)
+    assert captured["auto_retry"] is False
+    assert captured["raise_exception"] is True
+
+
+def test_batch_hard_deadline_stops_before_hang(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+    calls: list = []
+    _fake_quotes_factory(
+        monkeypatch, {}, per_call=lambda code: calls.append(code) or []
+    )
+    out = af.fetch_xdxr_batch(
+        ["600000", "600001", "600002"], progress_every=0, deadline_sec=0
+    )
+    assert calls == [] and out == {}, "deadline 到点须一只都不取"
+    assert "硬上限" in capsys.readouterr().err
+
+
+def test_single_fetch_also_disables_auto_retry(monkeypatch, tmp_path):
+    monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+    captured: dict = {}
+    _fake_quotes_factory(monkeypatch, captured, per_call=lambda code: [])
+    af.get_xdxr("600000", refresh=True)
+    assert captured["auto_retry"] is False
+    assert captured["raise_exception"] is True

@@ -446,3 +446,67 @@ class TestCalendarGateContinueOnClosed:
             (tmp_path / "2026-09-19_0905_run_log.json").read_text(encoding="utf-8")
         )
         assert log["status"] == "calendar_failed"
+
+
+# ---------------------------------------------------------------------------
+# run_stage 超时杀整棵进程树（2026-11-05 1800 事故：只杀 uv 壳 ⇒ 孙进程攥着
+# 管道，communicate() 永等 EOF，「600s 超时」退化成永久死锁，整链陪葬 3.3h）
+# ---------------------------------------------------------------------------
+
+import os  # noqa: E402
+import time  # noqa: E402
+
+
+def _pid_alive(pid: int) -> bool:
+    if os.name == "nt":
+        import ctypes
+
+        h = ctypes.windll.kernel32.OpenProcess(
+            0x1000, False, pid
+        )  # QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        ctypes.windll.kernel32.CloseHandle(h)
+        return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+class TestRunStageTimeoutKillsTree:
+    def test_timeout_kills_grandchild_holding_pipes(self, tmp_path):
+        pidfile = tmp_path / "grandchild.pid"
+        grandchild = tmp_path / "gc.py"
+        grandchild.write_text(
+            "import os, time\n"
+            f"open(r'{pidfile}', 'w').write(str(os.getpid()))\n"
+            "time.sleep(300)\n",
+            encoding="utf-8",
+        )
+        child = tmp_path / "child.py"
+        child.write_text(
+            "import subprocess, sys, time\n"
+            f"subprocess.Popen([sys.executable, r'{grandchild}'])\n"
+            "time.sleep(300)\n",
+            encoding="utf-8",
+        )
+        t0 = time.monotonic()
+        r = pipeline_kit.run_stage(
+            [sys.executable, str(child)], "tree", required=False, timeout=2
+        )
+        assert r["timeout"] is True
+        # 修复前：孙进程攥住管道，这里永远回不来（用宽上限防 CI 抖动误判）
+        assert time.monotonic() - t0 < 120
+        for _ in range(50):  # 孙进程启动略慢于主超时，等它落 pid
+            if pidfile.exists():
+                break
+            time.sleep(0.2)
+        assert pidfile.exists(), "孙进程没来得及启动（环境过慢）"
+        pid = int(pidfile.read_text().strip())
+        for _ in range(50):  # 杀树后等系统回收
+            if not _pid_alive(pid):
+                break
+            time.sleep(0.2)
+        assert not _pid_alive(pid), f"孙进程 {pid} 在超时杀树后仍然活着"

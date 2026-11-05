@@ -28,6 +28,7 @@ from typing import NamedTuple
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -36,13 +37,23 @@ from pathlib import Path
 from custos.core.paths import TOOLS, cn_now, is_snapshot_mode, snapshot_root
 
 
-def _as_text(data) -> str:
-    """Normalize subprocess output that may be str, bytes, or None to str."""
-    if data is None:
-        return ""
-    if isinstance(data, bytes):
-        return data.decode("utf-8", errors="replace")
-    return data
+def _kill_process_tree(p: subprocess.Popen) -> None:
+    """超时杀**整棵进程树**（2026-11-05 1800 卡死事故）。
+
+    stage 命令多是 ``uv run python ...``：直接子进程只是 uv 壳，真正干活的是孙进程。
+    旧实现 ``subprocess.run(timeout=)`` 超时只杀壳，随后 ``communicate()`` 等管道 EOF——
+    管道写端被还活着的孙进程攥着 ⇒ 「超时」退化成更糟的永久死锁（refresh_xdxr 段
+    卡死 3.3 小时、整链陪葬）。Windows 用 ``taskkill /T`` 杀树；POSIX 靠
+    ``start_new_session`` 让子孙同组，再 ``killpg``。"""
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(p.pid)],
+            capture_output=True,
+            check=False,
+        )
+    else:  # POSIX：SIGKILL 整组（孙进程与壳同 session）
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
 
 
 def run_stage(
@@ -52,24 +63,34 @@ def run_stage(
     print(" ".join(cmd))
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
+    popen_kw: dict = {}
+    if sys.platform != "win32":
+        popen_kw["start_new_session"] = True  # 孙进程同组，killpg 才杀得到整树
+    p = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        **popen_kw,
+    )
     timed_out = False
     try:
-        p = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-            timeout=timeout,
-        )
-        stdout, stderr, returncode = p.stdout, p.stderr, p.returncode
-    except subprocess.TimeoutExpired as e:
+        stdout, stderr = p.communicate(timeout=timeout)
+        returncode = p.returncode
+    except subprocess.TimeoutExpired:
         timed_out = True
-        stdout = _as_text(e.stdout)
-        stderr = _as_text(e.stderr)
+        _kill_process_tree(p)
+        try:
+            # 树死绝 ⇒ 管道 EOF，已读到的部分输出一并返回（CPython 文档形态）
+            stdout, stderr = p.communicate(timeout=30)
+        except subprocess.TimeoutExpired:  # 极端：管道仍不闭，杀本体兜底
+            p.kill()
+            stdout, stderr = p.communicate()
         returncode = None
-        print(f"[TIMEOUT] {name} exceeded {timeout}s, process killed")
+        print(f"[TIMEOUT] {name} exceeded {timeout}s, process tree killed")
     if stdout:
         print(
             stdout.encode("utf-8", errors="replace").decode("utf-8", errors="replace")

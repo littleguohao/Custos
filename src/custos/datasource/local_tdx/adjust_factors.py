@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import pathlib
 import sys
+import time
 from typing import Any, Optional
 
 import numpy as np
@@ -311,7 +312,9 @@ def get_shares_events(
         from mootdx.quotes import Quotes
 
         c6 = str(code)[:6]
-        q = Quotes.factory(market="std", timeout=timeout)
+        q = Quotes.factory(
+            market="std", timeout=timeout, auto_retry=False, raise_exception=True
+        )
         # 显式传 market —— 见 _tdx_market（mootdx 把 920xxx 判成沪市 ⇒ 取到空）
         raw = q.client.get_xdxr_info(_tdx_market(c6), c6)
     except Exception as e:  # noqa: BLE001
@@ -354,7 +357,9 @@ def fetch_xdxr(code: str, timeout: int = 10) -> list[dict[str, Any]]:
         from mootdx.quotes import Quotes
 
         c6 = str(code)[:6]
-        q = Quotes.factory(market="std", timeout=timeout)
+        q = Quotes.factory(
+            market="std", timeout=timeout, auto_retry=False, raise_exception=True
+        )
         # 显式传 market —— 不走 q.xdxr() 的内部推断（它把 920xxx 判成沪市）
         df = q.client.get_xdxr_info(_tdx_market(c6), c6)
     except Exception as e:  # noqa: BLE001
@@ -368,6 +373,7 @@ def fetch_xdxr_batch(
     timeout: int = 10,
     progress_every: int = 200,
     on_error: str = "skip",
+    deadline_sec: float = 480.0,
 ) -> dict[str, list[dict[str, Any]]]:
     """批量取权息并写缓存，**复用同一个 Quotes 连接**。
 
@@ -375,6 +381,12 @@ def fetch_xdxr_batch(
     有几百只候选，逐只新建连接会把一个 <1s 的操作拖成几分钟。这里建一次连接跑完全部。
 
     ``on_error="skip"`` 单只失败跳过并计数；``"raise"`` 立即中断。
+
+    网络挂死兜底（2026-11-05 1800 卡死事故）：连接显式 ``auto_retry=False,
+    raise_exception=True``——pytdx 默认 auto_retry 遇错就重连重试，叠加对端
+    逐字节慢吐包（每次 recv 都够不到 socket 超时）时单点能挂几个小时；
+    另加 ``deadline_sec`` 整批硬上限（须小于外层 stage 的 600s 杀树锤），
+    到点即停、已逐只落盘的缓存不丢，余下留给明天的增量刷新。
     """
     out: dict[str, list[dict[str, Any]]] = {}
     if not codes:
@@ -382,13 +394,25 @@ def fetch_xdxr_batch(
     try:
         from mootdx.quotes import Quotes
 
-        q = Quotes.factory(market="std", timeout=timeout)
+        q = Quotes.factory(
+            market="std", timeout=timeout, auto_retry=False, raise_exception=True
+        )
     except Exception as e:  # noqa: BLE001
         raise AdjustError(f"通达信连接建立失败: {e}") from e
 
+    deadline = time.monotonic() + deadline_sec
     now = cn_now().isoformat(timespec="seconds")
     failed = 0
+    stalled = False
     for i, code in enumerate(codes, 1):
+        if time.monotonic() >= deadline:
+            stalled = True
+            print(
+                f"[WARN] 权息批量到达硬上限 {deadline_sec:.0f}s，"
+                f"停在 {i - 1}/{len(codes)}（已取部分已落盘，余下明天增量再刷）",
+                file=sys.stderr,
+            )
+            break
         c6 = str(code)[:6]
         try:
             raw = q.client.get_xdxr_info(_tdx_market(c6), c6)
@@ -411,6 +435,8 @@ def fetch_xdxr_batch(
             f"[WARN] 权息取数 {failed}/{len(codes)} 只失败（这些票将按未复权处理）",
             file=sys.stderr,
         )
+    if stalled and on_error == "raise":
+        raise AdjustError(f"权息批量超过硬上限 {deadline_sec:.0f}s 被截断")
     return out
 
 
@@ -455,7 +481,9 @@ def get_xdxr(
     try:
         from mootdx.quotes import Quotes
 
-        q = Quotes.factory(market="std", timeout=timeout)
+        q = Quotes.factory(
+            market="std", timeout=timeout, auto_retry=False, raise_exception=True
+        )
         # 显式传 market —— 不走 q.xdxr() 的内部推断（它把 920xxx 判成沪市 ⇒ 取到空）
         raw = q.client.get_xdxr_info(_tdx_market(str(code)[:6]), str(code)[:6])
     except Exception as e:  # noqa: BLE001
@@ -675,6 +703,12 @@ def _parse_args() -> tuple[Any, Any]:
         help="缓存超过该天数才刷新（默认 7；除权公告有 >2 周提前期）",
     )
     ap.add_argument("--force", action="store_true", help="忽略缓存年龄，全部重取")
+    ap.add_argument(
+        "--hard-deadline",
+        type=float,
+        default=480.0,
+        help="批量取数硬上限秒数（默认 480，须小于外层 stage 的 600s 杀树锤）；到点即停，已取部分保留",
+    )
     ap.add_argument("--show", default="", help="打印某只票的权息事件与因子")
     ap.add_argument("--stats", action="store_true", help="缓存统计")
     return ap, ap.parse_args()
@@ -756,7 +790,7 @@ def _cmd_warmup(a: Any) -> int:
         print("全部命中缓存，无需取数")
         return 0
     try:
-        got = fetch_xdxr_batch(todo)
+        got = fetch_xdxr_batch(todo, deadline_sec=a.hard_deadline)
     except AdjustError as e:
         print(f"[ERR] {e}")
         return 2
