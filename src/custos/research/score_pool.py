@@ -25,6 +25,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from custos.core import code_freeze as _cf
+
 CHUNK = 64
 ENV = "CUSTOS_V0_SCORE_CACHE"
 _W: dict[str, Any] = {}
@@ -65,7 +67,7 @@ def code_version() -> str:
             h.update(
                 str(p.resolve().relative_to(BASE.resolve())).replace("\\", "/").encode()
             )
-            h.update(p.read_bytes().replace(b"\r\n", b"\n"))
+            h.update(_cf.read_bytes(p).replace(b"\r\n", b"\n"))
         _VERSION = h.hexdigest()
     return _VERSION
 

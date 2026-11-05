@@ -63,6 +63,8 @@ _BOOKKEEP_KEYS = {
     "replay_memo",
     # 「no_early_stop」（v0.463）：随机臂提前终止开关，总结局不变——执行策略不进哈希
     "no_early_stop",
+    # 「warm_procs」（v0.497）：预热进程并行路数，读数逐位不变——同 jobs 口径
+    "warm_procs",
     # 「tag/out_dir」（v0.406 审计 P1-2）：只决定产物命名/位置，不影响读数——进哈希会让崩溃
     # 重跑换 tag/换目录被批次门误判「口径变了」。⚠️ timeout **留在哈希里**（审计 3 B-1：
     # score_evolution 的格子超时决定格子 ran/failed ⇒ 臂池/候选集会变，影响读数）
@@ -425,10 +427,6 @@ def gate_judgment_read(
 
     ``synthetic`` 必须在**函数入口快照**（任何注入件非 None ⇒ 合成 ⇒ 不查批
     也不写台账，同 record_use 的合成守卫语义）。"""
-    if is_snapshot_mode():
-        # 快照硬闸（TODO #116）：快照物理上不含判定段数据，批次门无从谈起——
-        # 开发机上出现判定段读取意图即配置错误，ap.error（exit 2）当场拦下。
-        ap.error("快照模式禁止判定段批次门——判定段只在生产机读（TODO #116）")
     from custos.research import load_window as lw  # noqa: PLC0415
 
     if synthetic:
@@ -437,6 +435,12 @@ def gate_judgment_read(
         return False
     if not lw.touches_judgment(judgment_span[0], judgment_span[1]):
         return False
+    if is_snapshot_mode():
+        # 快照硬闸（TODO #116）：快照物理上不含判定段数据，批次门无从谈起——
+        # 开发机上出现判定段读取意图即配置错误，ap.error（exit 2）当场拦下。
+        # v0.497：移到「不相交 ⇒ 不查」之后——原先在最前，第二窗放挖掘 B
+        # （R40 预演 --judgment-start 2022-01-01）的纯挖掘段跑数也被误拦。
+        ap.error("快照模式禁止判定段批次门——判定段只在生产机读（TODO #116）")
     if not getattr(args, "batch_id", "") or not getattr(args, "candidate_id", ""):
         ap.error(
             "判定段 2017~2021 走攒批协议（README『判定段攒批协议』）：须带 "

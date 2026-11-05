@@ -35,6 +35,7 @@ TOOLS = ROOT / "src" / "custos"
 # core 顶层文件名 ∈ BASE_MODULES 才是 L0；组内子目录用两级键查 LAYER_OF_DIR。
 BASE_MODULES = {
     "paths.py",
+    "code_freeze.py",  # v0.497 研究长跑代码冻结（stdlib-only）
     "code_utils.py",
     "indicators.py",
     "fmt.py",

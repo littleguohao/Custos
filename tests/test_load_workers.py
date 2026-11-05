@@ -155,3 +155,38 @@ def test_warm_gates_parallel_bit_identical(monkeypatch):
     # 0 信号票（600005）保留 pack（随机臂母体=全宇宙 bar 口径），加载失败票剔除
     assert "600005" in par and par["600005"]["gate_signals"] == {}
     assert "600009" not in par
+
+
+@pytest.mark.skipif(
+    __import__("multiprocessing").get_start_method(allow_none=False) != "fork",
+    reason="依赖 fork 继承 monkeypatch（Windows/spawn 平台由生产冒烟覆盖）",
+)
+def test_warm_gates_procs_bit_identical(monkeypatch):
+    """v0.497 --warm-procs：进程池预热与串行逐位一致（同序同值、0 信号票保留、失败票剔除）。"""
+    _patch_warm(monkeypatch)
+    monkeypatch.setattr(
+        bt, "ENTRY_GATES", {"g1": object(), "g2": object()}, raising=False
+    )
+    kw = dict(
+        gates=["g1", "g2"],
+        count=100,
+        cost_bps=25.0,
+        start="2022-01-01",
+        end="2022-12-31",
+    )
+    serial = brs.warm_gates(CODES, {}, None, **kw)
+    par = brs.warm_gates(CODES, {}, None, warm_procs=3, **kw)
+    _packs_equal(serial, par)
+    assert "600005" in par and "600009" not in par
+
+
+def test_warm_procs_not_in_config_hash():
+    import argparse
+
+    from custos.research import judgment_batch as jb
+
+    a = argparse.Namespace(gates="all", warm_procs=0)
+    b = argparse.Namespace(gates="all", warm_procs=10)
+    assert jb.config_hash("bear_regime_study", a) == jb.config_hash(
+        "bear_regime_study", b
+    )

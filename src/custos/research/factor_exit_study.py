@@ -57,6 +57,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, NoReturn, Optional
 
+from custos.core import code_freeze as _cf
 from custos.core.paths import RESEARCH_DIR
 from custos.research.evolution import exit_genome as eg
 from custos.research import criteria_kit as kit
@@ -225,7 +226,7 @@ def replay_source_files() -> list[Path]:
         pkg = mod if f.name == "__init__.py" else mod.rsplit(".", 1)[0]
         parts = mod.split(".")  # 父包 __init__ 会先执行
         todo.extend(".".join(parts[:k]) for k in range(2, len(parts)))
-        for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
+        for node in ast.walk(ast.parse(_cf.read_source(f))):
             if isinstance(node, ast.Import):
                 todo.extend(a.name for a in node.names)
             elif isinstance(node, ast.ImportFrom):
@@ -258,7 +259,7 @@ def replay_code_version() -> str:
             h.update(
                 str(p.resolve().relative_to(BASE.resolve())).replace("\\", "/").encode()
             )
-            h.update(p.read_bytes().replace(b"\r\n", b"\n"))
+            h.update(_cf.read_bytes(p).replace(b"\r\n", b"\n"))
         _REPLAY_CODE_VERSION = h.hexdigest()
     return _REPLAY_CODE_VERSION
 

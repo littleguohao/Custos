@@ -850,6 +850,7 @@ class TestLegacyR40Compat:
             "pre_reg_blob_hash",
             "objective_version",
             "factor_versions",  # v0.481：随因子升版而变，非读数
+            "code_freeze",  # v0.497：冻结快照摘要 / HEAD，非读数
         ):
             prov.pop(k, None)
         rep["provenance"] = prov

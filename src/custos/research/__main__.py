@@ -489,7 +489,7 @@ def _listing() -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, freeze: bool = False) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
     if not args or args[0] in {"-h", "--help", "list"}:
         return _listing()
@@ -511,10 +511,58 @@ def main(argv: list[str] | None = None) -> int:
     # ⚠️ 用 subprocess 而不是 import：保住 m2_stop_sweep / adjust_diagnostic
     # 依赖的**内存隔离**（那个回测常被 OOM Kill），也让一个工具的 import 错误
     # 不会波及其余工具。cwd 固定到仓库根 —— 研究脚本的相对路径都以它为基准。
+    if not freeze:
+        return subprocess.run(
+            [sys.executable, str(script), *rest], cwd=str(BASE)
+        ).returncode
+    # 代码冻结（v0.497，R40 事故：长跑中 git pull ⇒ 报告阶段惰性 import 新代码 ImportError）：
+    # 启动时快照 src/custos，子工具与其 worker 一律从快照 import；以 -m 启动，
+    # 使 spawn worker 重导入 __main__ 时也经快照（按路径启动会从磁盘重读脚本）。
+    env = _freeze_env()
     return subprocess.run(
-        [sys.executable, str(script), *rest], cwd=str(BASE)
+        [sys.executable, "-m", f"custos.research.{name}", *rest], cwd=str(BASE), env=env
     ).returncode
 
 
+def _freeze_env() -> dict[str, str]:
+    """快照 src/custos ⇒ 子进程环境（``CUSTOS_CODE_FREEZE`` + git HEAD）。"""
+    import os  # noqa: PLC0415
+
+    from custos.core import code_freeze as cf  # noqa: PLC0415
+    from custos.core.paths import ARTIFACTS  # noqa: PLC0415
+
+    env = dict(os.environ)
+    if env.get(cf.ENV):  # 已在冻结中（嵌套调用）⇒ 沿用
+        return env
+    path = cf.freeze(HERE.parent, ARTIFACTS / "cache" / "code_freeze")
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(BASE),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "--", "src"],
+            cwd=str(BASE),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        head, dirty = "", ""
+    env[cf.ENV] = str(path)
+    env[cf.ENV + "_HEAD"] = head + ("+dirty" if dirty else "")
+    print(
+        f"[code-freeze] 代码已冻结 {path.stem}（HEAD {env[cf.ENV + '_HEAD'] or '?'}）"
+        "——跑数期间 pull / 改代码不影响本次运行",
+        file=sys.stderr,
+    )
+    return env
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    import os as _os
+
+    raise SystemExit(main(freeze=_os.environ.get("CUSTOS_CODE_FREEZE") != "off"))

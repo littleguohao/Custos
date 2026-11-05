@@ -204,6 +204,7 @@ def warm_gates(
     warmup_bars: int = 0,
     load_workers: int = 1,
     score_workers: int = 1,
+    warm_procs: int = 0,
 ) -> dict[str, dict]:
     """R40 预热：逐股加载一次 → 逐门扫信号（门在内层 ⇒ df 只加载一次）→
     as-of V0 分（与门无关，按 (code, date) 去重）。
@@ -216,6 +217,9 @@ def warm_gates(
     ``load_workers``（v0.441，TODO #112）：>1 时逐股「加载+逐门扫描+打分」
     整体线程并行（每票独立），产物按提交序装配与串行逐位一致；默认 1=原行为。
     ``score_workers``（v0.447）：扫完全部门后批量打分（``score_pool``，多进程 + 落盘缓存），逐位一致。
+    ``warm_procs``（v0.497）：>1 时「加载 + 逐门扫描」改**进程**并行（优先于 load_workers）。
+    逐门扫描是纯 Python CPU 活，线程受 GIL 限制实测只吃满 ~1 核（开发机 100 票 12 核 CPU 107%）；
+    每票独立、按 codes 提交序装配 ⇒ 与串行逐位一致。
     """
     from custos.research import backtest_factors as bt  # noqa: PLC0415
     from custos.research import score_pool  # noqa: PLC0415
@@ -223,38 +227,23 @@ def warm_gates(
 
     _t0 = _time.time()  # TODO #92 warm 耗时埋点（[TIME] warm 行，return 前打印）
 
+    ctx: dict[str, Any] = {
+        "gates": list(gates),
+        "count": count,
+        "cost_bps": cost_bps,
+        "start": start,
+        "end": end,
+        "warmup_bars": warmup_bars,
+        "regime_bear": regime_bear,
+    }
+
     def _one(code: str) -> Optional[dict]:
-        df = bt._load_one_bars(code, count, start, end, warmup_bars=warmup_bars)
-        if df is None or not len(df):
-            return None
-        gate_signals: dict[str, list] = {}
-        todo: dict[str, int] = {}
-        for g in gates:
-            sigs: list[dict] = []
-            bt.evaluate_trades(
-                {code: df},
-                scorer=bt.SCORERS["baseline"],
-                entry_gate=bt.ENTRY_GATES[g],
-                amv_regime=regime_bear,
-                cost_bps=cost_bps,
-                collect_all=True,
-                signals_out=sigs,
-            )
-            if warmup_bars > 0:
-                sigs = [s for s in sigs if str(s.get("date") or "")[:10] >= start]
-            if sigs:
-                gate_signals[g] = sigs
-            for s in sigs:
-                todo.setdefault(s["date"], s["i"])  # 与门无关，按日期去重（同原逻辑）
-        return {
-            "df": df,
-            "gate_signals": gate_signals,
-            "scores": {},
-            "_to_score": list(todo.items()),
-        }
+        return _warm_code(code, **ctx)
 
     per_code: dict[str, dict] = {}
-    if load_workers and load_workers > 1 and len(codes) > 1:
+    if warm_procs and warm_procs > 1 and len(codes) > 1:
+        per_code = _warm_parallel_procs(codes, ctx, int(warm_procs))
+    elif load_workers and load_workers > 1 and len(codes) > 1:
         per_code = bt.run_codes_parallel(codes, _one, load_workers)
     else:
         for i, code in enumerate(codes, 1):
@@ -272,6 +261,87 @@ def warm_gates(
         file=sys.stderr,
     )
     return per_code
+
+
+def _warm_code(
+    code: str,
+    *,
+    gates: list[str],
+    count: int,
+    cost_bps: float,
+    start: str,
+    end: str,
+    warmup_bars: int,
+    regime_bear: dict[str, str],
+) -> Optional[dict]:
+    """单票预热：加载一次 → 逐门扫信号（门在内层）→ 待打分 (date, i)。
+    模块级（v0.497）：进程池可 pickle；线程 / 串行路径调同一函数，逐位一致。"""
+    from custos.research import backtest_factors as bt  # noqa: PLC0415
+
+    df = bt._load_one_bars(code, count, start, end, warmup_bars=warmup_bars)
+    if df is None or not len(df):
+        return None
+    gate_signals: dict[str, list] = {}
+    todo: dict[str, int] = {}
+    for g in gates:
+        sigs: list[dict] = []
+        bt.evaluate_trades(
+            {code: df},
+            scorer=bt.SCORERS["baseline"],
+            entry_gate=bt.ENTRY_GATES[g],
+            amv_regime=regime_bear,
+            cost_bps=cost_bps,
+            collect_all=True,
+            signals_out=sigs,
+        )
+        if warmup_bars > 0:
+            sigs = [s for s in sigs if str(s.get("date") or "")[:10] >= start]
+        if sigs:
+            gate_signals[g] = sigs
+        for s in sigs:
+            todo.setdefault(s["date"], s["i"])  # 与门无关，按日期去重（同原逻辑）
+    return {
+        "df": df,
+        "gate_signals": gate_signals,
+        "scores": {},
+        "_to_score": list(todo.items()),
+    }
+
+
+_WARM_CTX: dict[str, Any] = {}
+
+
+def _warm_init(ctx: dict[str, Any]) -> None:
+    _WARM_CTX.clear()
+    _WARM_CTX.update(ctx)
+
+
+def _warm_task(code: str) -> Optional[dict]:
+    return _warm_code(code, **_WARM_CTX)
+
+
+def _warm_parallel_procs(
+    codes: list[str], ctx: dict[str, Any], procs: int
+) -> dict[str, dict]:
+    """进程池逐票预热；``map`` 按提交序产出 ⇒ 装配与串行同序同值。
+    worker 继承代码冻结环境（Windows spawn 经 custos/__init__ 装快照）。"""
+    from concurrent.futures import ProcessPoolExecutor  # noqa: PLC0415
+
+    out: dict[str, dict] = {}
+    with ProcessPoolExecutor(
+        max_workers=procs, initializer=_warm_init, initargs=(ctx,)
+    ) as ex:
+        for i, (code, res) in enumerate(
+            zip(codes, ex.map(_warm_task, codes, chunksize=4)), 1
+        ):
+            if i % 200 == 0:
+                print(
+                    f"[warmup] {ctx['start']}~{ctx['end']} {i}/{len(codes)}",
+                    file=sys.stderr,
+                )
+            if res is not None:
+                out[code] = res
+    return out
 
 
 def collect_gate_signals(per_code: dict[str, dict], gate: str) -> list[dict]:
@@ -848,6 +918,7 @@ def _resolve_warm(
                 warmup_bars=300 if _is_v2 else 0,
                 load_workers=int(getattr(args, "load_workers", 1) or 1),
                 score_workers=int(getattr(args, "score_workers", 1) or 1),
+                warm_procs=int(getattr(args, "warm_procs", 0) or 0),
             )
 
     return regime_bear, index_df, warm_fn
@@ -1731,6 +1802,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default=1,
         help="warm 加载并行路数（v0.441，TODO #112：逐股 加载+扫描+打分 线程并行，"
         "产物与串行逐位一致；默认 1=原行为）",
+    )
+    ap.add_argument(
+        "--warm-procs",
+        type=int,
+        default=0,
+        help="预热（加载 + 46 门扫描）进程并行路数（v0.497；>1 优先于 --load-workers 线程，"
+        "读数逐位不变、不进配置哈希；建议 = 物理核数 − 2）",
     )
     ap.add_argument(
         "--no-early-stop",

@@ -24,6 +24,8 @@
 - **随机臂提前终止**（R40/R45/R44 扫描/R47/R48/R49/R50 全部终端）：不依赖随机臂池的判据已定结局 ⇒ 跳过臂阶段，stderr 打 `[early-stop]`，
   报告 C4 块记 `early_stop`；四态终端用 `criteria_kit.verdict_without_c4`（穷举 C4 四种状态结局都相同才跳），R49/R50 是「无两窗复现线索 / 对象」才跳。
   结局逐位不变；要池作描述读数时加 `--no-early-stop`（不进配置哈希）。
+- **代码冻结（v0.497）**：一律经 `uv run python -m custos.research <工具>` 启动，stderr 首行打 `[code-freeze] 代码已冻结 <摘要>（HEAD ...）`；之后 pull / 改代码不影响在跑进程，
+  产物 provenance 记 `code_freeze`。绕过入口直接 `-m custos.research.<工具>` 或按路径跑**不冻结**。契约 JSON 不在快照内，跑数期间仍勿改。
 - **探索类先抽样摸底**：R49、R50 这类描述 / 探索单元，以及新问题初次摸底，先 `--universe-sample 1000` 跑一遍（约全量 1/5，几小时）。
   抽样读数**只作描述，不入批、不入库作结论**、不能拿来改判据；看到苗头再全量正式跑，正式读数以全量为准。
   豁免边界：摸底可以暴露**判据口径缺陷**并触发 owner 拍板的跑数前修订（如 R50 v0.477：点估计高但簇少、下界不过 → 资格改簇稳健下界），
@@ -95,7 +97,7 @@ uv run python -m custos.research factor_exit_study --tag r39_v2_pre \
 #   （artifacts/cache/v0_score/<源码哈希>/，键 = as-of 帧内容摘要，代码一改自动换目录）——R40/R45/R44/R47~R50
 #   同票同信号日只算一次，后跑的研究大部分命中。磁盘量级：每 bar 约 50 字节。CUSTOS_V0_SCORE_CACHE=off 可关。
 # ③ R40 预演（46 门 × 5 档；随机臂成簇抽样 v0.399/0.409）
-uv run python -m custos.research bear_regime_study --tag r40_v2_pre --gates all --load-workers 4 --score-workers 8 \
+uv run python -m custos.research bear_regime_study --tag r40_v2_pre --gates all --warm-procs <物理核数-2> --score-workers 8 \
   --mining-start <SEG_A_START> --mining-end 2016-12-31 \
   --judgment-start 2022-01-01 --judgment-end 2026-09-04
 

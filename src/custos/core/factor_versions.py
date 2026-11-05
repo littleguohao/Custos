@@ -22,6 +22,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from custos.core import code_freeze as _cf
 from custos.core.paths import CONTRACTS_DIR
 
 VERSIONS_FILE = CONTRACTS_DIR / "FACTOR_VERSIONS.json"
@@ -49,7 +50,7 @@ def tracked_files() -> dict[str, Path]:
     for p in sorted(_FACTORS.glob("*.py")):
         if p.stem in _SKIP:
             continue
-        tree = ast.parse(p.read_text(encoding="utf-8"))
+        tree = ast.parse(_cf.read_source(p))
         if any(
             isinstance(n, (ast.Assign, ast.AnnAssign))
             and any(
@@ -103,7 +104,7 @@ def source_digest(path: Path) -> str:
     """规范化 AST 摘要：注释、空白、docstring 改动不影响；任何代码改动都会变。
 
     跨 Python 版本稳定（3.11 / 3.12 / 3.13 钉测同一期望值），口径见 ``_canon``。"""
-    tree = _StripDoc().visit(ast.parse(path.read_text(encoding="utf-8")))
+    tree = _StripDoc().visit(ast.parse(_cf.read_source(path)))
     return hashlib.blake2b(_canon(tree).encode(), digest_size=10).hexdigest()
 
 

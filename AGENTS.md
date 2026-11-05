@@ -224,6 +224,7 @@ stock_pool / 研究 provenance / holdout 月报都落当时的版本表。
   契约 JSON 内容哈希（自动失效，勿手改）；测试 conftest 默认 `CUSTOS_V0_SCORE_CACHE=off`，专测用例自行设目录。
 - **逐笔重放备忘**（`factor_exit_study.replay_session`，v0.461/v0.464）：研究终端 `run_study` 挂装饰器，collect_all 重放按 (票, df 内容, 出场参数, regime, 成本, bar) 缓存交易，结果逐位不变；
   生产路径落盘 `artifacts/cache/replay_memo/<出场源码哈希>/`（只追加 jsonl，跨运行 / 跨研究复用；版本 = backtest_factors import 闭包哈希，清理用 `scripts/dev/prune_replay_cache.py`），注入件运行只开内存；conftest 默认 `CUSTOS_REPLAY_CACHE=off`。
+- **代码冻结**（`core/code_freeze.py`，v0.497）：`python -m custos.research <工具>` 启动即快照 src/custos，子进程 / worker 的 custos import 走快照（`CUSTOS_CODE_FREEZE`）；做源码哈希的地方用 `code_freeze.read_source/read_bytes`，勿直接读盘。测试直接调 `main()` 缺省不冻结。
 - **指标盘缓存**（`research/indicator_cache.py`）：不得服务 live、不得服务 as-of 重播种
   路径；指标实现任何改动必须 bump `INDICATOR_PACK_VERSION`。
 

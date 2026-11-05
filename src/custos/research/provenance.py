@@ -156,7 +156,15 @@ def build(
         "cmdline": getattr(args, "cmdline", None),
         # v0.481（TODO #121）：跑数时的因子版本表——R 结果可按因子版本对比 / 判断是否需重跑
         "factor_versions": _factor_versions(),
+        # v0.497 代码冻结：{digest, path, git_head}；未经 `python -m custos.research` 冻结启动 ⇒ None
+        "code_freeze": _code_freeze(),
     }
+
+
+def _code_freeze():
+    from custos.core import code_freeze as cf  # noqa: PLC0415
+
+    return cf.active()
 
 
 def _factor_versions() -> dict:
