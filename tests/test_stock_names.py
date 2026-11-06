@@ -757,3 +757,42 @@ class TestNameMapOverwriteGuard:
         assert rc == 0
         assert json.loads(p.read_text(encoding="utf-8"))["count"] == 5000
         assert json.loads(p.read_text(encoding="utf-8"))["source"] == "tdx_protocol"
+
+    def test_main_merges_complete_a_share_fallback_with_broad_cache(
+        self, tmp_path, monkeypatch
+    ):
+        """5 千只 A 股不能被 5 万只广义证券旧缓存误判为残缺。"""
+        p = self._write_cache(tmp_path, 20000)
+        expected = {"000001", "600000", "920808"}
+        fresh = {code: f"新{code}" for code in expected}
+        monkeypatch.setattr(sn, "_local_a_share_codes", lambda: expected)
+        monkeypatch.setattr(
+            sn, "fetch_name_map", lambda session=None: (fresh, "tq_local")
+        )
+
+        rc = sn.main(["--out", str(p)])
+
+        payload = json.loads(p.read_text(encoding="utf-8"))
+        assert rc == 0
+        assert payload["count"] == 20002
+        assert payload["source"] == "tq_local+cache_merge"
+        assert payload["names"]["000001"] == "新000001"
+
+    def test_main_rejects_partial_a_share_fallback_with_broad_cache(
+        self, tmp_path, monkeypatch
+    ):
+        """广义缓存也不能让低覆盖的新表伪装成全量刷新。"""
+        p = self._write_cache(tmp_path, 20000)
+        expected = {"000001", "600000", "920808"}
+        partial = {code: f"新{code}" for code in sorted(expected)[:2]}
+        monkeypatch.setattr(sn, "_local_a_share_codes", lambda: expected)
+        monkeypatch.setattr(
+            sn, "fetch_name_map", lambda session=None: (partial, "tq_local")
+        )
+
+        rc = sn.main(["--out", str(p)])
+
+        payload = json.loads(p.read_text(encoding="utf-8"))
+        assert rc == 2
+        assert payload["count"] == 20000
+        assert payload["names"]["600000"] == "票0"

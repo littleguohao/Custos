@@ -13,6 +13,7 @@ Replaces the previous tqcenter/vipdoc binary parsing with community-maintained m
 
 from __future__ import annotations
 
+import atexit
 import json
 import math
 import os
@@ -91,6 +92,22 @@ def _get_reader():
     return _reader
 
 
+def _close_client_quietly(client: Any) -> None:
+    from custos.datasource.local_tdx.adjust_factors import _dispose_quotes
+
+    _dispose_quotes(client)
+
+
+def _dispose_global_client() -> None:
+    global _client
+    if _client is not None:
+        _close_client_quietly(_client)
+        _client = None
+
+
+atexit.register(_dispose_global_client)
+
+
 def _get_client(force_new: bool = False):
     """TDX 协议客户端。**带连接时效与强制重建**。
 
@@ -101,6 +118,7 @@ def _get_client(force_new: bool = False):
     当时把它归因为「接口失效」并改走东财 HTTP 绕过，而真正的 bug 一直在。
 
     长跑进程（18:00 选股链跑几百只票）尤其需要这个：连接可能在中途失效。
+    建连 10s 超时且禁自动重试；重建与进程退出复用权息侧的安静释放（v0.500）。
     """
     global _client, _client_created_at
     now = time.time()
@@ -110,13 +128,16 @@ def _get_client(force_new: bool = False):
     )
     if force_new or _client is None or too_old:
         if _client is not None:
-            try:
-                _client.close()
-            except Exception:  # noqa: BLE001, S110
-                pass
+            _close_client_quietly(_client)
         from mootdx.quotes import Quotes
 
-        _client = Quotes.factory(market="std", quiet=True)
+        _client = Quotes.factory(
+            market="std",
+            quiet=True,
+            timeout=10,
+            auto_retry=False,
+            raise_exception=True,
+        )
         _client_created_at = now
     return _client
 

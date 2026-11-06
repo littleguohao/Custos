@@ -103,6 +103,8 @@ CLIST_MIN_COVERAGE = 0.8
 # ⇒ 门槛该在**落盘边界**，不是在每个源里各写一份。落盘边界有两条——
 # `resolve_name_map`（链内调用）与 `main()`（生产每日刷新走这条）——
 # 两条都在 `save_cache` 之前过 `_refuses_overwrite`，缺一条等于没挂。
+# 既有缓存若是广义证券（数量 > 本地 A 股宇宙 2 倍），新表改按本地 A 股
+# 覆盖率验收；通过后才合并旧缓存，避免 5 千只 A 股被 5 万只广义证券误杀（v0.500）。
 NAME_MAP_MIN_OVERWRITE_RATIO = 0.8
 
 # 本次运行内记住可用域名，避免每批都从头重试已知不通的域名
@@ -614,27 +616,68 @@ def _age_days(generated_at: str) -> Optional[int]:
         return None
 
 
+def _local_a_share_codes() -> set[str]:
+    """本地 vipdoc 的 A 股宇宙；排障环境读不到时回退旧数量门槛。"""
+    try:
+        from custos.datasource.local_tdx import local_tdx_data
+
+        return {
+            str(c).split(".")[0].zfill(6)
+            for c in local_tdx_data.list_local_vipdoc_codes()
+        }
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def _is_broad_cache(old: dict, expected: set[str]) -> bool:
+    """旧表是否明显是广义证券宇宙，而非当前 A 股宇宙。"""
+    return bool(expected and len(old) > 2 * len(expected))
+
+
+def _merge_broad_cache(
+    new_map: dict, source: str, path: Path | None = None
+) -> tuple[dict, str]:
+    """A 股新表验收后合并广义旧缓存，保留指数/基金等旧条目。"""
+    old, _meta = load_cache(path)
+    expected = _local_a_share_codes()
+    if not old or not _is_broad_cache(old, expected):
+        return new_map, source
+    return {**old, **new_map}, f"{source}+cache_merge"
+
+
 def _refuses_overwrite(
     new_map: dict, source: str, diag: dict, path: Path | None = None
 ) -> bool:
-    """新表是否**过小以致不该覆盖**既有缓存。返回 True = 拒绝。
-
-    判据：既有缓存存在且非空，而 `len(new) < len(old) * NAME_MAP_MIN_OVERWRITE_RATIO`。
-    首次构建（无缓存）一律放行。
-
-    ``path`` 是**实际落盘目标**（缺省 = :data:`CACHE`）：main() 支持 ``--out``
-    自定义路径，门槛必须对着将被覆盖的那份文件判，而不是固定对着默认缓存。
-
-    ⚠️ 这里**不区分既有缓存是否陈旧**：陈旧但完整的表仍比新鲜但残缺的表适合做
-    ST 排除（ST 名称变动不频繁，残缺表会让大部分票查不到名字）。
-    陈旧本身会被 `load_cache` 判出来并让 `st_filter="stale"`，信息不会丢。
-    """
+    """残缺新表不得覆盖完整缓存；广义旧表与 A 股新表按各自宇宙验收。"""
     try:
         old, _meta = load_cache(path)
     except Exception:  # noqa: BLE001
         return False
     if not old:
         return False
+
+    expected = _local_a_share_codes()
+    if _is_broad_cache(old, expected):
+        covered = sum(code in new_map for code in expected)
+        coverage = covered / len(expected)
+        if coverage >= NAME_MAP_MIN_OVERWRITE_RATIO:
+            return False
+        diag.update(
+            name_map_rejected_source=source,
+            name_map_rejected_size=len(new_map),
+            name_map_rejected_reason=(
+                f"新表覆盖本地 A 股 {covered}/{len(expected)}（{coverage:.1%}）"
+                f" < {NAME_MAP_MIN_OVERWRITE_RATIO:.0%}，"
+                f"既有广义证券缓存 {len(old)} 只 ⇒ 拒绝覆盖"
+            ),
+        )
+        print(
+            f"[WARN] 名称表拒绝落盘：{source} 的本地 A 股覆盖率 "
+            f"{covered}/{len(expected)}（{coverage:.1%}）不足，已回退缓存",
+            file=sys.stderr,
+        )
+        return True
+
     floor = len(old) * NAME_MAP_MIN_OVERWRITE_RATIO
     if len(new_map) >= floor:
         return False
@@ -674,6 +717,7 @@ def resolve_name_map(
             # ST 名称变动不频繁，而残缺表会让 90% 的票根本查不到名字。
             name_map = {}
         if name_map:
+            name_map, source = _merge_broad_cache(name_map, source)
             try:
                 save_cache(name_map, source)
             except (OSError, ValueError) as exc:
@@ -790,6 +834,7 @@ def main(argv=None) -> int:
             )
         )
         return 2
+    name_map, source = _merge_broad_cache(name_map, source, Path(args.out))
     out = save_cache(name_map, source, Path(args.out))
     st_count = sum(1 for n in name_map.values() if "ST" in n.upper())
     print(

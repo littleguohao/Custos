@@ -681,6 +681,56 @@ class TestClientReconnect:
         ltd._get_client()
         assert built, "超过 CLIENT_MAX_AGE_SEC 应重建"
 
+    def test_client_factory_disables_unbounded_retry(self, monkeypatch):
+        """全市场名称协议与权息一样，禁止慢吐包触发无限重连。"""
+        import mootdx.quotes as mq
+
+        from custos.datasource.local_tdx import local_tdx_data as ltd
+
+        captured = {}
+
+        class C:
+            def close(self):
+                pass
+
+        def factory(**kwargs):
+            captured.update(kwargs)
+            return C()
+
+        monkeypatch.setattr(ltd, "_client", None)
+        monkeypatch.setattr(ltd, "_client_created_at", None)
+        monkeypatch.setattr(mq.Quotes, "factory", staticmethod(factory))
+
+        ltd._get_client()
+
+        assert captured["timeout"] == 10
+        assert captured["auto_retry"] is False
+        assert captured["raise_exception"] is True
+
+    def test_global_client_is_disposed_quietly(self, monkeypatch):
+        """进程退出前先关 raise_exception，失效 socket 不再产生析构异常。"""
+        from custos.datasource.local_tdx import local_tdx_data as ltd
+
+        class Raw:
+            raise_exception = True
+
+        class C:
+            def __init__(self):
+                self.client = Raw()
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        client = C()
+        monkeypatch.setattr(ltd, "_client", client)
+
+        ltd._dispose_global_client()
+
+        assert client.client.raise_exception is False
+        assert client.closed is True
+        assert ltd._client is None
+
 
 class TestCliFullMarketPath:
     """CLI 的「全市场」路径必须真的能跑。
