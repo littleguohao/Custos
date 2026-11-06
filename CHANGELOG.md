@@ -502,6 +502,7 @@
 | 2026-11-05 | v0.497 | **研究长跑代码冻结**（R40 事故：跑数中 git pull ⇒ 报告阶段惰性 import 新 provenance ImportError）：`python -m custos.research <工具>` 启动即快照 src/custos，子工具以 -m 启动，本进程与 spawn worker 的 custos import 一律走快照；源码哈希（重放备忘 / V0 分缓存 / 因子版本表）读快照版；provenance 落 `code_freeze{digest,git_head}`；快照模式批次门只拦触及判定段的读取 | owner 2026-11-05 | 新 `core/code_freeze.py` |
 | 2026-11-05 | v0.497 | **R40 预热进程并行 `--warm-procs N`**：46 门逐 bar 扫描是纯 Python CPU 活，`--load-workers` 线程受 GIL 只吃满约 1 核（开发机实测 CPU 107%）；改进程池后 20 票冒烟 15 分钟出报告、CPU 约 430%；逐位一致（钉测）、不进配置哈希 | owner 2026-11-05 | 开发机冒烟 |
 | 2026-11-05 | v0.498 | **1800 卡死事故双修**：① `pipeline_kit.run_stage` 超时改杀整棵进程树（Windows taskkill /T、POSIX killpg）——旧实现只杀 uv 壳，孙进程攥住管道 ⇒ communicate 永等 EOF，超时退化成死锁（refresh_xdxr 卡 3.3h 整链陪葬）；② xdxr 权息连接显式 auto_retry=False/raise_exception=True（pytdx 默认重连重试叠慢吐包可挂数小时），批量加 --hard-deadline 480s 硬上限，到点即停、已取部分落盘不丢 | owner 2026-11-05「修了吧」 | 钉测 +4（含杀树实测） |
+| 2026-11-06 | v0.499 | **权息刷新截断显式留痕 + 连接释放**（v0.498 review）：`fetch_xdxr_batch(stats=)` 出参记截断；`--warmup` 截断时末行 `[PARTIAL] i/N`，run_1800 从 stdout 取结论行，截断打 WARN 不再显示 [OK]；建连 / 释放收口 `_open_quotes` / `_dispose_quotes`（先关 raise_exception 再 close，防 mootdx `__del__` 抛 TdxConnectionError）；修 v0.498 起开发机红的建连用例 | owner 2026-11-06 | v0.498 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

@@ -1101,6 +1101,13 @@ class TestSharesEventsCacheShared:
         monkeypatch.setattr(
             af, "_tdx_market", lambda c: (_ for _ in ()).throw(RuntimeError("net"))
         )
+        # 桩掉真实建连（v0.499）：v0.498 起 raise_exception=True，开发机无网时真实
+        # factory 建连失败，半成品 Quotes 在 __del__ 抛 TdxConnectionError ⇒ unraisable 报红
+        import mootdx.quotes as _mq
+
+        monkeypatch.setattr(
+            _mq.Quotes, "factory", staticmethod(lambda *a, **k: type("Q", (), {})())
+        )
         with pytest.raises(af.AdjustError):
             af.get_shares_events("600000")
 
@@ -1233,3 +1240,17 @@ def test_single_fetch_also_disables_auto_retry(monkeypatch, tmp_path):
     af.get_xdxr("600000", refresh=True)
     assert captured["auto_retry"] is False
     assert captured["raise_exception"] is True
+
+
+def test_batch_deadline_reports_truncation_via_stats(monkeypatch, tmp_path):
+    """v0.499：截断经 stats 出参显式留痕（调用方据此打 [PARTIAL]，不再显示成完成）。"""
+    monkeypatch.setattr(af, "CACHE_DIR", tmp_path)
+    _fake_quotes_factory(monkeypatch, {}, per_call=lambda code: [])
+    stats: dict = {}
+    af.fetch_xdxr_batch(
+        ["600000", "600001"], progress_every=0, deadline_sec=0, stats=stats
+    )
+    assert stats["truncated"] == {"done": 0, "total": 2}
+    stats2: dict = {}
+    af.fetch_xdxr_batch(["600000"], progress_every=0, stats=stats2)
+    assert "truncated" not in stats2

@@ -129,10 +129,15 @@ def _run_refresh_xdxr(run_stage: Callable[..., dict]) -> None:
         "refresh_xdxr",
         note="前复权依据，best-effort；缺失时按未复权并在 attrs 留痕",
     )
+    # out = stdout + stderr 合并，末行可能是 stderr ⇒ 结论行从 stdout 取
+    lines = (r.get("stdout") or "").strip().splitlines()
+    partial = next((ln for ln in lines if ln.startswith("[PARTIAL]")), None)
     if not r["ok"]:
         print(f"[WARN] refresh_xdxr failed: {r['out'][:200]}")
+    elif partial:  # v0.499：硬上限截断不再显示成 [OK]
+        print(f"[WARN] refresh_xdxr {partial}")
     else:
-        print(f"[OK] {r['out'].splitlines()[-1] if r['out'] else 'xdxr refreshed'}")
+        print(f"[OK] {lines[-1] if lines else 'xdxr refreshed'}")
 
 
 def _run_refresh_sector_index(run_stage: Callable[..., dict], target: str) -> None:

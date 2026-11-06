@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import pathlib
 import sys
+import contextlib
 import time
 from typing import Any, Optional
 
@@ -294,6 +295,26 @@ def normalize_shares(df: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _open_quotes(quotes_cls: Any, timeout: int) -> Any:
+    """建通达信连接（v0.498 口径：禁 auto_retry、出错即抛，防慢吐包挂死）。"""
+    return quotes_cls.factory(
+        market="std", timeout=timeout, auto_retry=False, raise_exception=True
+    )
+
+
+def _dispose_quotes(q: Any) -> None:
+    """释放连接（v0.499）：先关掉 ``raise_exception`` 再 close，异常一律吞掉。
+
+    ``raise_exception=True`` 时 tdxpy 的 disconnect 遇已断开的 socket 会抛
+    ``TdxConnectionError``；mootdx ``BaseQuotes.__del__`` 回收时再 close 一次 ⇒ 异常从
+    ``__del__`` 冒出成「不可捕获异常」（生产是 stderr 噪声，测试里按 unraisable 报红）。"""
+    client = getattr(q, "client", None)
+    with contextlib.suppress(Exception):
+        client.raise_exception = False  # type: ignore[union-attr]
+    with contextlib.suppress(Exception):
+        q.close()
+
+
 def get_shares_events(
     code: str, *, refresh: bool = False, timeout: int = 10
 ) -> list[dict[str, Any]]:
@@ -312,11 +333,12 @@ def get_shares_events(
         from mootdx.quotes import Quotes
 
         c6 = str(code)[:6]
-        q = Quotes.factory(
-            market="std", timeout=timeout, auto_retry=False, raise_exception=True
-        )
+        q = _open_quotes(Quotes, timeout)
         # 显式传 market —— 见 _tdx_market（mootdx 把 920xxx 判成沪市 ⇒ 取到空）
-        raw = q.client.get_xdxr_info(_tdx_market(c6), c6)
+        try:
+            raw = q.client.get_xdxr_info(_tdx_market(c6), c6)
+        finally:
+            _dispose_quotes(q)
     except Exception as e:  # noqa: BLE001
         raise AdjustError(f"xdxr({code}) 取数失败: {e}") from e
     ev, sh = normalize_xdxr(raw), normalize_shares(raw)
@@ -357,11 +379,12 @@ def fetch_xdxr(code: str, timeout: int = 10) -> list[dict[str, Any]]:
         from mootdx.quotes import Quotes
 
         c6 = str(code)[:6]
-        q = Quotes.factory(
-            market="std", timeout=timeout, auto_retry=False, raise_exception=True
-        )
+        q = _open_quotes(Quotes, timeout)
         # 显式传 market —— 不走 q.xdxr() 的内部推断（它把 920xxx 判成沪市）
-        df = q.client.get_xdxr_info(_tdx_market(c6), c6)
+        try:
+            df = q.client.get_xdxr_info(_tdx_market(c6), c6)
+        finally:
+            _dispose_quotes(q)
     except Exception as e:  # noqa: BLE001
         raise AdjustError(f"xdxr({code}) 取数失败: {e}") from e
     return normalize_xdxr(df)
@@ -374,6 +397,7 @@ def fetch_xdxr_batch(
     progress_every: int = 200,
     on_error: str = "skip",
     deadline_sec: float = 480.0,
+    stats: Optional[dict[str, Any]] = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """批量取权息并写缓存，**复用同一个 Quotes 连接**。
 
@@ -394,9 +418,7 @@ def fetch_xdxr_batch(
     try:
         from mootdx.quotes import Quotes
 
-        q = Quotes.factory(
-            market="std", timeout=timeout, auto_retry=False, raise_exception=True
-        )
+        q = _open_quotes(Quotes, timeout)
     except Exception as e:  # noqa: BLE001
         raise AdjustError(f"通达信连接建立失败: {e}") from e
 
@@ -407,6 +429,8 @@ def fetch_xdxr_batch(
     for i, code in enumerate(codes, 1):
         if time.monotonic() >= deadline:
             stalled = True
+            if stats is not None:  # 出参：调用方据此把「部分完成」显式留痕（v0.499）
+                stats["truncated"] = {"done": i - 1, "total": len(codes)}
             print(
                 f"[WARN] 权息批量到达硬上限 {deadline_sec:.0f}s，"
                 f"停在 {i - 1}/{len(codes)}（已取部分已落盘，余下明天增量再刷）",
@@ -427,7 +451,7 @@ def fetch_xdxr_batch(
         if progress_every and i % progress_every == 0:
             print(f"[INFO] 权息 {i}/{len(codes)}（失败 {failed}）", file=sys.stderr)
     try:
-        q.close()
+        _dispose_quotes(q)
     except Exception:  # noqa: BLE001, S110
         pass
     if failed:
@@ -481,11 +505,12 @@ def get_xdxr(
     try:
         from mootdx.quotes import Quotes
 
-        q = Quotes.factory(
-            market="std", timeout=timeout, auto_retry=False, raise_exception=True
-        )
+        q = _open_quotes(Quotes, timeout)
         # 显式传 market —— 不走 q.xdxr() 的内部推断（它把 920xxx 判成沪市 ⇒ 取到空）
-        raw = q.client.get_xdxr_info(_tdx_market(str(code)[:6]), str(code)[:6])
+        try:
+            raw = q.client.get_xdxr_info(_tdx_market(str(code)[:6]), str(code)[:6])
+        finally:
+            _dispose_quotes(q)
     except Exception as e:  # noqa: BLE001
         raise AdjustError(f"xdxr({code}) 取数失败: {e}") from e
     ev = normalize_xdxr(raw)
@@ -790,11 +815,21 @@ def _cmd_warmup(a: Any) -> int:
         print("全部命中缓存，无需取数")
         return 0
     try:
-        got = fetch_xdxr_batch(todo, deadline_sec=a.hard_deadline)
+        stats: dict[str, Any] = {}
+        got = fetch_xdxr_batch(todo, deadline_sec=a.hard_deadline, stats=stats)
     except AdjustError as e:
         print(f"[ERR] {e}")
         return 2
     with_ev = sum(1 for v in got.values() if v)
+    tr = stats.get("truncated")
+    if tr:
+        # 末行固定 [PARTIAL] 前缀：run_1800 只看末行，据此 WARN（best-effort，不改退出码）
+        print(
+            f"[PARTIAL] 权息刷新到硬上限截断：处理 {tr['done']}/{tr['total']}，"
+            f"取到 {len(got)} 只（{with_ev} 只有事件）；余下明天增量再刷，"
+            "当日未刷到的票若恰逢新除权，前复权用旧权息"
+        )
+        return 0
     print(
         f"完成：{len(got)} 只取到数据，其中 {with_ev} 只有权息事件"
         f"（无事件的票也缓存，避免反复重试）"
