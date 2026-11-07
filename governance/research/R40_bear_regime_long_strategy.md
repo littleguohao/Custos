@@ -236,6 +236,37 @@ r40_a1 停跑，读数不作数（见头部审计注记）。重跑按以下修�
 
 ### 回填区（逐 Phase 填）
 
+<!-- digest:results/R40/r40_v2_pre.json -->
+**跑数摘要** `r40_v2_pre`（kind=r40，产物 `_bear_regime__r40_v2_pre.json` sha256 `60e76c788c0acec8`，digest v1；数字只来自产物，勿手改）
+
+| 字段 | 值 |
+|---|---|
+| `cost_sensitivity.deltas` | {"top_margin_vs_0_judgment": {"base": -0.06345134431916738, "flip": false, "side": -0.08182777777777772}, "top_margin_vs_0_mining": {"base": 0.2906447339847992, "flip": false, "side": 0.28018007117437727}} |
+| `criteria.C1` | {"judgment": {"n_taken": 232, "ok": true}, "min_n_taken": 100, "mining": {"n_taken": 69, "ok": false}, "ok": false} |
+| `criteria.C2` | {"margin_judgment": -0.06345134431916738, "margin_mining": 0.2906447339847992, "ok": false, "pool_ok_judgment": null, "pool_ok_mining": null, "pools_available": false, "pos_ok": false, "q95_judgment": null, "q95_mining": null, "rule": "margin 双窗同向为正 且 双窗>随机臂对应窗池 q95（基准=随机臂非空仓）"} |
+| `criteria.C3` | {"draws": [{"c2_holds": false, "draw": 0, "params_perturbed": {"stop_mode": "pct", "stop_pct": 4.0}, "perturbable": true}, {"c2_holds": false, "draw": 1, "params_perturbed": {"stop_mode": "pct", "stop_pct": 4.0}, "perturbable": true}, {"c2_holds": false, "draw": 2, "params_perturbed": {"stop_mode": "pct", "stop_pct": 8.0}, "perturbable": true}, {"c2_holds": false, "draw": 3, "params_perturbed": {"stop_mode": "pct", "stop_pct": 4.0}, "perturbable": true}], "n_flips": 4, "ok": false, "rule": "出场参数 ±50% ×4 扰动 C2 结论零翻转（池固定）"} |
+| `criteria.C4` | {"early_stop": {"reason": "C1 n_taken 不足", "skipped": true, "verdict": "untested"}, "evaluated": 0, "gate_pass": 0, "gate_pass_rate": null, "min_pool": 50, "note": "与 C2 挖掘半窗同池（重合是设计使然——R40 量级线与选择效应对的是同一个零假设）", "pool_size": 0, "q95": null, "state": "indeterminate"} |
+| `n_signals_by_gate` | {"judgment": {"b2": 39162, "bottom_surge": 1112335, "bottom_surge_j13": 306928, "bottom_surge_strict": 4898, "bottom_surge_strict_j13": 1280, "breakout_pullback_b1": 34259, "j_low": 906285, "j_low_adx25": 366909, "j_low_adx60": 2279, "j_low_dif_pos": 284884, "j_low_qsx_gt_dks": 414133, "j_low_qsx_weekly": 87937, "j_low_rsi_deep": 49597, "j_low_rsi_div": 87328, "j_low_rsi_ideal_b1": 1406, "j_low_rsi_strong": 152389, "j_low_weekly_qsx_weekly": 118318, "j_low_weekly_resonance": 381414, "j_macd_turn": 158692, "main_rally": 0, "main_rally_above": 0, "none": 3330871, "platform_pullback": 148376, "qg": 854120, "qn_adx_extreme": 1151, "qn_box_target": 645012, "qn_bullish_engulf": 30327, "qn_kdj_neg_day": 41350, "qn_ma144_launch": 75121, "qn_ma25_state": 408707, "qn_ma_converge": 17158, "qn_macd_bar_shift": 484960, "qn_shrink_limit_up": 3, "qn_three_red": 327442, "qn_volume_surge_cut": 34726, "qn_weekly180_setup": 6, "qsx_gt_dks": 1467525, "reversal_k": 27808, "rsi_bull_div": 287818, "rsi_deep": 57991, "rsi_strong": 503463, "surge_strict_then_b1": 1280, "surge_then_b1": 306928, "weekly_j_low": 894880, "weekly_j_low_qg": 9199, "weekly_qsx_gt_dks": 1205073}, "mining": {"b2": 42233, "bottom_surge": 1305641, "bottom_surge_j13": 349639, "bottom_surge_strict": 907, "bottom_surge_strict_j13": 206, "breakout_pullback_b1": 38338, "j_low": 965120, "j_low_adx25": 402478, "j_low_adx60": 2562, "j_low_dif_pos": 299812, "j_low_qsx_gt_dks": 438556, "j_low_qsx_weekly": 90147, "j_low_rsi_deep": 63609, "j_low_rsi_div": 94871, "j_low_rsi_ideal_b1": 4386, "j_low_rsi_strong": 182740, "j_low_weekly_qsx_weekly": 154590, "j_low_weekly_resonance": 428378, "j_macd_turn": 170782, "main_rally": 0, "main_rally_above": 0, "none": 3601278, "platform_pullback": 197914, "qg": 948006, "qn_adx_extreme": 1103, "qn_box_target": 686735, "qn_bullish_engulf": 24280, "qn_kdj_neg_day": 35068, "qn_ma144_launch": 58008, "qn_ma25_state": 379229, "qn_ma_converge": 17530, "qn_macd_bar_shift": 628107, "qn_shrink_limit_up": 13, "qn_three_red": 370379, "qn_volume_surge_cut": 37503, "qn_weekly180_setup": 776, "qsx_gt_dks": 1690621, "reversal_k": 84356, "rsi_bull_div": 302251, "rsi_deep": 81491, "rsi_strong": 680974, "surge_strict_then_b1": 206, "surge_then_b1": 349639, "weekly_j_low": 1046924, "weekly_j_low_qg": 5915, "weekly_qsx_gt_dks": 1443813}} |
+| `pools.entry_accounting` | {"judgment": {"requested": 0, "returned": 0}, "mining": {"requested": 0, "returned": 0}} |
+| `pools.q95_judgment` | null |
+| `pools.q95_mining` | null |
+| `provenance.cmdline` | "--tag r40_v2_pre --gates all --warm-procs 4 --score-workers 8 --mining-start 2000-01-01 --mining-end 2016-12-31 --judgment-start 2022-01-01 --judgment-end 2026-09-04" |
+| `provenance.data_last_date` | "2026-09-04" |
+| `provenance.git_dirty` | false |
+| `provenance.git_sha` | "59c7eb8aca" |
+| `provenance.n_codes` | 5581 |
+| `provenance.universe_rule` | "ashare_full_asof" |
+| `provenance.universe_sha256` | "72bedcb47588b8e9" |
+| `top.exit` | "pct5" |
+| `top.gate` | "bottom_surge_strict_j13" |
+| `top.judgment` | {"expectancy_R": -0.169, "margin": -0.06345134431916738, "n": 1275, "n_taken": 232, "n_unrealized": 5, "objective": null, "objective_version": "v2.1-margin-rddref", "payoff_ratio": 1.306, "rdd_gate": false, "ret_over_dd": -0.18721971999999998, "trade_set_note": "margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）", "win_rate": 0.3702} |
+| `top.mining` | {"expectancy_R": 1.649, "margin": 0.2906447339847992, "n": 193, "n_taken": 69, "n_unrealized": 13, "objective": 0.2906447339847992, "objective_version": "v2.1-margin-rddref", "payoff_ratio": 3.605, "rdd_gate": true, "ret_over_dd": 4.0537213206491325, "trade_set_note": "margin=全候选交易(collect_all) / rdd=topN 组合选中子集——两批交易不同（v2.1 注明在案）", "win_rate": 0.5078} |
+| `verdict` | "untested" |
+| `window_usage` | {"k": null, "note": "判定窗在挖掘段内（非受保护段 2017~2021）——读挖掘段不入台账（v2 口径）", "window": "mining_segment"} |
+| `windows` | {"judgment": {"end": "2026-09-04", "start": "2022-01-01"}, "mining": {"end": "2016-12-31", "start": "2000-01-01"}} |
+<!-- /digest -->
+
+
 - **r40_a1 台账第二行注记（2026-10-17）**：`window_usage.jsonl` 新增 r40_a1 `judgment` 行（2026-10-16 23:13，旧代码跑完时自动登记）与 2026-10-10 补登行是**同一次读取**，k 按一次计；该窗（2024-08~2026-09）在 v2 布局已属挖掘 B，不占判定段 2017~2021 预算。r40_a1 读数按审计缺陷作废（头部注记），不回填判决。
 
 - **Phase 1 工程（✅ 2026-10-08，v0.303）**：见「工程落点」。
