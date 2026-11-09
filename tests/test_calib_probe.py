@@ -378,3 +378,86 @@ class TestLabelUiAndIngestV0502:
             cp.main(["--module", "b1_thresholds", "--mode", "ingest", "--dir", str(d)])
             == 0
         )
+
+
+class TestTerminalLabelV0503:
+    """v0.503：终端逐条标注（--mode label）——每条立刻写回 labels.csv、可退出续标、边界样本优先。"""
+
+    def _mk(self, tmp_path):
+        import json
+
+        d = TestLabelUiAndIngestV0502()._mk(tmp_path)
+        bars = 30
+        cd = {
+            "title": "t",
+            "dates": [f"2022-01-{i + 1:02d}" for i in range(bars)],
+            "open": [10.0 + i * 0.1 for i in range(bars)],
+            "high": [10.5 + i * 0.1 for i in range(bars)],
+            "low": [9.5 + i * 0.1 for i in range(bars)],
+            "close": [10.2 + i * 0.1 for i in range(bars)],
+            "volume": [1000.0 + i for i in range(bars)],
+            "j": [50.0 - i * 2 for i in range(bars)],
+            "dif": [0.0] * bars,
+            "dea": [0.0] * bars,
+            "hist": [(-1) ** i * 0.1 for i in range(bars)],
+        }
+        (d / "chart_data.json").write_text(
+            json.dumps({str(i): cd for i in (1, 2, 3)}), encoding="utf-8"
+        )
+        return d
+
+    def _read(self, d):
+        import csv
+
+        with (d / "labels.csv").open(encoding="utf-8-sig", newline="") as fh:
+            return list(csv.reader(fh))[1:]
+
+    def test_label_resume_and_order(self, tmp_path):
+        d = self._mk(tmp_path)
+        seen = []
+        ans = iter(["2", "J 13.5 也是深超卖", "q"])
+        n = cp.label_cli(
+            d, color=False, ask=lambda p: next(ans), say=lambda s: seen.append(s)
+        )
+        rows = self._read(d)
+        assert n == 1 and rows[1][7:9] == [
+            "错",
+            "J 13.5 也是深超卖",
+        ]  # 边界样本 #2 排第一
+        assert any("#2" in s for s in seen[:3])
+        ans = iter(["b", "1", "", "1", "", "q"])  # 续标：只剩未标；b 在首条不越界
+        cp.label_cli(d, color=False, ask=lambda p: next(ans), say=lambda s: None)
+        rows = self._read(d)
+        assert [r[7] for r in rows] == ["对", "错", "对"]
+
+    def test_invalid_key_and_skip(self, tmp_path):
+        d = self._mk(tmp_path)
+        ans = iter(["x", "s", "3", "", "q"])
+        out = []
+        cp.label_cli(d, color=False, ask=lambda p: next(ans), say=out.append)
+        assert any("无效按键" in s for s in out)
+        assert [r[7] for r in self._read(d)] == ["", "", "不确定"]
+
+    def test_missing_chart_data_rejected(self, tmp_path):
+        d = TestLabelUiAndIngestV0502()._mk(tmp_path)
+        with pytest.raises(RuntimeError, match="chart_data"):
+            cp.label_cli(d, ask=lambda p: "q", say=lambda s: None)
+
+    def test_term_chart_flat_series(self):
+        cd = {
+            k: [1.0] * 5
+            for k in (
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "j",
+                "dif",
+                "dea",
+                "hist",
+            )
+        }
+        cd.update(title="t", dates=["2022-01-01"] * 5)
+        txt = cp.term_chart(cd, color=False)
+        assert txt.startswith("t") and "MACD" in txt

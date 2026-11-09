@@ -1070,6 +1070,161 @@ def _ingest_md(o: dict[str, Any]) -> str:
     return "\n".join(L) + "\n"
 
 
+#: 终端图宽（根数）——终端 80 列放得下，比网页图（CHART_BARS）短
+TERM_BARS = 60
+
+
+def chart_payload(df: Any, title: str) -> dict[str, Any]:
+    """终端标注用的紧凑图数据（v0.503）：末 TERM_BARS 根 OHLCV + J + MACD，只到 as-of 当根。"""
+    from custos.core.indicators import j_series, macd_series  # noqa: PLC0415
+
+    t = df.tail(TERM_BARS)
+    dif, dea, hist = (x.tail(TERM_BARS) for x in macd_series(df["close"]))
+
+    def r(xs: Any) -> list[float]:
+        return [round(float(x), 4) for x in xs]
+
+    return {
+        "title": title,
+        "dates": [str(x)[:10] for x in t["date"]],
+        **{k: r(t[k]) for k in ("open", "high", "low", "close", "volume")},
+        "j": r(j_series(df).tail(TERM_BARS)),
+        "dif": r(dif),
+        "dea": r(dea),
+        "hist": r(hist),
+    }
+
+
+def term_chart(cd: dict[str, Any], color: bool = True) -> str:
+    """终端 K 线（v0.503）：价格 14 行（│ 影线、█ 实体，红涨绿跌）+ 量 3 行 + J 4 行（· 为 13 线）+ MACD 柱 4 行。"""
+    R, G, Y, Z = ("\033[31m", "\033[32m", "\033[33m", "\033[0m") if color else ("",) * 4
+    o, h, lo, c = cd["open"], cd["high"], cd["low"], cd["close"]
+    n = len(c)
+    if not n:
+        return "（无图数据）"
+    top, bot = max(h), min(lo)
+    span = (top - bot) or 1.0
+    rows = 14
+
+    def lv(x: float) -> int:
+        return int(round((x - bot) / span * (rows - 1)))
+
+    grid = [[" "] * n for _ in range(rows)]
+    for i in range(n):
+        col = R if c[i] >= o[i] else G
+        a, b = sorted((lv(o[i]), lv(c[i])))
+        for y in range(lv(lo[i]), lv(h[i]) + 1):
+            grid[y][i] = col + ("█" if a <= y <= b else "│") + Z
+    out = [cd["title"]]
+    for y in range(rows - 1, -1, -1):
+        out.append(f"{bot + span * y / (rows - 1):8.2f} " + "".join(grid[y]))
+    vm = max(cd["volume"]) or 1.0
+    for y in (3, 2, 1):
+        out.append(
+            ("      量 " if y == 3 else " " * 9)
+            + "".join("█" if v / vm * 3 >= y - 0.5 else " " for v in cd["volume"])
+        )
+    jv = cd["j"]
+    jt, jb = max(max(jv), 13.0), min(min(jv), 13.0)
+    js = (jt - jb) or 1.0
+    l13 = int(round((13.0 - jb) / js * 3))
+    for y in range(3, -1, -1):
+        cells = [
+            (Y + "●" + Z)
+            if int(round((v - jb) / js * 3)) == y
+            else ("·" if l13 == y else " ")
+            for v in jv
+        ]
+        out.append(f"  J{jb + js * y / 3:5.0f} " + "".join(cells))
+    hm = max(abs(x) for x in cd["hist"]) or 1.0
+    for y in (2, 1, -1, -2):
+        cells = []
+        for x in cd["hist"]:
+            k = x / hm * 2
+            on = (k >= y - 0.5) if y > 0 else (k <= y + 0.5)
+            cells.append(((R if x >= 0 else G) + "▌" + Z) if on else " ")
+        out.append(("   MACD " if y == 2 else " " * 9) + "".join(cells))
+    out.append(" " * 9 + cd["dates"][0] + " " * max(1, n - 20) + cd["dates"][-1])
+    return "\n".join(out)
+
+
+def _write_labels(path: Path, head: list[str], rows: list[list[str]]) -> None:
+    tmp = path.with_suffix(".tmp")
+    with tmp.open("w", encoding="utf-8-sig", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(head)
+        w.writerows(rows)
+    tmp.replace(path)
+
+
+def label_cli(
+    d: Path,
+    *,
+    only_todo: bool = True,
+    boundary_first: bool = True,
+    color: bool = True,
+    ask: Callable[[str], str] = input,
+    say: Callable[[str], None] = print,
+) -> int:
+    """终端标注（v0.503，owner 2026-11-09）：逐条画图 → 按键判定 → 写形态理由，每条立刻写回 labels.csv
+    （原子替换，可随时退出、下次续标）。按键：sample ``1``=对 ``2``=错 ``3``=不确定；review ``y`` / ``n`` / ``?``；
+    ``s``=跳过 ``b``=上一条 ``q``=退出。边界 / 近似命中样本排前面。返回本次标注条数。"""
+    summ = json.loads((d / "summary.json").read_text(encoding="utf-8-sig"))
+    mode = summ["mode"]
+    cdp = d / "chart_data.json"
+    if not cdp.exists():
+        raise RuntimeError(
+            f"{d} 缺 chart_data.json（v0.503 前的产物）——重跑该模块 sample / review 生成后再标"
+        )
+    charts = json.loads(cdp.read_text(encoding="utf-8"))
+    path = d / "labels.csv"
+    with path.open(encoding="utf-8-sig", newline="") as fh:
+        allr = list(csv.reader(fh))
+    head = allr[0]
+    rows = [r + [""] * (9 - len(r)) for r in allr[1:] if r]
+    keys = {
+        "sample": {"1": "对", "2": "错", "3": "不确定"},
+        "review": {"y": "Y", "n": "N", "?": "不确定"},
+    }[mode]
+    order = list(range(len(rows)))
+    if boundary_first:
+        order.sort(key=lambda i: (rows[i][4] not in ("boundary", "near_miss"), i))
+    if only_todo:
+        order = [i for i in order if not rows[i][7].strip()]
+    hint = "  ".join(f"{k}={v}" for k, v in keys.items()) + "  s=跳过 b=上一条 q=退出"
+    pos = done = 0
+    while 0 <= pos < len(order):
+        r = rows[order[pos]]
+        cd = charts.get(str(r[0]))
+        say("\n" + "=" * 72)
+        say(
+            f"[{pos + 1}/{len(order)}]  #{r[0]}  {r[1]}  {r[2]} {r[3]}  类别={r[4]}  检测值={r[5]}"
+            + (f"  边界={r[6]}" if r[6] else "")
+            + (f"  已标={r[7]}" if r[7] else "")
+        )
+        say(term_chart(cd, color) if cd else "（无图数据）")
+        k = ask(f"判定 [{hint}] > ").strip().lower()
+        if k == "q":
+            break
+        if k == "b":
+            pos = max(0, pos - 1)
+            continue
+        if k in ("s", ""):
+            pos += 1
+            continue
+        if k not in keys:
+            say(f"无效按键：{k!r}")
+            continue
+        r[7] = keys[k]
+        r[8] = ask("形态理由（写形态，不写后来涨跌；回车留空）> ").strip()
+        _write_labels(path, head, rows)
+        done += 1
+        pos += 1
+    n_done = sum(1 for x in rows if x[7].strip())
+    say(f"\n本次标注 {done} 条，已写回 {path}；已标 {n_done}/{len(rows)}")
+    return done
+
+
 def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
     d = out_dir / f"{rep['module']}__{rep['tag']}"
     d.mkdir(parents=True, exist_ok=True)
@@ -1087,6 +1242,7 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
             for row in csv_rows:
                 w.writerow([*row, "", ""])
         it = iter(csv_rows)
+        chart_data: dict[str, Any] = {}
         for f, rows in rep["samples"].items():
             parts.append(f"<h2>{html.escape(f)}</h2>")
             for r in rows:
@@ -1098,6 +1254,11 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
                 parts.append(
                     f"<div class='s' data-id='{row[0]}'>{svg_chart(fr[1], title) if fr else ''}</div>"
                 )
+                if fr:
+                    chart_data[str(row[0])] = chart_payload(fr[1], title)
+        (d / "chart_data.json").write_text(
+            json.dumps(chart_data, ensure_ascii=False), encoding="utf-8"
+        )
         parts.append(label_ui(csv_rows, rep["mode"], f"calib:{d.name}"))
         parts.append("</body></html>")
         (d / "gallery.html").write_text("".join(parts), encoding="utf-8")
@@ -1132,14 +1293,19 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--module", required=True, choices=sorted(MODULES))
     ap.add_argument(
         "--mode",
-        choices=("sample", "sensitivity", "review", "ui", "ingest"),
+        choices=("sample", "sensitivity", "review", "ui", "ingest", "label"),
         default="sample",
-        help="ui=给既有产物目录的 gallery 加标注界面（不重算）；ingest=读回标注出汇总（ingest.md）",
+        help="ui=给既有产物目录的 gallery 加标注界面（不重算）；label=终端逐条标注（写回 labels.csv）；"
+        "ingest=读回标注出汇总（ingest.md）",
     )
     ap.add_argument("--dir", default="", help="ui / ingest：产物目录（<模块>__<tag>）")
     ap.add_argument(
         "--labels", default="", help="ingest：标注 CSV（缺省 = 目录内 labels.csv）"
     )
+    ap.add_argument(
+        "--all", action="store_true", help="label：已标的也逐条过一遍（缺省只看未标）"
+    )
+    ap.add_argument("--no-color", action="store_true", help="label：终端不用颜色")
     ap.add_argument(
         "--review-source",
         choices=("stock_pool", "holdings"),
@@ -1182,7 +1348,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     args = _build_parser().parse_args(argv)
-    if args.mode in ("ui", "ingest"):
+    if args.mode in ("ui", "ingest", "label"):
         d = Path(args.dir)
         if not (d / "summary.json").exists():
             print(
@@ -1191,7 +1357,15 @@ def main(argv: Optional[list[str]] = None) -> int:
             )
             return 1
         try:
-            if args.mode == "ui":
+            if args.mode == "label":
+                import os  # noqa: PLC0415
+
+                label_cli(
+                    d,
+                    only_todo=not args.all,
+                    color=not args.no_color and not os.environ.get("NO_COLOR"),
+                )
+            elif args.mode == "ui":
                 n = upgrade_gallery(d)
                 print(f"[calib_probe] 标注界面已加 {n} 图 ⇒ {d / 'gallery.html'}")
             else:

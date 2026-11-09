@@ -38,6 +38,8 @@ uv run python -m custos.research calib_probe --module b1_structure --mode review
   --diff artifacts/reports/calibration/b1_structure__v1/summary.json
 # ①′ 标注：直接在 gallery.html 每图下方点选 + 写形态理由（浏览器本地存档，可分次标；顶部「导出 labels.csv」）
 #     旧产物加界面（不重算）：calib_probe --module <模块> --mode ui --dir artifacts/reports/calibration/<模块>__<tag>
+# ①‴ 终端标注（v0.503，命令行逐条画图 + 按键 1/2/3 或 y/n/?，每条即写回 labels.csv，q 退出、再跑续标）：
+#     uv run python -m custos.research calib_probe --module <模块> --mode label --dir artifacts/reports/calibration/<模块>__<tag>
 # ①″ 汇总：把导出的 labels.csv 放回产物目录（或 --labels 指定），出 ingest.md（逐字段对/错、误中/漏中清单、参数改向票）
 uv run python -m custos.research calib_probe --module b1_structure --mode ingest --dir artifacts/reports/calibration/b1_structure__v1
 # ③ 挖掘段确认新定义（sample 模式），owner 确认后升版 + 登记 holdout 使用
