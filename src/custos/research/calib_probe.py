@@ -635,11 +635,16 @@ def run_study(
     hits = {f: {k for k, v in base.items() if is_hit(v.get(f))} for f in fields}
     sens: list[dict[str, Any]] = []
     flips: dict[tuple, set] = {}
+    flip_steps: dict[
+        tuple, list
+    ] = {}  # (field, key) → ["PARAM×k", ...]（v0.502：带方向）
     for vi, (p, k, ov) in enumerate(variants[1:], start=1):
         for f in fields:
             hs = {key for key in pool if is_hit(res[(vi, key)].get(f))}
             changed = {key for key in pool if res[(vi, key)].get(f) != base[key].get(f)}
             flips.setdefault((f, p), set()).update(changed)
+            for key in changed:
+                flip_steps.setdefault((f, key), []).append(f"{p}×{k:g}")
             u = hs | hits[f]
             sens.append(
                 {
@@ -686,6 +691,7 @@ def run_study(
         ]
         rep["factor_version"] = _version_of(args.module)
         rep["samples"] = _review_rows(pool, base, hits, flips, fields)
+        _attach_steps(rep["samples"], flip_steps)
         rep["_frames"] = {
             k: frames[k]
             for s in rep["samples"].values()
@@ -693,6 +699,7 @@ def run_study(
         }
     if args.mode == "sample":
         rep["samples"] = _samples(pool, base, hits, flips, fields, args, rng)
+        _attach_steps(rep["samples"], flip_steps)
         rep["_frames"] = {
             k: frames[k]
             for s in rep["samples"].values()
@@ -803,6 +810,266 @@ def _samples(pool, base, hits, flips, fields, args, rng) -> dict[str, list[dict]
     return out
 
 
+def _attach_steps(
+    samples: dict[str, list[dict]], flip_steps: dict[tuple, list]
+) -> None:
+    """样本行补 ``flip_steps``（哪个参数往哪个方向改会让该 bar 判定改变，v0.502）。"""
+    for f, rows in samples.items():
+        for r in rows:
+            r["flip_steps"] = sorted(flip_steps.get((f, tuple(r["key"])), []))
+
+
+#: 标注选项（网页 UI 与 ingest 同源）
+LABEL_CHOICES = {"sample": ("对", "错", "不确定"), "review": ("Y", "N", "不确定")}
+CSV_HEAD = ["id", "字段", "代码", "日期", "类别", "检测值", "边界翻转参数"]
+CSV_TAIL = {
+    "sample": ["判定(对/错/不确定)", "备注"],
+    "review": ["应命中(Y/N)", "形态理由（写形态，不写后来涨跌）"],
+}
+
+
+def label_ui(rows: list[list[Any]], mode: str, store_key: str) -> str:
+    """网页内标注（v0.502，owner 2026-11-09）：每图下「判定按钮 + 形态理由」，浏览器本地存档
+    （localStorage，可分多次标），一键导出与 labels.csv 同列的 CSV；可导入已有 labels.csv 续标。
+    纯静态、无网络。``rows`` = labels.csv 的前 7 列（id 起）。"""
+    meta = json.dumps(
+        {
+            "rows": rows,
+            "choices": list(LABEL_CHOICES[mode]),
+            "head": CSV_HEAD + CSV_TAIL[mode],
+            "key": store_key,
+        },
+        ensure_ascii=False,
+    )
+    css = (
+        "<style>.lbl{margin:2px 0 18px;padding:6px;background:#f6f6f6;font:14px sans-serif}"
+        ".lbl button{margin-right:6px;padding:3px 12px}.lbl button.on{background:#2b6;color:#fff}"
+        ".lbl input{width:70%;margin-left:8px}#bar{position:sticky;top:0;background:#fffbe6;"
+        "padding:6px;border-bottom:1px solid #ccc;font:14px sans-serif;z-index:9}"
+        ".done{opacity:.55}</style>"
+    )
+    bar = (
+        "<div id='bar'>进度 <b id='prog'></b>　"
+        "<label><input type='checkbox' id='onlyTodo'>只看未标</label>　"
+        "<button id='exp'>导出 labels.csv</button>　"
+        "导入续标 <input type='file' id='imp' accept='.csv'>　"
+        "<span style='color:#888'>（形态理由写形态，不写后来涨跌；标注存在本浏览器，换机器请先导出）</span></div>"
+    )
+    js = r"""
+<script>
+const M = __META__;
+const ls = window.localStorage;
+const K = id => M.key + ':' + id;
+function get(id){ try { return JSON.parse(ls.getItem(K(id)) || '{}'); } catch(e) { return {}; } }
+function put(id, v){ ls.setItem(K(id), JSON.stringify(v)); }
+function refresh(){
+  let n = 0;
+  document.querySelectorAll('div.s').forEach(d => {
+    const v = get(d.dataset.id), done = !!v.c;
+    n += done ? 1 : 0;
+    d.classList.toggle('done', done);
+    d.style.display = (document.getElementById('onlyTodo').checked && done) ? 'none' : '';
+    d.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.textContent === v.c));
+    const inp = d.querySelector('input'); if (document.activeElement !== inp) inp.value = v.r || '';
+  });
+  document.getElementById('prog').textContent = n + ' / ' + M.rows.length;
+}
+document.querySelectorAll('div.s').forEach(d => {
+  const id = d.dataset.id, box = document.createElement('div');
+  box.className = 'lbl';
+  M.choices.forEach(c => {
+    const b = document.createElement('button'); b.textContent = c;
+    b.onclick = () => { const v = get(id); v.c = (v.c === c ? '' : c); put(id, v); refresh(); };
+    box.appendChild(b);
+  });
+  const inp = document.createElement('input'); inp.placeholder = '形态理由';
+  inp.oninput = () => { const v = get(id); v.r = inp.value; put(id, v); };
+  box.appendChild(inp); d.appendChild(box);
+});
+const q = s => /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+document.getElementById('exp').onclick = () => {
+  const out = [M.head.map(q).join(',')];
+  M.rows.forEach(r => { const v = get(r[0]); out.push([...r.map(x => String(x ?? '')), v.c || '', v.r || ''].map(q).join(',')); });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\ufeff' + out.join('\r\n') + '\r\n'], {type: 'text/csv'}));
+  a.download = 'labels.csv'; a.click();
+};
+function parseCsv(t){
+  const rows = []; let row = [], f = '', i = 0, inq = false;
+  t = t.replace(/^\ufeff/, '');
+  for (; i < t.length; i++) { const ch = t[i];
+    if (inq) { if (ch === '"') { if (t[i+1] === '"') { f += '"'; i++; } else inq = false; } else f += ch; }
+    else if (ch === '"') inq = true; else if (ch === ',') { row.push(f); f = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && t[i+1] === '\n') i++; row.push(f); rows.push(row); row = []; f = ''; }
+    else f += ch; }
+  if (f !== '' || row.length) { row.push(f); rows.push(row); }
+  return rows;
+}
+document.getElementById('imp').onchange = ev => {
+  const fr = new FileReader();
+  fr.onload = () => { parseCsv(fr.result).slice(1).forEach(r => { if (r[0] && (r[7] || r[8])) put(r[0], {c: r[7] || '', r: r[8] || ''}); }); refresh(); };
+  fr.readAsText(ev.target.files[0], 'utf-8');
+};
+document.getElementById('onlyTodo').onchange = refresh;
+refresh();
+</script>"""
+    return css + bar + js.replace("__META__", meta)
+
+
+def _csv_rows(rep: dict[str, Any], frames: dict) -> list[list[Any]]:
+    out = []
+    n = 0
+    for f, rows in rep["samples"].items():
+        for r in rows:
+            n += 1
+            key = tuple(r["key"])
+            fr = frames.get(key)
+            code = key[0].split("|")[0]
+            date = str(fr[0]["date"].iloc[-1])[:10] if fr else ""
+            steps = r.get("flip_steps") or r["flip_params"]
+            out.append([n, f, code, date, r["class"], r["value"], "、".join(steps)])
+    return out
+
+
+def upgrade_gallery(d: Path) -> int:
+    """给既有产物目录的 gallery.html 加标注 UI（不重算）：第 n 个图块 ⇔ labels.csv 第 n 行。返回行数。"""
+    import re as _re  # noqa: PLC0415
+
+    summ = json.loads((d / "summary.json").read_text(encoding="utf-8-sig"))
+    with (d / "labels.csv").open(encoding="utf-8-sig", newline="") as fh:
+        rows = [r[:7] for r in list(csv.reader(fh))[1:] if r]
+    g = (d / "gallery.html").read_text(encoding="utf-8")
+    g = _re.sub(
+        r"\n*<script>\nconst M = .*?</script>", "", g, flags=_re.S
+    )  # 幂等：去旧 UI
+    g = _re.sub(r"<style>\.lbl.*?</style><div id='bar'>.*?</div>", "", g, flags=_re.S)
+    cnt = iter(range(1, 10**9))
+    g = _re.sub(
+        r"<div(?: class='s' data-id='\d+')?>(?=<svg|</div>)",
+        lambda m: f"<div class='s' data-id='{next(cnt)}'>",
+        g,
+    )
+    n = next(cnt) - 1
+    if n != len(rows):
+        raise RuntimeError(
+            f"gallery 图块数 {n} ≠ labels.csv 行数 {len(rows)}——产物不配套，拒绝升级"
+        )
+    ui = label_ui(rows, summ["mode"], f"calib:{d.name}")
+    g = g.replace("</body></html>", ui + "</body></html>")
+    (d / "gallery.html").write_text(g, encoding="utf-8")
+    return n
+
+
+def ingest(d: Path, labels: Optional[Path] = None) -> dict[str, Any]:
+    """读回标注（v0.502）：逐字段 × 类别统计「对 / 错」，并按「错」样本的翻转方向汇总参数改向。
+
+    判定口径：sample 模式直接读「对/错」；review 模式「应命中 Y/N」与当前是否命中比较（不一致 = 错）。
+    参数改向表：错样本里某 ``PARAM×k`` 会翻转它 ⇒ 修正票 +1；对样本里同一 ``PARAM×k`` 也会翻转 ⇒ 误伤票 +1。
+    只描述、不拍板（owner 2026-11-09：不设固定门槛，持续进化——每条「错」都进候选讨论）。"""
+    summ = json.loads((d / "summary.json").read_text(encoding="utf-8-sig"))
+    mode = summ["mode"]
+    path = labels or d / "labels.csv"
+    with path.open(encoding="utf-8-sig", newline="") as fh:
+        rows = list(csv.reader(fh))[1:]
+    by_field: dict[str, dict[str, Any]] = {}
+    votes: dict[str, dict[str, int]] = {}
+    wrong: list[dict[str, Any]] = []
+    n_labeled = 0
+    for r in rows:
+        if len(r) < 9 or not r[7].strip():
+            continue
+        lid, f, code, date, cls, val, flip, lab, why = (x.strip() for x in r[:9])
+        n_labeled += 1
+        now_hit = cls == "hit" or (cls == "boundary" and is_hit(_parse_val(val)))
+        if mode == "review":
+            if lab not in ("Y", "N"):
+                verdict = "不确定"
+            else:
+                verdict = "对" if (lab == "Y") == now_hit else "错"
+        else:
+            verdict = lab if lab in ("对", "错") else "不确定"
+        st = by_field.setdefault(f, {}).setdefault(cls, {"对": 0, "错": 0, "不确定": 0})
+        st[verdict] += 1
+        steps = [x for x in flip.split("、") if x]
+        for stp in steps:
+            v = votes.setdefault(f"{f}｜{stp}", {"修正": 0, "误伤": 0})
+            if verdict == "错":
+                v["修正"] += 1
+            elif verdict == "对":
+                v["误伤"] += 1
+        if verdict == "错":
+            wrong.append(
+                {
+                    "id": lid,
+                    "field": f,
+                    "code": code,
+                    "date": date,
+                    "class": cls,
+                    "now_hit": now_hit,
+                    "should_hit": not now_hit,
+                    "flip": steps,
+                    "reason": why,
+                }
+            )
+    out = {
+        "module": summ["module"],
+        "tag": summ.get("tag"),
+        "mode": mode,
+        "factor_version": summ.get("factor_version"),
+        "n_rows": len(rows),
+        "n_labeled": n_labeled,
+        "by_field": by_field,
+        "param_votes": dict(sorted(votes.items(), key=lambda kv: -kv[1]["修正"])),
+        "wrong": wrong,
+        "note": "只描述：误中 = 现命中但标错；漏中 = 现未命中但应命中。参数改向票只来自边界 / 近似命中样本，改不改由 owner 定",
+    }
+    (d / "ingest.json").write_text(
+        json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    (d / "ingest.md").write_text(_ingest_md(out), encoding="utf-8")
+    return out
+
+
+def _parse_val(v: str) -> Any:
+    if v in ("True", "False"):
+        return v == "True"
+    try:
+        return float(v)
+    except ValueError:
+        return v or None
+
+
+def _ingest_md(o: dict[str, Any]) -> str:
+    L = [
+        f"# {o['module']} 标注汇总（{o['tag']}，{o['mode']}；已标 {o['n_labeled']}/{o['n_rows']}）",
+        "",
+        "| 字段 | 类别 | 对 | 错 | 不确定 |",
+        "|---|---|---:|---:|---:|",
+    ]
+    for f, cs in o["by_field"].items():
+        for c, st in cs.items():
+            L.append(f"| {f} | {c} | {st['对']} | {st['错']} | {st['不确定']} |")
+    L += [
+        "",
+        "## 参数改向票（错样本可被它修正 vs 对样本会被它误伤）",
+        "",
+        "| 字段｜参数×步长 | 修正 | 误伤 |",
+        "|---|---:|---:|",
+    ]
+    for k, v in o["param_votes"].items():
+        if v["修正"] or v["误伤"]:
+            L.append(f"| {k} | {v['修正']} | {v['误伤']} |")
+    L += ["", "## 标「错」的样本（按字段）", ""]
+    for w in sorted(o["wrong"], key=lambda x: (x["field"], x["class"])):
+        kind = "误中" if w["now_hit"] else "漏中"
+        L.append(
+            f"- #{w['id']} {w['field']} {w['code']} {w['date']} [{w['class']}·{kind}]"
+            f"{'（翻转：' + '、'.join(w['flip']) + '）' if w['flip'] else ''}：{w['reason'] or '（未写理由）'}"
+        )
+    L += ["", f"> {o['note']}"]
+    return "\n".join(L) + "\n"
+
+
 def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
     d = out_dir / f"{rep['module']}__{rep['tag']}"
     d.mkdir(parents=True, exist_ok=True)
@@ -811,52 +1078,27 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
         parts = [
             f"<html><meta charset='utf-8'><title>{rep['module']} 抽检</title><body>",
             f"<h1>{html.escape(rep['module'])} 定义校准抽检（{rep['n_bars']} bar 池，{html.escape(rep['pool'])}）</h1>",
-            "<p>只画到 as-of 当根（无未来数据）。按标注表 labels.csv 的 id 填判定。</p>",
+            "<p>只画到 as-of 当根（无未来数据）。每图下方点选判定、写形态理由，标完点顶部「导出 labels.csv」。</p>",
         ]
+        csv_rows = _csv_rows(rep, frames)
         with (d / "labels.csv").open("w", encoding="utf-8-sig", newline="") as fh:
             w = csv.writer(fh)
-            w.writerow(
-                [
-                    "id",
-                    "字段",
-                    "代码",
-                    "日期",
-                    "类别",
-                    "检测值",
-                    "边界翻转参数",
-                ]
-                + (
-                    ["应命中(Y/N)", "形态理由（写形态，不写后来涨跌）"]
-                    if rep["mode"] == "review"
-                    else ["判定(对/错/不确定)", "备注"]
+            w.writerow(CSV_HEAD + CSV_TAIL[rep["mode"]])
+            for row in csv_rows:
+                w.writerow([*row, "", ""])
+        it = iter(csv_rows)
+        for f, rows in rep["samples"].items():
+            parts.append(f"<h2>{html.escape(f)}</h2>")
+            for r in rows:
+                row = next(it)
+                fr = frames.get(tuple(r["key"]))
+                title = f"#{row[0]} {row[2]} {row[3]} [{r['class']}] {f}={r['value']}"
+                if row[6]:
+                    title += f"（边界：{row[6]}）"
+                parts.append(
+                    f"<div class='s' data-id='{row[0]}'>{svg_chart(fr[1], title) if fr else ''}</div>"
                 )
-            )
-            n = 0
-            for f, rows in rep["samples"].items():
-                parts.append(f"<h2>{html.escape(f)}</h2>")
-                for r in rows:
-                    n += 1
-                    key = tuple(r["key"])
-                    fr = frames.get(key)
-                    code = key[0].split("|")[0]
-                    date = str(fr[0]["date"].iloc[-1])[:10] if fr else ""
-                    w.writerow(
-                        [
-                            n,
-                            f,
-                            code,
-                            date,
-                            r["class"],
-                            r["value"],
-                            "、".join(r["flip_params"]),
-                            "",
-                            "",
-                        ]
-                    )
-                    title = f"#{n} {code} {date} [{r['class']}] {f}={r['value']}"
-                    if r["flip_params"]:
-                        title += f"（边界：{'、'.join(r['flip_params'])}）"
-                    parts.append(f"<div>{svg_chart(fr[1], title) if fr else ''}</div>")
+        parts.append(label_ui(csv_rows, rep["mode"], f"calib:{d.name}"))
         parts.append("</body></html>")
         (d / "gallery.html").write_text("".join(parts), encoding="utf-8")
     else:
@@ -889,7 +1131,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--module", required=True, choices=sorted(MODULES))
     ap.add_argument(
-        "--mode", choices=("sample", "sensitivity", "review"), default="sample"
+        "--mode",
+        choices=("sample", "sensitivity", "review", "ui", "ingest"),
+        default="sample",
+        help="ui=给既有产物目录的 gallery 加标注界面（不重算）；ingest=读回标注出汇总（ingest.md）",
+    )
+    ap.add_argument("--dir", default="", help="ui / ingest：产物目录（<模块>__<tag>）")
+    ap.add_argument(
+        "--labels", default="", help="ingest：标注 CSV（缺省 = 目录内 labels.csv）"
     )
     ap.add_argument(
         "--review-source",
@@ -933,6 +1182,30 @@ def main(argv: Optional[list[str]] = None) -> int:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     args = _build_parser().parse_args(argv)
+    if args.mode in ("ui", "ingest"):
+        d = Path(args.dir)
+        if not (d / "summary.json").exists():
+            print(
+                f"[FAIL] {d} 不是 calib_probe 产物目录（缺 summary.json）",
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            if args.mode == "ui":
+                n = upgrade_gallery(d)
+                print(f"[calib_probe] 标注界面已加 {n} 图 ⇒ {d / 'gallery.html'}")
+            else:
+                o = ingest(d, Path(args.labels) if args.labels else None)
+                if not o["n_labeled"]:
+                    print("[FAIL] 标注表里没有任何已填判定", file=sys.stderr)
+                    return 1
+                print(
+                    f"[calib_probe] 已标 {o['n_labeled']}/{o['n_rows']}，错 {len(o['wrong'])} ⇒ {d / 'ingest.md'}"
+                )
+        except RuntimeError as exc:
+            print(f"[FAIL] {exc}", file=sys.stderr)
+            return 1
+        return 0
     try:
         rep = run_study(args)
     except RuntimeError as exc:

@@ -250,3 +250,131 @@ def test_review_pool_holdings_rows(tmp_path):
         index_df=_df(9),
     )
     assert keys == [("600001|full", 400)]
+
+
+class TestLabelUiAndIngestV0502:
+    """v0.502：网页标注界面（不重算升级既有产物）+ ingest 汇总。"""
+
+    def _mk(self, tmp_path, mode="sample", rows=None):
+        import csv
+        import json
+
+        d = tmp_path / "b1_thresholds__t"
+        d.mkdir()
+        (d / "summary.json").write_text(
+            json.dumps({"module": "b1_thresholds", "tag": "t", "mode": mode}),
+            encoding="utf-8",
+        )
+        rows = rows or [
+            [1, "patterns.j_low", "000001", "2022-01-05", "hit", "True", ""],
+            [
+                2,
+                "patterns.j_low",
+                "000002",
+                "2022-01-06",
+                "boundary",
+                "False",
+                "J_LOW_THRESHOLD×1.2",
+            ],
+            [
+                3,
+                "patterns.j_low",
+                "000003",
+                "2022-01-07",
+                "boundary",
+                "True",
+                "J_LOW_THRESHOLD×0.8",
+            ],
+        ]
+        tail = cp.CSV_TAIL[mode]
+        with (d / "labels.csv").open("w", encoding="utf-8-sig", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerow(cp.CSV_HEAD + tail)
+            for r in rows:
+                w.writerow([*r, "", ""])
+        (d / "gallery.html").write_text(
+            "<html><body>"
+            + "".join(f"<div><svg>{r[0]}</svg></div>" for r in rows)
+            + "</body></html>",
+            encoding="utf-8",
+        )
+        return d
+
+    def test_upgrade_idempotent_and_count_guard(self, tmp_path):
+        d = self._mk(tmp_path)
+        assert cp.upgrade_gallery(d) == 3
+        g1 = (d / "gallery.html").read_text(encoding="utf-8")
+        assert cp.upgrade_gallery(d) == 3
+        g2 = (d / "gallery.html").read_text(encoding="utf-8")
+        assert g1 == g2 and g2.count("const M = ") == 1 and g2.count("data-id='3'") == 1
+        (d / "gallery.html").write_text(
+            "<html><body><div><svg/></div></body></html>", encoding="utf-8"
+        )
+        import pytest
+
+        with pytest.raises(RuntimeError, match="不配套"):
+            cp.upgrade_gallery(d)
+
+    def _fill(self, d, labs):
+        import csv
+
+        with (d / "labels.csv").open(encoding="utf-8-sig", newline="") as fh:
+            rows = list(csv.reader(fh))
+        for r, (c, why) in zip(rows[1:], labs):
+            r[7], r[8] = c, why
+        with (d / "labels.csv").open("w", encoding="utf-8-sig", newline="") as fh:
+            csv.writer(fh).writerows(rows)
+
+    def test_ingest_sample_votes(self, tmp_path):
+        d = self._mk(tmp_path)
+        self._fill(d, [("对", ""), ("错", "J 13.5 也是深超卖"), ("对", "")])
+        o = cp.ingest(d)
+        assert o["n_labeled"] == 3 and len(o["wrong"]) == 1
+        w = o["wrong"][0]
+        assert w["should_hit"] and w["flip"] == [
+            "J_LOW_THRESHOLD×1.2"
+        ]  # 漏中，×1.2 能修
+        assert o["param_votes"]["patterns.j_low｜J_LOW_THRESHOLD×1.2"] == {
+            "修正": 1,
+            "误伤": 0,
+        }
+        assert o["param_votes"]["patterns.j_low｜J_LOW_THRESHOLD×0.8"] == {
+            "修正": 0,
+            "误伤": 1,
+        }
+        md = (d / "ingest.md").read_text(encoding="utf-8")
+        assert "漏中" in md and "J 13.5 也是深超卖" in md
+
+    def test_ingest_review_compares_with_current_hit(self, tmp_path):
+        rows = [
+            [1, "n.status", "000001", "2026-10-05", "hit", "True", ""],
+            [
+                2,
+                "n.status",
+                "000002",
+                "2026-10-06",
+                "near_miss",
+                "False",
+                "N_LOOKBACK×1.2",
+            ],
+        ]
+        d = self._mk(tmp_path, mode="review", rows=rows)
+        self._fill(d, [("N", "只是小级别回撤，不是 N 字"), ("Y", "")])
+        o = cp.ingest(d)
+        kinds = sorted((w["id"], w["now_hit"]) for w in o["wrong"])
+        assert kinds == [("1", True), ("2", False)]  # 1 误中，2 漏中
+
+    def test_cli_ui_and_ingest(self, tmp_path):
+        d = self._mk(tmp_path)
+        assert (
+            cp.main(["--module", "b1_thresholds", "--mode", "ui", "--dir", str(d)]) == 0
+        )
+        assert (
+            cp.main(["--module", "b1_thresholds", "--mode", "ingest", "--dir", str(d)])
+            == 1
+        )  # 未填
+        self._fill(d, [("对", ""), ("对", ""), ("不确定", "")])
+        assert (
+            cp.main(["--module", "b1_thresholds", "--mode", "ingest", "--dir", str(d)])
+            == 0
+        )

@@ -24,6 +24,7 @@
    整数版本，每升一次 = 判定语义变一次）；同时 `--holdout-use <因子> --window <用到的 1800 日期区间>` 登记——该因子在该窗口内的
    holdout 读数不再是独立证据（holdout 月报自动带上此表）。CHANGELOG 列受影响 R。
 4. 追踪：stock_pool / 研究 provenance / holdout 月报都落当时的 `factor_versions`；R 可按版本各跑一遍对比效果。
+5. **持续进化，不设「改不改」门槛**（owner 2026-11-09）：不预设误中率 / 漏中数阈值——每条标「错」的样本都进 v(n+1) 候选讨论，改不改、怎么改由 owner 看 `ingest.md` 逐条定；同一因子可以多轮迭代、版本号持续上升。约束只有两条不变：改动写成形态理由、每次语义变化都升版并登记（holdout 使用照常登记）。
 
 **命令（生产机）**：
 
@@ -35,6 +36,10 @@ uv run python -m custos.research calib_probe --module b1_structure --mode review
 # ② coder 改定义后，同批日期出新旧差异（新增 / 消失 / 取值变）
 uv run python -m custos.research calib_probe --module b1_structure --mode review --since 2026-09-05 --until 2026-11-03 --workers 8 --tag v2cand \
   --diff artifacts/reports/calibration/b1_structure__v1/summary.json
+# ①′ 标注：直接在 gallery.html 每图下方点选 + 写形态理由（浏览器本地存档，可分次标；顶部「导出 labels.csv」）
+#     旧产物加界面（不重算）：calib_probe --module <模块> --mode ui --dir artifacts/reports/calibration/<模块>__<tag>
+# ①″ 汇总：把导出的 labels.csv 放回产物目录（或 --labels 指定），出 ingest.md（逐字段对/错、误中/漏中清单、参数改向票）
+uv run python -m custos.research calib_probe --module b1_structure --mode ingest --dir artifacts/reports/calibration/b1_structure__v1
 # ③ 挖掘段确认新定义（sample 模式），owner 确认后升版 + 登记 holdout 使用
 uv run python scripts/dev/factor_versions.py --bump b1_structure --reason "..."
 uv run python scripts/dev/factor_versions.py --holdout-use b1_structure --window 2026-09-05~2026-11-03 --reason "1800 命中名单标注校准"
@@ -63,8 +68,10 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
   `--pool all`（**校准 J 门槛本身必须用 all**——jlow 池里放宽 J 不会多出命中）。
 - 参数改动覆盖：定义模块常量 + 所有 `from x import NAME` 绑定 + 源码默认值写该常量名的函数默认参数 + 抄进默认权重表的别名
   （如 `capital_intent.CAP_STRONG` → `DEFAULT_EVIDENCE_WEIGHTS`）。**函数体内联常量、import 时派生的常量改不到**——
-  报告 `no_effect`（全部步长零变化）须人工确认是不敏感还是没改到。开发机快照冒烟已知：`b1_thresholds.REVERSAL_CHANGE_PCT` /
-  `REVERSAL_AMPLITUDE_PCT` 为 no_effect（前者 import 时派生 MIN/MAX，应改 `REVERSAL_CHANGE_MIN/MAX_PCT`）。
+  报告 `no_effect`（全部步长零变化）须人工确认是不敏感还是没改到。开发机快照复核（2026-11-06，×0.1/×10 极端步长）：
+  `REVERSAL_CHANGE_PCT` 改不到（import 时派生 MIN/MAX，应改 `REVERSAL_CHANGE_MIN/MAX_PCT`）；`REVERSAL_AMPLITUDE_PCT` 等 11 个
+  极端步长下有反应（只是 ±20% 不敏感）；`DIST_LONG_BEAR_FRAC` 在 jlow 池仍零变化（出货②腿另需巨量，distribution 轮用 `--pool all` 单看）。
+- 边界样本的「边界翻转参数」带方向（v0.502，如 `J_LOW_THRESHOLD×1.2`）：ingest 据此出「参数改向票」——错样本能被它修正 / 对样本会被它误伤。
 - live 的资金意图阈值可被 `SCREEN_FORMULA_REGISTRY.json` `scoring.weights` 覆盖，校准时以 registry 实际生效值为准。
 
 ## P0H 持仓大形态（v0.485 纳入，**排在 P0 之前**）
