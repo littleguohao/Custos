@@ -124,6 +124,8 @@ uv run python -m custos.research family_lattice_study --mining-a-start <SEG_A_ST
 
 ## 步骤 3 · 冻结（截止日前，逐候选）
 
+> **第一批结局（2026-11-09）**：R36/R46 撤出、R39/R40 untested、R43/R44/R45 falsified ⇒ **无候选入批，第一批空批收尾**，判定段 2017~2021 本轮未读、预算原样留给后续批次。
+
 把**读判定段的命令**逐字定下来，末尾加 `--print-config-hash`（不读判定段交易数据；R39/R40/R44/R45 会先做一次
 指数日线的到达校验，需在生产机跑）：
 
@@ -131,10 +133,10 @@ uv run python -m custos.research family_lattice_study --mining-a-start <SEG_A_ST
 |---|---|
 | R36（不入批） | ⏹ owner 2026-10-21 撤出——不跑判定段 |
 | R39（不入批） | ❌ 挖掘段预演 untested（2026-10-20）——不跑判定段 |
-| R40 | `bear_regime_study --tag r40_v2_j --gates all` |
+| R40（不入批） | ❌ 挖掘段预演 untested（2026-11-08，C1 挖掘 A n_taken=69<100）——不跑判定段 |
 | R43（不入批） | ❌ 挖掘段 falsified（2026-10-20）——不跑判定段 |
 | R44（不入批） | ❌ 挖掘段 falsified（2026-10-19，r44_scan）——不入批，不跑判定段 |
-| R45 | `bear_regime_study --r45 --tag r45_v2_j` |
+| R45（不入批） | ❌ 挖掘段预演 falsified（2026-10-26，r45_v2_pre）——不跑判定段 |
 | R46（不入批） | ⏹ owner 2026-10-21 撤回——不跑判定段 |
 
 回填：每个候选的 `<tool>:<hash>` 写进对应单元回填区（块外，文本即可）。`--tag/--out-dir/--jobs/count` 不进哈希，可改；其余参数（含 `--timeout`）一个都不能动。
