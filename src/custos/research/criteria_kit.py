@@ -274,6 +274,171 @@ def cluster_draw(clusters: list[int], choices: tuple, rng: random.Random) -> lis
 
 
 # ---------------------------------------------------------------------------
+# 质量门（v0.501，owner 2026-11-09「看质量不看数量」+「更关注近年有效性」）
+# ---------------------------------------------------------------------------
+
+#: 资格底线：有效簇数 ≥ 30——只为让簇稳健下界算得出来，不是数量要求（R50 v0.477 口径推广）
+MIN_CLUSTERS = 30
+#: 双侧 95% 正态分位
+Z95 = 1.96
+#: 近年逐年独立读数年份 = 挖掘 B 的完整年（2026 只有 1~9 月 ⇒ 只描述不计）；
+#: 2020/2021 属判定段，挖掘时不可读
+RECENT_YEARS = (2022, 2023, 2024, 2025)
+#: 可判年份中同向比例下限
+YEAR_AGREE_FRAC = 0.75
+
+
+def cluster_ratio_bounds(
+    n_c: Any, h_c: Any, base: Optional[float], z: float = Z95
+) -> tuple[Optional[float], Optional[float], Optional[float]]:
+    """簇稳健比率界（单一来源；R50 v0.477 ``cluster_lift_bounds`` 上移并补上界）。
+
+    精度 p = Σh/Σn；方差按簇残差 Σ(h_c − p·n_c)²·k/(k−1) / (Σn)²（比率估计的
+    簇稳健三明治式）。返回 ``(p/base, (p−z·se)/base, (p+z·se)/base)``；
+    基线缺 / 总数 0 ⇒ 全 None；簇数 < 2 ⇒ 界为 None（点估计照给）。
+    ``base`` 视为常数（全体 / 同年同层精确基线，方差远小于信号侧）。"""
+    import numpy as np  # noqa: PLC0415
+
+    n_arr = np.asarray(n_c, dtype=float)
+    h_arr = np.asarray(h_c, dtype=float)
+    tot = float(n_arr.sum())
+    if not base or tot <= 0:
+        return None, None, None
+    p = float(h_arr.sum()) / tot
+    k = len(n_arr)
+    if k < 2:
+        return p / base, None, None
+    se = float(np.sqrt(((h_arr - p * n_arr) ** 2).sum() * k / (k - 1)) / tot)
+    return p / base, (p - z * se) / base, (p + z * se) / base
+
+
+def cluster_sums(cids: Any, *cols: Any) -> tuple[Any, ...]:
+    """按簇求和：``cids``（每行簇号）× 若干等长列 ⇒ 各列的逐簇和（只含出现过的簇）。"""
+    import numpy as np  # noqa: PLC0415
+
+    c = np.asarray(cids)
+    _u, inv = np.unique(c, return_inverse=True)
+    return tuple(
+        np.bincount(inv, weights=np.asarray(x, dtype=float), minlength=len(_u))
+        for x in cols
+    )
+
+
+def _weighted_margin(w: Any, ret: Any) -> Any:
+    """加权 margin（向量化，B×N 权重）：胜率 − 1/(1+盈亏比)，与
+    ``backtest_factors.summarize_trades`` + ``m2._margin`` 同口径（亏损 = ret<0，
+    平局计入胜率分母、不计入盈亏均值）。无盈 / 无亏 ⇒ NaN。"""
+    import numpy as np  # noqa: PLC0415
+
+    r = np.asarray(ret, dtype=float)
+    win, loss = r > 0, r < 0
+    n = w.sum(axis=1)
+    nw = w @ win.astype(float)
+    nl = w @ loss.astype(float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        aw = (w @ np.where(win, r, 0.0)) / nw
+        al = (w @ np.where(loss, -r, 0.0)) / nl
+        payoff = aw / al
+        return nw / n - 1.0 / (1.0 + payoff)
+
+
+def margin_delta_bounds(
+    ret_a: Any,
+    cid_a: Any,
+    ret_b: Any,
+    cid_b: Any,
+    *,
+    seed: Any,
+    n_boot: int = 400,
+) -> dict[str, Any]:
+    """配对 margin 差（a − b）的簇 bootstrap 95% 区间（单一来源，R47 用）。
+
+    两组交易来自**同一批信号**、只是出场不同 ⇒ 按信号簇整簇重抽、两边用同一组
+    簇权重（配对，抵消信号侧方差）。``cid_*`` = 每笔交易所属信号簇号（两边同一
+    编号体系）。返回 ``{delta, lo, hi, n_clusters}``；某侧无盈或无亏 ⇒ 对应量 None。"""
+    import numpy as np  # noqa: PLC0415
+
+    ca, cb = np.asarray(cid_a), np.asarray(cid_b)
+    uniq = np.unique(np.concatenate([ca, cb]))
+    k = len(uniq)
+    out: dict[str, Any] = {"delta": None, "lo": None, "hi": None, "n_clusters": int(k)}
+    if k == 0:
+        return out
+    ia = np.searchsorted(uniq, ca)
+    ib = np.searchsorted(uniq, cb)
+    one = np.ones((1, k))
+    pa = _weighted_margin(one[:, ia], ret_a)[0]
+    pb = _weighted_margin(one[:, ib], ret_b)[0]
+    if np.isfinite(pa) and np.isfinite(pb):
+        out["delta"] = float(pa - pb)
+    if k < 2:
+        return out
+    rng = np.random.default_rng(seed)
+    wc = rng.multinomial(k, np.full(k, 1.0 / k), size=n_boot).astype(float)
+    d = _weighted_margin(wc[:, ia], ret_a) - _weighted_margin(wc[:, ib], ret_b)
+    d = d[np.isfinite(d)]
+    if len(d) >= max(20, n_boot // 2):
+        out["lo"] = float(np.quantile(d, 0.025))
+        out["hi"] = float(np.quantile(d, 0.975))
+    return out
+
+
+def yearly_stability(
+    per_year: dict[Any, dict[str, Any]],
+    *,
+    null: float,
+    years: tuple[int, ...] = RECENT_YEARS,
+    min_clusters: int = MIN_CLUSTERS,
+    frac: float = YEAR_AGREE_FRAC,
+) -> dict[str, Any]:
+    """近年逐年稳定性（单一来源；owner 2026-11-09）。
+
+    ``per_year[y] = {point, lo, hi, n_clusters}``（键可为 int 或 str 年份）。规则写死：
+
+    - **可判年** = 有效簇数 ≥ ``min_clusters`` 且点估计非空：要求可判年中
+      「点估计 > null」（同向）的比例 ≥ ``frac``；
+    - **任何一年**（含稀疏年）不得**显著反向**：95% 上界 < null ⇒ 不过；
+    - 稀疏年 / 缺年不单独判方向——稀疏但高质量的信号不因「某年样本太少」出局
+      （质量 > 数量）；可判年为 0 ⇒ 只看「无显著反向」，``evidence="none"`` 留痕。
+    """
+    detail: dict[str, Any] = {}
+    judged = agree = 0
+    reversed_years: list[int] = []
+    for y in years:
+        rd = per_year.get(y) or per_year.get(str(y)) or {}
+        pt, hi, nc = rd.get("point"), rd.get("hi"), int(rd.get("n_clusters") or 0)
+        is_judged = bool(pt is not None and pt == pt and nc >= min_clusters)
+        rev = bool(hi is not None and hi == hi and float(hi) < null)
+        same = bool(is_judged and pt is not None and float(pt) > null)
+        judged += int(is_judged)
+        agree += int(same)
+        if rev:
+            reversed_years.append(int(y))
+        detail[str(y)] = {
+            "point": pt,
+            "lo": rd.get("lo"),
+            "hi": hi,
+            "n_clusters": nc,
+            "judged": bool(is_judged),
+            "same_direction": same if is_judged else None,
+            "significantly_reversed": bool(rev),
+        }
+    dir_ok = judged == 0 or agree / judged >= frac
+    return {
+        "ok": bool(dir_ok and not reversed_years),
+        "judged": judged,
+        "agree": agree,
+        "reversed_years": reversed_years,
+        "evidence": "none" if judged == 0 else "judged",
+        "years": detail,
+        "rule": (
+            f"近年 {years[0]}~{years[-1]} 逐年：可判年（簇 ≥{min_clusters}）同向（>{null:g}）"
+            f"占比 ≥{frac:g}；任何一年 95% 上界 <{null:g} 即不过"
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
 # CLI（诊断：本模块是库——打印单一来源清单）
 # ---------------------------------------------------------------------------
 
@@ -286,7 +451,8 @@ def main(_argv: Optional[list[str]] = None) -> int:
         "  q95（campaign 语义）/ verdict_four_state（C1 untested 优先）/\n"
         "  c4_state_of（空池 indeterminate/池未满 provisional）/\n"
         "  assemble_c4_pool（v0.317 族重抽至过门臂满 N 或上限 10×N）/\n"
-        "  cluster_ids + cluster_draw（v0.335 簇构造——C4 打乱按簇不按笔）\n"
+        "  cluster_ids + cluster_draw（v0.335 簇构造——C4 打乱按簇不按笔）/\n"
+        "  cluster_ratio_bounds / margin_delta_bounds / yearly_stability（v0.501 质量门 + 近年逐年稳定性）\n"
         "rdd 相对门=strategy_grid.rdd_gate_ok；C5 判决=exit_c5_terminal.apply_c5"
         "（均已有单源，勿再抄）。"
     )

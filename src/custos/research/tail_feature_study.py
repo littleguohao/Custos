@@ -42,7 +42,11 @@ from custos.core.paths import LOGS, RESEARCH_DIR
 BIG_WIN = 0.20
 BIG_LOSS = -0.10
 LIFT_MIN = 1.2
-MIN_N_HI = 2000
+MIN_N_HI = (
+    2000  # 🔄 v0.501 起不再作 C1 门（只描述）——改为高档有效簇数 ≥ MIN_CLUSTERS_HI
+)
+#: v0.501 C1 底线：高档有效簇数（只为簇稳健下界可算，不是数量要求；= kit.MIN_CLUSTERS）
+MIN_CLUSTERS_HI = 30
 MAX_MISSING = 0.5
 SPEARMAN_MIN = 0.8
 YEAR_FRAC = 2 / 3
@@ -309,6 +313,41 @@ def _ret_block(r: np.ndarray, hi: np.ndarray) -> dict[str, Any]:
     }
 
 
+def _cluster_block(
+    c: np.ndarray, hi: np.ndarray, b: np.ndarray, y: np.ndarray, pb: float
+) -> dict[str, Any]:
+    """v0.501 质量门读数：高档大单率 lift 的簇稳健 95% 界 + 有效簇数；逐年同口径
+    （年基线 = 当年全体大单率，与 year_frac 同口径）。"""
+    from custos.research import criteria_kit as kit  # noqa: PLC0415
+
+    out: dict[str, Any] = {
+        "n_clusters_hi": 0,
+        "lift_big_lo95": None,
+        "lift_big_hi95": None,
+    }
+    if hi.any():
+        n_c, h_c = kit.cluster_sums(c[hi], np.ones(int(hi.sum())), b[hi])
+        _pt, lo, up = kit.cluster_ratio_bounds(n_c, h_c, pb)
+        out.update(n_clusters_hi=len(n_c), lift_big_lo95=lo, lift_big_hi95=up)
+    by_year: dict[str, Any] = {}
+    for yy in np.unique(y):
+        m = y == yy
+        hm = hi & m
+        base = float(b[m].mean()) if m.any() else 0.0
+        if not hm.any():
+            continue
+        n_c, h_c = kit.cluster_sums(c[hm], np.ones(int(hm.sum())), b[hm])
+        pt, lo, up = kit.cluster_ratio_bounds(n_c, h_c, base)
+        by_year[str(int(yy))] = {
+            "point": pt,
+            "lo": lo,
+            "hi": up,
+            "n_clusters": len(n_c),
+        }
+    out["by_year_big"] = by_year
+    return out
+
+
 def feature_stats(
     vals: np.ndarray,
     big: np.ndarray,
@@ -316,6 +355,7 @@ def feature_stats(
     year: np.ndarray,
     kind: str,
     ret: Optional[np.ndarray] = None,
+    cids: Optional[np.ndarray] = None,
 ) -> dict[str, Any]:
     ok = ~np.isnan(vals)
     n_all = int(ok.sum())
@@ -360,6 +400,8 @@ def feature_stats(
     )
     if ret is not None:
         out.update(_ret_block(ret[ok], hi))
+    if cids is not None:
+        out.update(_cluster_block(np.asarray(cids)[ok], hi, b, y, pb))
     if kind != "quintile":
         yrs = []
         for yy in np.unique(y):
@@ -387,6 +429,7 @@ def _all_stats(
             win["year"],
             "quintile" if f in QUINTILE else "binary",
             win["ret"] if perm is None else None,
+            win.get("cid"),
         )
     return out
 
@@ -517,6 +560,8 @@ def build_window(
         "year": np.array([int(it["date"][:4]) for it in items]),
         "feat": {f: np.array(feats[f], dtype=float) for f in feats},
         "ret": r,
+        # v0.501：交易所属信号簇（kit.cluster_ids，按信号 code/i/date 划簇）——簇稳健界用
+        "cid": np.asarray(_kit_cluster_ids(items), dtype=np.int64),
         "raw": raws,
         "trades": kept,
         "df_of": {c: group["per_code"][c]["df"] for c in frames},
@@ -524,24 +569,63 @@ def build_window(
     }
 
 
+def _kit_cluster_ids(items: list[dict]) -> list[int]:
+    from custos.research import criteria_kit as kit  # noqa: PLC0415
+
+    return kit.cluster_ids(items) if items else []
+
+
+def _recent_window(per_w: dict[str, Any]) -> str:
+    """近年逐年稳定性所在窗 = 挖掘 B（v2 布局窗名 mining_b；其他布局取末窗）。"""
+    return "mining_b" if "mining_b" in per_w else list(per_w)[-1]
+
+
 def judge(per_w: dict[str, dict[str, dict[str, Any]]], f: str) -> dict[str, Any]:
+    """v0.501 跑数前修订（owner 2026-11-09「看质量不看数量」）：
+    C1 = 高档有效簇数 ≥ MIN_CLUSTERS_HI ∧ 缺失率 ≤ 50%（原「n_hi ≥ 2000」🔄 废）；
+    C2 = 两窗 lift_big 的**簇稳健 95% 下界** > 1.2（原点估计 > 1.2 🔄 废）；
+    C3 追加 ③ 挖掘 B 近年逐年稳定（kit.yearly_stability，同向 = lift_big > 1）。"""
+    from custos.research import criteria_kit as kit  # noqa: PLC0415
+
     ws = list(per_w)
     s = {w: per_w[w][f] for w in ws}
     c1 = all(
-        s[w].get("n_hi", 0) >= MIN_N_HI
+        s[w].get("n_clusters_hi", 0) >= MIN_CLUSTERS_HI
         and (s[w].get("missing_rate") or 0) <= MAX_MISSING
         for w in ws
     )
-    c2 = all((s[w].get("lift_big") or 0) > LIFT_MIN for w in ws)
+    c2 = all(
+        (lo := s[w].get("lift_big_lo95")) is not None and lo > LIFT_MIN for w in ws
+    )
     tail = all((s[w].get("tail_ratio") or 0) > 1 for w in ws)
     if f in QUINTILE:
         stab = all((s[w].get("spearman") or -1) >= SPEARMAN_MIN for w in ws)
     else:
         stab = all((s[w].get("year_frac_gt1") or 0) >= YEAR_FRAC for w in ws)
+    yr = kit.yearly_stability(
+        s[_recent_window(per_w)].get("by_year_big") or {},
+        null=1.0,
+        min_clusters=MIN_CLUSTERS_HI,
+    )
     return {
-        "C1": {"ok": c1},
-        "C2": {"ok": c2, "min_lift_big": _min_lift(per_w, f)},
-        "C3": {"ok": bool(tail and stab), "tail_ok": tail, "stability_ok": stab},
+        "C1": {
+            "ok": c1,
+            "n_clusters_hi": {w: s[w].get("n_clusters_hi") for w in ws},
+            "rule": f"高档有效簇数 ≥{MIN_CLUSTERS_HI} ∧ 缺失率 ≤{MAX_MISSING:g}（v0.501）",
+        },
+        "C2": {
+            "ok": c2,
+            "min_lift_big": _min_lift(per_w, f),
+            "lift_big_lo95": {w: s[w].get("lift_big_lo95") for w in ws},
+            "rule": f"两窗 lift_big 簇稳健 95% 下界 >{LIFT_MIN:g}（v0.501）",
+        },
+        "C3": {
+            "ok": bool(tail and stab and yr["ok"]),
+            "tail_ok": tail,
+            "stability_ok": stab,
+            "yearly_ok": yr["ok"],
+            "yearly": yr,
+        },
     }
 
 
@@ -664,7 +748,7 @@ def run_study(
         "provenance": pv.build(
             args,
             unit="R48",
-            criteria_version="v0.443",
+            criteria_version="v0.501",
             pre_reg_doc=RESEARCH_DIR / "R48_tail_entry_features.md",
         ),
     }

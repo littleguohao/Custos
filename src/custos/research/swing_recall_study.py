@@ -581,11 +581,13 @@ def _baseline(
     }
 
 
-def _baseline_low_exact(win: dict[str, Any], obj: str) -> Optional[float]:
+def _baseline_low_exact(
+    win: dict[str, Any], obj: str, rows: Optional[list[dict]] = None
+) -> Optional[float]:
     """局部低点对照（v0.458）：按该对象信号的 (年, 市值五分位) 组成加权，各层取**全部**局部低点 bar
     落在起涨窗口内的精确比例（不抽样——抽样基线在小样本对象上噪声大，max-of-16 置换会被噪声顶高）。"""
     counts: dict[tuple[str, Any], int] = {}
-    for r in win["sig_rows"][obj]:
+    for r in win["sig_rows"][obj] if rows is None else rows:
         k = _stratum_of(win, r["code"], r["date"][:4])
         counts[k] = counts.get(k, 0) + 1
     if not counts:
@@ -689,6 +691,7 @@ def window_readings(
         _lift, lo95 = cluster_lift_bounds(
             [cl_n[c] for c in cl_n], [cl_h[c] for c in cl_n], base_low
         )
+        by_year_low = _year_low_bounds(win, obj, flat)
         readings[obj] = {
             "n_signals": n_sig,
             "n_matched": n_hit,
@@ -700,6 +703,8 @@ def window_readings(
             "lift_low": (prec / base_low if prec is not None and base_low else None),
             "n_clusters": len(cl_n),
             "lift_low_lo95": lo95,  # v0.477 资格量
+            # v0.501：逐年 lift_low 簇稳健界（近年稳定性判据用；同年同层精确基线）
+            "by_year_low": by_year_low,
             "recall": (matched_swings / n_swings if n_swings else None),
             "n_swings_matched": matched_swings,
             "lead_quantiles": _quantiles(offsets),
@@ -721,6 +726,33 @@ def window_readings(
         "n_clusters": {o: readings[o]["n_clusters"] for o in OBJECTS},
     }
     return readings, aux
+
+
+def _year_low_bounds(
+    win: dict[str, Any], obj: str, flat: list[dict]
+) -> dict[str, dict[str, Any]]:
+    """逐信号年：lift_low 点估计 + 簇稳健 95% 界 + 有效簇数 + 该年基线（v0.501）。
+    簇号取全窗 ``kit.cluster_ids``（跨年簇按年切开——各年独立读数）。"""
+    from custos.research import criteria_kit as kit  # noqa: PLC0415
+
+    if not flat:
+        return {}
+    cids = kit.cluster_ids(flat)
+    by: dict[str, list[int]] = {}
+    for k, r in enumerate(flat):
+        by.setdefault(r["date"][:4], []).append(k)
+    out: dict[str, dict[str, Any]] = {}
+    for y, ks in sorted(by.items()):
+        rows = [flat[k] for k in ks]
+        base = _baseline_low_exact(win, obj, rows)
+        n_c, h_c = kit.cluster_sums(
+            [cids[k] for k in ks],
+            [1.0] * len(ks),
+            [float(bool(flat[k].get("_hit"))) for k in ks],
+        )
+        pt, lo, hi = kit.cluster_ratio_bounds(n_c, h_c, base, LIFT_Z)
+        out[y] = {"point": pt, "lo": lo, "hi": hi, "n_clusters": len(n_c), "base": base}
+    return out
 
 
 def _funnel(win: dict[str, Any], readings: dict[str, Any]) -> dict[str, Any]:
@@ -1011,18 +1043,23 @@ def _null_lifts(
     shapes: dict[str, Any],
     base_low: dict[str, Any],
     rng: Any,
-) -> dict[str, tuple[Optional[float], Optional[float]]]:
+    base_year: Optional[dict[str, dict[str, Any]]] = None,
+) -> dict[str, tuple[Optional[float], Optional[float], dict[str, Any]]]:
     """单臂：每对象按簇形状逐簇抽同层随机局部低点作锚点，整簇取锚点命中；精度 ÷ 局部低点基线。
-    v0.477：返回 {对象: (lift, 簇稳健下界)}——臂资格与候选同口径（下界 > LIFT_MIN）。"""
+    v0.477：返回 {对象: (lift, 簇稳健下界, 逐年界)}——臂资格与候选同口径（下界 > LIFT_MIN；
+    v0.501 起另报逐年 lift_low 界，供近年稳定性同口径判定；簇形状分层键含年 ⇒ 逐年直接按键归集）。"""
+    from custos.research import criteria_kit as kit  # noqa: PLC0415
+
     out: dict[str, Any] = {}
     for o in OBJECTS:
         sh = shapes[o]
         b = base_low.get(o)
         if not sh or not b or not len(mat["all"]):
-            out[o] = (None, None)
+            out[o] = (None, None, {})
             continue
         ns: list[Any] = []
         hs: list[Any] = []
+        yr: dict[str, tuple[list[Any], list[Any]]] = {}
         for key, lens in sh.items():
             pool = mat["strata"].get(key)
             if pool is None or not len(pool):
@@ -1035,29 +1072,33 @@ def _null_lifts(
             # 高度同进同出；取完全相关是保守端（零假设方差 ≥ 真实）
             ns.append(lens)
             hs.append(h * lens)
+            yb = yr.setdefault(str(key[0]), ([], []))
+            yb[0].append(lens)
+            yb[1].append(h * lens)
         if not ns:
-            out[o] = (None, None)
+            out[o] = (None, None, {})
             continue
-        out[o] = cluster_lift_bounds(np.concatenate(ns), np.concatenate(hs), b)
+        lift, lo = cluster_lift_bounds(np.concatenate(ns), np.concatenate(hs), b)
+        by_year: dict[str, Any] = {}
+        for y, (yn, yh) in yr.items():
+            nn, hh = np.concatenate(yn), np.concatenate(yh)
+            pt, ylo, yhi = kit.cluster_ratio_bounds(
+                nn, hh, (base_year or {}).get(o, {}).get(y), LIFT_Z
+            )
+            by_year[y] = {"point": pt, "lo": ylo, "hi": yhi, "n_clusters": len(nn)}
+        out[o] = (lift, lo, by_year)
     return out
 
 
 def cluster_lift_bounds(
     n_c: Any, h_c: Any, base: Optional[float], z: float = LIFT_Z
 ) -> tuple[Optional[float], Optional[float]]:
-    """簇稳健比率估计（v0.477）：精度 p = Σh/Σn，方差按簇残差 Σ(h_c − p·n_c)² ·k/(k−1) / (Σn)²；
-    返回 (lift, lift 下界) = (p/base, (p − z·se)/base)。簇数 < 2 或基线缺 ⇒ 下界 None。"""
-    n_c = np.asarray(n_c, dtype=float)
-    h_c = np.asarray(h_c, dtype=float)
-    tot = float(n_c.sum())
-    if not base or tot <= 0:
-        return None, None
-    p = float(h_c.sum()) / tot
-    k = len(n_c)
-    if k < 2:
-        return p / base, None
-    se = float(np.sqrt(((h_c - p * n_c) ** 2).sum() * k / (k - 1)) / tot)
-    return p / base, (p - z * se) / base
+    """簇稳健比率估计（v0.477）→ (lift, lift 下界)。v0.501 起委托 ``criteria_kit.cluster_ratio_bounds``
+    （单一来源，补了上界；本函数保留两元返回给既有调用点）。"""
+    from custos.research import criteria_kit as kit  # noqa: PLC0415
+
+    lift, lo, _hi = kit.cluster_ratio_bounds(n_c, h_c, base, z)
+    return lift, lo
 
 
 def _min_clusters(args: Any) -> int:
@@ -1165,10 +1206,16 @@ def run_study(
         ra, rb = readings[wa][o], readings[wb][o]
         qa = _qualifies(ra, _min_clusters(args))
         qb = _qualifies(rb, _min_clusters(args))
+        # v0.501 跑数前修订（owner 2026-11-09）：B 复现另须近年逐年稳定（2022~2025，同向 = lift_low > 1）
+        yb = kit.yearly_stability(
+            rb.get("by_year_low") or {}, null=1.0, min_clusters=_min_clusters(args)
+        )
         objs[o] = {
             "windows": {wa: ra, wb: rb},
             "qualify_a": qa,
-            "replicated": bool(qa and qb),
+            "qualify_b": qb,
+            "yearly_b": yb,
+            "replicated": bool(qa and qb and yb["ok"]),
             "lift_a": ra.get("lift_low"),
             "lift_b": rb.get("lift_low"),
             "lift_lo95_a": ra.get("lift_low_lo95"),
@@ -1194,6 +1241,17 @@ def run_study(
     base_low = {
         w: {o: readings[w][o]["baseline_low"] for o in OBJECTS} for w in (wa, wb)
     }
+    # 臂逐年基线 = 候选同年基线（v0.501，与候选同口径）
+    base_year = {
+        w: {
+            o: {
+                y: v.get("base")
+                for y, v in (readings[w][o].get("by_year_low") or {}).items()
+            }
+            for o in OBJECTS
+        }
+        for w in (wa, wb)
+    }
 
     def _arm(i: int) -> Optional[float]:
         rng = np.random.default_rng(
@@ -1201,10 +1259,12 @@ def run_study(
         )  # 确定性（勿用 hash()：str 哈希随进程随机）
         lifts = {}
         for w in (wa, wb):
-            lifts[w] = _null_lifts(wins[w], mats[w], shapes[w], base_low[w], rng)
+            lifts[w] = _null_lifts(
+                wins[w], mats[w], shapes[w], base_low[w], rng, base_year[w]
+            )
         best = 0.0
         for o in OBJECTS:
-            (la, la_lo), (lb, lb_lo) = lifts[wa][o], lifts[wb][o]
+            (la, la_lo, _ya), (lb, lb_lo, yr_b) = lifts[wa][o], lifts[wb][o]
             mc = _min_clusters(args)
             if (
                 aux[wa]["n_clusters"][o] >= mc
@@ -1215,6 +1275,7 @@ def run_study(
                 and lb_lo is not None
                 and la_lo > LIFT_MIN
                 and lb_lo > LIFT_MIN
+                and kit.yearly_stability(yr_b, null=1.0, min_clusters=mc)["ok"]
             ):
                 best = max(best, min(la, lb))
         return best  # 无复现记 0（R49 同口径——臂恒有值，池必满 N）

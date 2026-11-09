@@ -140,3 +140,34 @@ def test_early_stop_same_verdict_v0466():
         assert e["verdict"] == f["verdict"], seed
         if e["criteria"]["C4"]["early_stop"]["skipped"]:
             assert e["criteria"]["C4"]["evaluated"] == 0
+
+
+def test_quality_gate_fields_v0501():
+    """v0.501：C1 = 两窗参照格信号簇数 ≥ 30；C2 = 两窗 Δmargin 配对簇下界 > 0 ∧ 挖掘 B 近年逐年稳定。"""
+    from custos.research import criteria_kit as kit
+
+    good = _run(1, replay=_replay_factory(1, edge_cell=(0.08, 0.12)), scan_random=10)
+    c1, c2 = good["criteria"]["C1"], good["criteria"]["C2"]
+    assert c1["ok"] and all(v >= kit.MIN_CLUSTERS for v in c1["n_clusters"].values())
+    assert "n_taken" in c1  # 原判据量保留为描述
+    for v in c2["windows"].values():
+        assert v["delta_lo95"] is not None and v["delta_lo95"] > 0
+        assert v["delta_lo95"] <= v["delta_margin"] <= v["delta_hi95"] + 1e-9
+    assert c2["yearly"]["rule"].startswith("近年 2022~2025") and c2["ok"] == (
+        all(v["ok"] for v in c2["windows"].values()) and c2["yearly"]["ok"]
+    )
+
+
+def test_protect_delta_bounds_pairs_by_signal():
+    """配对：同一批信号、出场相同 ⇒ Δ = 0 且区间退化为 0（信号侧方差完全抵消）。"""
+    tr = [
+        {
+            "code": f"60000{i % 7}",
+            "entry_date": f"2023-0{1 + i % 9}-1{i % 10}",
+            "ret": r,
+            "reason": "stop",
+        }
+        for i, r in enumerate([0.1, -0.05, 0.2, -0.03, 0.04, -0.06, 0.15, -0.02] * 6)
+    ]
+    b = prr.protect_delta_bounds(tr, list(tr), seed=1)
+    assert b["delta"] == 0 and b["lo"] == 0 and b["hi"] == 0

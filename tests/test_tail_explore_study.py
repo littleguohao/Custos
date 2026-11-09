@@ -134,6 +134,18 @@ class TestSentinelExploreIid:
             return np.array(idx)
 
         monkeypatch.setattr(tf, "cluster_perm", iid)
+        # v0.501 起资格 = 簇稳健下界 + B 近年逐年稳定：合成零假设世界里质量门把复现格全挡掉
+        # （实测 10/10 种子 0 复现，资格簇逐笔化也一样），C4 校准机制无从被检验。哨兵因此同时
+        # 把质量门退回点估计（模拟「门被回退」），专测 C4 置换按簇这一道；单边退化由质量门兜底。
+        monkeypatch.setattr(
+            te,
+            "_bound_ok",
+            lambda p, perm, h, v, min_cl, yearly=False: {
+                "ok": True,
+                "n_clusters": None,
+                "lo95": None,
+            },
+        )
         with pytest.raises(AssertionError, match="零假设校准失败"):
             hn.assert_noise_calibration(
                 "tail_explore[逐笔置换哨兵]",
@@ -204,3 +216,14 @@ def test_early_stop_same_lead_status_v0466():
             assert [(d["cell"], d["status"]) for d in e["leads"]] == [
                 (d["cell"], d["status"]) for d in f["leads"]
             ]
+
+
+def test_quality_gate_fields_v0501():
+    """v0.501：B 侧线索带簇稳健下界 / 簇数 / 近年逐年块；复现 ⇔ 质量门 ∧ 逐年稳定。"""
+    rep = _run(1, edge=True)
+    reps = [d for d in rep["leads"] if d["replicated"]]
+    assert reps, "植入 edge 应有复现线索"
+    for d in reps:
+        assert d["lift_lo95_b"] is not None and d["lift_lo95_b"] > te.LIFT_MIN
+        assert d["yearly_b"]["ok"] is True
+    assert te._min_clusters(te.MIN_N) == 30 and te._min_clusters(50) == 50

@@ -415,3 +415,45 @@ def test_early_stop_same_feature_verdicts_v0466():
                 k: v["verdict"] for k, v in f["features"].items()
             }
             assert e["verdict"] == f["verdict"]
+
+
+def test_quality_gate_and_yearly_v0501():
+    """v0.501：C1 = 高档簇数底线、C2 = 簇稳健下界、C3 含挖掘 B 近年逐年稳定；判据量都落盘。"""
+    rep = _run(1, edge=True)
+    lu = rep["features"]["limitup_active"]
+    c = lu["criteria"]
+    assert set(c["C2"]["lift_big_lo95"]) == {"mining_a", "mining_b"}
+    assert all(
+        v is not None and v > tf.LIFT_MIN for v in c["C2"]["lift_big_lo95"].values()
+    )
+    assert c["C3"]["yearly"]["rule"].startswith("近年 2022~2025")
+    assert c["C3"]["ok"] == bool(
+        c["C3"]["tail_ok"] and c["C3"]["stability_ok"] and c["C3"]["yearly_ok"]
+    )
+    wb = lu["windows"]["mining_b"]
+    assert {"n_clusters_hi", "lift_big_lo95", "lift_big_hi95", "by_year_big"} <= set(wb)
+    assert all(int(y) >= 2022 for y in wb["by_year_big"])
+
+
+def test_point_estimate_alone_no_longer_passes_c2(monkeypatch):
+    """点估计 > 1.2 但下界不过 ⇒ C2 不过（v0.501 前会过）。"""
+    per_w = {
+        w: {
+            "x": {
+                "n_clusters_hi": 40,
+                "missing_rate": 0.0,
+                "lift_big": 1.5,
+                "lift_big_lo95": 1.1,
+                "tail_ratio": 1.2,
+                "year_frac_gt1": 1.0,
+                "by_year_big": {},
+            }
+        }
+        for w in ("mining_a", "mining_b")
+    }
+    assert tf.judge(per_w, "x")["C2"]["ok"] is False
+    for w in per_w:
+        per_w[w]["x"]["lift_big_lo95"] = 1.25
+    assert tf.judge(per_w, "x")["C2"]["ok"] is True
+    per_w["mining_a"]["x"]["n_clusters_hi"] = 29
+    assert tf.judge(per_w, "x")["C1"]["ok"] is False

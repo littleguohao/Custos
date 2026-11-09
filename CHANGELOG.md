@@ -504,6 +504,7 @@
 | 2026-11-05 | v0.498 | **1800 卡死事故双修**：① `pipeline_kit.run_stage` 超时改杀整棵进程树（Windows taskkill /T、POSIX killpg）——旧实现只杀 uv 壳，孙进程攥住管道 ⇒ communicate 永等 EOF，超时退化成死锁（refresh_xdxr 卡 3.3h 整链陪葬）；② xdxr 权息连接显式 auto_retry=False/raise_exception=True（pytdx 默认重连重试叠慢吐包可挂数小时），批量加 --hard-deadline 480s 硬上限，到点即停、已取部分落盘不丢 | owner 2026-11-05「修了吧」 | 钉测 +4（含杀树实测） |
 | 2026-11-06 | v0.499 | **权息刷新截断显式留痕 + 连接释放**（v0.498 review）：`fetch_xdxr_batch(stats=)` 出参记截断；`--warmup` 截断时末行 `[PARTIAL] i/N`，run_1800 从 stdout 取结论行，截断打 WARN 不再显示 [OK]；建连 / 释放收口 `_open_quotes` / `_dispose_quotes`（先关 raise_exception 再 close，防 mootdx `__del__` 抛 TdxConnectionError）；修 v0.498 起开发机红的建连用例 | owner 2026-11-06 | v0.498 |
 | 2026-11-06 | v0.500 | **1800 名称缓存误杀与连接超时防护**：广义证券旧缓存不再与 A 股新表直接比数量，改按本地 A 股 ≥80% 覆盖验收后合并；mootdx 全市场建连 10s 超时、禁自动重试并复用安静释放 | owner 2026-11-06 批准修改 | 钉测 +4（累计 180 项）；副本实刷 5578 合并为 51745；权息仍 10s 超时 |
+| 2026-11-09 | v0.501 | **第二批跑数前修订：质量门 + 近年逐年稳定**（owner「看质量不看数量」「更关注近年」）：R47/R48/R49/R50 资格门由计数改为效应簇稳健 95% 下界过线（底线 ≥30 簇）；挖掘 B 2022~2025 逐年独立读数，可判年 ≥3/4 同向、任何一年显著反向即不过；挖掘 A 照旧作门。单源 `criteria_kit.cluster_ratio_bounds / margin_delta_bounds / yearly_stability` | owner 2026-11-09 | 四单元修订节 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

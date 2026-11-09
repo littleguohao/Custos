@@ -1717,6 +1717,62 @@ def protect_tail_reading(
     return out
 
 
+def _protect_cids(
+    trades_a: list[dict], trades_b: list[dict]
+) -> tuple[list[int], list[int]]:
+    """两组交易（同一批信号、不同出场）的共同信号簇号（v0.501）：按 (code, 入场日) 去重成信号，
+    ``kit.cluster_ids`` 划簇（缺 bar 序号 ⇒ 日历日间隔 ≤5 判邻）。"""
+    from custos.research import criteria_kit as kit  # noqa: PLC0415
+
+    keys = sorted(
+        {(str(t["code"]), str(t["entry_date"])[:10]) for t in (*trades_a, *trades_b)}
+    )
+    cid_of = dict(zip(keys, kit.cluster_ids([{"code": c, "date": d} for c, d in keys])))
+    return (
+        [cid_of[(str(t["code"]), str(t["entry_date"])[:10])] for t in trades_a],
+        [cid_of[(str(t["code"]), str(t["entry_date"])[:10])] for t in trades_b],
+    )
+
+
+def _protect_cluster_count(trades: list[dict]) -> int:
+    real = _protect_realized(trades)
+    return len(set(_protect_cids(real, [])[0])) if real else 0
+
+
+def protect_delta_bounds(
+    trades_g: list[dict], trades_ref: list[dict], *, seed: Any
+) -> dict[str, Any]:
+    """g* − 参照的已实现 margin 差：配对簇 bootstrap 95% 区间（kit.margin_delta_bounds）。"""
+    from custos.research import criteria_kit as kit  # noqa: PLC0415
+
+    a, b = _protect_realized(trades_g), _protect_realized(trades_ref)
+    ca, cb = _protect_cids(a, b)
+    return kit.margin_delta_bounds(
+        [float(t["ret"]) for t in a], ca, [float(t["ret"]) for t in b], cb, seed=seed
+    )
+
+
+def protect_yearly_deltas(
+    trades_g: list[dict], trades_ref: list[dict], *, seed: int
+) -> dict[str, dict[str, Any]]:
+    """按入场年逐年的配对 Δmargin 区间 → ``kit.yearly_stability`` 输入（point/lo/hi/n_clusters）。"""
+    by: dict[str, tuple[list[dict], list[dict]]] = {}
+    for t in trades_g:
+        by.setdefault(str(t["entry_date"])[:4], ([], []))[0].append(t)
+    for t in trades_ref:
+        by.setdefault(str(t["entry_date"])[:4], ([], []))[1].append(t)
+    out: dict[str, dict[str, Any]] = {}
+    for y, (ga, rb) in sorted(by.items()):
+        bd = protect_delta_bounds(ga, rb, seed=[seed, 47, int(y)])
+        out[y] = {
+            "point": bd["delta"],
+            "lo": bd["lo"],
+            "hi": bd["hi"],
+            "n_clusters": bd["n_clusters"],
+        }
+    return out
+
+
 def run_protect_scan(
     args: Any,
     *,
@@ -1735,6 +1791,9 @@ def run_protect_scan(
         return _replay_width(gs, _no_stop, params, regime, args.cost_bps, replay_fn)[0]
 
     readings: dict[str, dict[str, Any]] = {}
+    win_trades: dict[
+        str, dict[str, list[dict]]
+    ] = {}  # v0.501：逐窗逐格交易（配对下界用）
     all_trades: dict[str, list[dict]] = {
         protect_cell_key(*c): [] for c in PROTECT_CELLS
     }
@@ -1760,6 +1819,7 @@ def run_protect_scan(
                         tr, None if c == PROTECT_REF_CELL else ref_tr
                     )
             blk[k] = rd
+            win_trades.setdefault(name, {})[k] = tr
             all_trades[k].extend(tr)
         readings[name] = blk
     ref_k = protect_cell_key(*PROTECT_REF_CELL)
@@ -1781,12 +1841,16 @@ def run_protect_scan(
         a, b = margin(readings[w].get(k)), margin(readings[w].get(ref_k))
         return a - b if a is not None and b is not None else None
 
-    # C1
+    # C1（v0.501 跑数前修订，owner 2026-11-09「看质量不看数量」）：数量门 → 簇数底线
     n_ref = {w: (readings[w].get(ref_k) or {}).get("n_taken") for w in win_names}
+    n_cl = {
+        w: _protect_cluster_count(win_trades[w].get(ref_k) or []) for w in win_names
+    }
     c1: dict[str, Any] = {
-        "ok": all(v is not None and v >= MIN_N_TAKEN for v in n_ref.values()),
-        "n_taken": n_ref,
-        "rule": "两窗参照格组合 n_taken ≥ 100（不过=untested）",
+        "ok": all(v >= kit.MIN_CLUSTERS for v in n_cl.values()),
+        "n_clusters": n_cl,
+        "n_taken": n_ref,  # 🔄 原判据量（n_taken ≥ 100）——v0.501 起只描述
+        "rule": f"两窗参照格已实现交易的信号簇数 ≥ {kit.MIN_CLUSTERS}（v0.501；不过=untested）",
     }
     # C2
     cand = {protect_cell_key(*c): c for c in PROTECT_CELLS if c != PROTECT_REF_CELL}
@@ -1810,16 +1874,32 @@ def run_protect_scan(
             }
             for w in win_names
         }
-        for v in per.values():
-            v["ok"] = (
-                v["delta_margin"] is not None
-                and v["delta_margin"] > 0
-                and v["rdd_gate"]
+        for i_w, (w, v) in enumerate(per.items()):
+            b = protect_delta_bounds(
+                win_trades[w].get(g_star) or [],
+                win_trades[w].get(ref_k) or [],
+                seed=[int(args.seed), 47, i_w],
             )
+            v.update(delta_lo95=b["lo"], delta_hi95=b["hi"], n_clusters=b["n_clusters"])
+            # v0.501：Δmargin 点估计 > 0 → **配对簇 bootstrap 95% 下界 > 0**
+            v["ok"] = (
+                v["delta_lo95"] is not None and v["delta_lo95"] > 0 and v["rdd_gate"]
+            )
+        # v0.501：挖掘 B 近年逐年稳定（2022~2025，同向 = Δmargin > 0；稀疏年只禁显著反向）
+        wb_name = "mining_b" if "mining_b" in win_trades else win_names[-1]
+        yearly = kit.yearly_stability(
+            protect_yearly_deltas(
+                win_trades[wb_name].get(g_star) or [],
+                win_trades[wb_name].get(ref_k) or [],
+                seed=int(args.seed),
+            ),
+            null=0.0,
+        )
         md = margin(merged[g_star])
         mr = margin(merged[ref_k])
         c2 = {
-            "ok": all(v["ok"] for v in per.values()),
+            "ok": all(v["ok"] for v in per.values()) and yearly["ok"],
+            "yearly": yearly,
             "g_star": g_star,
             "cell": list(cand[g_star]),
             "windows": per,
@@ -1827,7 +1907,8 @@ def run_protect_scan(
             if md is not None and mr is not None
             else None,
             "passing_rdd_merged": sorted(passing),
-            "rule": "g*=合并 margin 最高且过 rdd 门的非参照格；两窗各自 Δmargin>0 且过门",
+            "rule": "g*=合并 margin 最高且过 rdd 门的非参照格；两窗各自 Δmargin 配对簇 95% 下界>0 且过门；"
+            "挖掘 B 2022~2025 逐年稳定（v0.501）",
         }
     # C3
     if g_star is None:
@@ -1962,7 +2043,7 @@ def run_protect_scan(
         "provenance": pv.build(
             args,
             unit="R47",
-            criteria_version="v0.434",
+            criteria_version="v0.501",
             pre_reg_doc=RESEARCH_DIR / "R47_profit_protection_breakeven_trail.md",
         ),
     }

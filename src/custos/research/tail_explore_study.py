@@ -10,9 +10,10 @@
 - 布尔量（R20 因子命中面板 ~29 项 + R48 二值特征 + 回看档）：每项两格 ``name`` 与 ``!name``。
 
 筛选流程（写死；零假设臂完全重复同一流程）：
-1. A 合格：``n_hi_A ≥ MIN_N`` ∧ ``lift_big_A > LIFT_MIN`` ∧ ``tail_ratio_A > 1``；
+1. A 合格（v0.501 跑数前修订：数量门 → 质量门）：高档有效簇数 ≥ ``kit.MIN_CLUSTERS`` ∧ ``lift_big_A`` 簇稳健 95% 下界 > ``LIFT_MIN``
+   ∧ ``tail_ratio_A > 1``（🔄 原 ``n_hi_A ≥ MIN_N`` ∧ 点估计 > LIFT_MIN 已废）；
 2. A 合格单格按 ``lift_big_A`` 取前 ``TOP_K``，两两合取（AND）成对格，对格同样过 A 合格；
-3. B 复现：``n_hi_B ≥ MIN_N`` ∧ ``lift_big_B > LIFT_MIN`` ∧ ``tail_ratio_B > 1``；线索统计量 = ``min(lift_A, lift_B)``；
+3. B 复现：同 A 质量门 ∧ 挖掘 B 近年逐年稳定（2022~2025，``kit.yearly_stability``）；线索统计量 = ``min(lift_A, lift_B)``；
 4. 零假设：簇级置换（R48 ``cluster_perm``，两窗各自）N 臂，每臂统计量 = 复现格的 max 线索统计量（无复现记 0）；
    复现格统计量 > ``kit.q95`` ⇒ ``lead_robust``，否则 ``lead_replicated``。
 
@@ -193,9 +194,66 @@ def cell_stats(
 
 
 def _qualify(st: dict[str, np.ndarray], min_n: int) -> np.ndarray:
+    """点估计预筛（v0.501 起不再是资格本身）：lift_big > LIFT_MIN ∧ tail > 1。
+    下界 > LIFT_MIN ⇒ 点估计 > LIFT_MIN，故先用它筛、只对幸存格算簇稳健界——与逐格全算等价。
+    ``min_n`` 保留签名（🔄 原「n_hi ≥ MIN_N」数量门已废，改为 ``_bound_ok`` 的簇数底线）。"""
     lb = np.nan_to_num(st["lift_big"], nan=0.0)
     tr = np.nan_to_num(st["tail"], nan=0.0, posinf=1e9)
-    return (st["n_hi"] >= min_n) & (lb > LIFT_MIN) & (tr > 1)
+    return (lb > LIFT_MIN) & (tr > 1)
+
+
+def _min_clusters(min_n: int) -> int:
+    """资格簇数底线：生产 = kit.MIN_CLUSTERS；测试经 --min-n 注入（与 R50 同口径）。"""
+    from custos.research import criteria_kit as kit  # noqa: PLC0415
+
+    return int(min_n) if int(min_n) != MIN_N else kit.MIN_CLUSTERS
+
+
+def _bound_ok(
+    p: dict[str, Any],
+    perm: Optional[np.ndarray],
+    h_col: np.ndarray,
+    v_col: np.ndarray,
+    min_cl: int,
+    yearly: bool = False,
+) -> dict[str, Any]:
+    """单格质量门（v0.501 跑数前修订，owner 2026-11-09「看质量不看数量」）：
+    高档有效簇数 ≥ min_cl ∧ lift_big 簇稳健 95% 下界 > LIFT_MIN；``yearly`` 时另须近年逐年稳定
+    （kit.yearly_stability，同向 = lift_big > 1）。置换下第 r 笔结局配第 perm[r] 行特征，簇按结局侧。"""
+    from custos.research import criteria_kit as kit  # noqa: PLC0415
+
+    fr = perm if perm is not None else np.arange(len(p["big"]))
+    h, v, big = h_col[fr], v_col[fr], p["big"]
+    base = float(big[v].mean()) if v.any() else 0.0
+    out: dict[str, Any] = {"ok": False, "n_clusters": 0, "lo95": None}
+    if not h.any():
+        return out
+    n_c, h_c = kit.cluster_sums(p["cid"][h], np.ones(int(h.sum())), big[h])
+    _pt, lo, _up = kit.cluster_ratio_bounds(n_c, h_c, base)
+    ok = len(n_c) >= min_cl and lo is not None and lo > LIFT_MIN
+    out.update(n_clusters=len(n_c), lo95=lo)
+    if yearly:
+        per: dict[str, Any] = {}
+        yrs = p["year"]
+        for yy in np.unique(yrs[h]):
+            m = yrs == yy
+            hm, vm = h & m, v & m
+            if not hm.any():
+                continue
+            yb = float(big[vm].mean()) if vm.any() else 0.0
+            nc, hc = kit.cluster_sums(p["cid"][hm], np.ones(int(hm.sum())), big[hm])
+            pt, ylo, yhi = kit.cluster_ratio_bounds(nc, hc, yb)
+            per[str(int(yy))] = {
+                "point": pt,
+                "lo": ylo,
+                "hi": yhi,
+                "n_clusters": len(nc),
+            }
+        ys = kit.yearly_stability(per, null=1.0, min_clusters=min_cl)
+        out["yearly"] = ys
+        ok = ok and ys["ok"]
+    out["ok"] = bool(ok)
+    return out
 
 
 def pipeline(
@@ -208,8 +266,16 @@ def pipeline(
     """A 发现（单格 + 前 TOP_K 两两合取）→ B 复现。perm=None 为真实读数。"""
     ra = _rows(pa, perm_a)
     rb = _rows(pb, perm_b)
+    min_cl = _min_clusters(min_n)
     sa = cell_stats(pa["hi"], pa["valid"], *ra)
-    qa = np.flatnonzero(_qualify(sa, min_n))
+    qa = np.array(
+        [
+            j
+            for j in np.flatnonzero(_qualify(sa, min_n))
+            if _bound_ok(pa, perm_a, pa["hi"][:, j], pa["valid"][:, j], min_cl)["ok"]
+        ],
+        dtype=np.int64,
+    )
     top = qa[np.argsort(-np.nan_to_num(sa["lift_big"][qa]))][:TOP_K]
     cands: list[tuple[str, tuple[int, ...]]] = [
         (pa["names"][int(j)], (int(j),)) for j in qa
@@ -220,6 +286,8 @@ def pipeline(
         pv = np.column_stack([pa["valid"][:, a] & pa["valid"][:, b] for a, b in pairs])
         sp = cell_stats(ph, pv, *ra)
         for kk in np.flatnonzero(_qualify(sp, min_n)):
+            if not _bound_ok(pa, perm_a, ph[:, kk], pv[:, kk], min_cl)["ok"]:
+                continue
             a, b = pairs[int(kk)]
             cands.append((f"{pa['names'][a]} & {pa['names'][b]}", (a, b)))
     if not cands:
@@ -236,18 +304,27 @@ def pipeline(
         keep.append((nm, ids))
     if not keep:
         return []
-    sb = cell_stats(np.column_stack(hb), np.column_stack(vb), *rb)
-    qb = _qualify(sb, min_n)
+    hb_m, vb_m = np.column_stack(hb), np.column_stack(vb)
+    sb = cell_stats(hb_m, vb_m, *rb)
+    pre_b = _qualify(sb, min_n)
     out = []
     for k, (nm, ids) in enumerate(keep):
+        gb = (
+            _bound_ok(pb, perm_b, hb_m[:, k], vb_m[:, k], min_cl, yearly=True)
+            if pre_b[k]
+            else {"ok": False, "n_clusters": None, "lo95": None}
+        )
         ja = ids[0] if len(ids) == 1 else None
         la = float(sa["lift_big"][ja]) if ja is not None else None
         out.append(
             {
                 "cell": nm,
                 "order": len(ids),
-                "replicated": bool(qb[k]),
+                "replicated": bool(gb["ok"]),
                 "lift_big_b": float(sb["lift_big"][k]),
+                "lift_lo95_b": gb.get("lo95"),
+                "n_clusters_b": gb.get("n_clusters"),
+                "yearly_b": gb.get("yearly"),
                 "lift_loss_b": float(sb["lift_loss"][k]),
                 "n_hi_b": int(sb["n_hi"][k]),
                 "_ids": ids,
@@ -346,6 +423,8 @@ def run_study(
             "big": win["big"],
             "loss": win["loss"],
             "items": win["items"],
+            "cid": win["cid"],  # v0.501：结局侧信号簇（簇稳健界）
+            "year": win["year"],
         }
     wa, wb = list(pnl)[:2]
     leads = pipeline(pnl[wa], pnl[wb], None, None, args.min_n)
@@ -419,7 +498,7 @@ def run_study(
         "provenance": pv.build(
             args,
             unit="R49",
-            criteria_version="v0.443",
+            criteria_version="v0.501",
             pre_reg_doc=RESEARCH_DIR / "R49_tail_reverse_profile.md",
         ),
     }

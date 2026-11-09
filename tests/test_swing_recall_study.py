@@ -859,3 +859,31 @@ class TestQualifyV0477:
         q = next(iter(o["quality"].values()))
         assert q["n_realized"] > 0 and {"payoff", "p_big", "p_bigloss"} <= set(q)
         assert rep["params"]["quality_baseline"]["p_big"] == pytest.approx(0.0593)
+
+
+class TestYearlyStabilityV0501:
+    """v0.501 跑数前修订：B 复现另须近年逐年稳定（kit.yearly_stability，同向 = lift_low > 1）。"""
+
+    def test_report_has_yearly_blocks(self):
+        rep = _world_run(0, edge=True)
+        o = rep["objects"]["b1_l1"]
+        assert "yearly_b" in o and "qualify_b" in o
+        wb = o["windows"]["mining_b"]
+        assert wb["by_year_low"], "B 窗逐年读数缺失"
+        y0 = next(iter(wb["by_year_low"].values()))
+        assert {"point", "lo", "hi", "n_clusters", "base"} <= set(y0)
+        assert o["replicated"] == bool(
+            o["qualify_a"] and o["qualify_b"] and o["yearly_b"]["ok"]
+        )
+
+    def test_reversed_year_blocks_replication(self, monkeypatch):
+        from custos.research import criteria_kit as kit
+
+        real = kit.yearly_stability
+        monkeypatch.setattr(
+            kit,
+            "yearly_stability",
+            lambda *a, **k: {**real(*a, **k), "ok": False},
+        )
+        rep = _world_run(0, edge=True)
+        assert not any(v["replicated"] for v in rep["objects"].values())
