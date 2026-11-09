@@ -217,3 +217,23 @@ def test_referenced_todo_numbers_resolve():
             if n not in have:
                 bad.setdefault(n, str(p.relative_to(ROOT)))
     assert not bad, f"引用了不存在的待办编号：{bad}"
+
+
+def test_closed_index_table_well_formed():
+    """已闭环索引：表头下一行即分隔行（插到分隔行上方会把表拆坏，2026-11-09 实际发生过），编号严格升序。"""
+    lines = TODO.read_text(encoding="utf-8").splitlines()
+    h = next(i for i, ln in enumerate(lines) if ln.startswith("## 已闭环索引"))
+    hdr = next(i for i in range(h, len(lines)) if lines[i].startswith("| # |"))
+    assert lines[hdr + 1].startswith("|---"), "表头后必须紧跟分隔行"
+    nums = []
+    for ln in lines[hdr + 2 :]:
+        if ln.startswith("## "):
+            break
+        if ln.startswith("|---"):
+            raise AssertionError("索引表内出现第二个分隔行")
+        m = re.match(r"\| (\d+) \|", ln)
+        if m:
+            nums.append(int(m.group(1)))
+    assert nums == sorted(nums) and len(nums) == len(set(nums)), (
+        "编号须严格升序、不重复"
+    )
