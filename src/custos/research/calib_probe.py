@@ -943,13 +943,16 @@ def upgrade_gallery(d: Path) -> int:
         r"\n*<script>\nconst M = .*?</script>", "", g, flags=_re.S
     )  # 幂等：去旧 UI
     g = _re.sub(r"<style>\.lbl.*?</style><div id='bar'>.*?</div>", "", g, flags=_re.S)
-    cnt = iter(range(1, 10**9))
-    g = _re.sub(
-        r"<div(?: class='s' data-id='\d+')?>(?=<svg|</div>)",
-        lambda m: f"<div class='s' data-id='{next(cnt)}'>",
-        g,
-    )
-    n = next(cnt) - 1
+    if "const KC = " in g:  # v0.506 KLineChart 版：图块已带 data-id，不再包裹
+        n = g.count("<div class='s' data-id=")
+    else:
+        cnt = iter(range(1, 10**9))
+        g = _re.sub(
+            r"<div(?: class='s' data-id='\d+')?>(?=<svg|</div>)",
+            lambda m: f"<div class='s' data-id='{next(cnt)}'>",
+            g,
+        )
+        n = next(cnt) - 1
     if n != len(rows):
         raise RuntimeError(
             f"gallery 图块数 {n} ≠ labels.csv 行数 {len(rows)}——产物不配套，拒绝升级"
@@ -1078,8 +1081,10 @@ def chart_payload(df: Any, title: str) -> dict[str, Any]:
     """终端标注用的紧凑图数据（v0.503）：末 TERM_BARS 根 OHLCV + J + MACD，只到 as-of 当根。"""
     from custos.core.indicators import j_series, macd_series  # noqa: PLC0415
 
-    t = df.tail(TERM_BARS)
-    dif, dea, hist = (x.tail(TERM_BARS) for x in macd_series(df["close"]))
+    t = df.tail(
+        CHART_BARS
+    )  # v0.506：存网页图的 CHART_BARS 根，终端图只画末 TERM_BARS 根
+    dif, dea, hist = (x.tail(CHART_BARS) for x in macd_series(df["close"]))
 
     def r(xs: Any) -> list[float]:
         return [round(float(x), 4) for x in xs]
@@ -1088,7 +1093,7 @@ def chart_payload(df: Any, title: str) -> dict[str, Any]:
         "title": title,
         "dates": [str(x)[:10] for x in t["date"]],
         **{k: r(t[k]) for k in ("open", "high", "low", "close", "volume")},
-        "j": r(j_series(df).tail(TERM_BARS)),
+        "j": r(j_series(df).tail(CHART_BARS)),
         "dif": r(dif),
         "dea": r(dea),
         "hist": r(hist),
@@ -1117,6 +1122,7 @@ def term_chart(cd: dict[str, Any], color: bool = True) -> str:
 
     价格 12 行（=24 个半格：█▀▄ 实体、│╵╷ 影线，红涨绿跌）+ 量 3 行 + J 4 行（┄ 为 13 线）+
     MACD 6 行（半格柱红绿、DIF 黄点 / DEA 白点叠在柱上、┄ 为零轴）；最末一根 = as-of 当根，底部 ▲ 竖标。"""
+    cd = {k: (v[-TERM_BARS:] if isinstance(v, list) else v) for k, v in cd.items()}
     R, G, Y, W, D, Z = (
         ("\033[31m", "\033[32m", "\033[33m", "\033[37m", "\033[2m", "\033[0m")
         if color
@@ -1283,6 +1289,95 @@ def label_cli(
     return done
 
 
+#: KLineChart vendored 资源（v0.506，owner 2026-11-10 同意引入；Apache-2.0，见目录 README）
+KC_DIR = Path(__file__).resolve().parent / "vendor" / "klinecharts"
+KC_JS = KC_DIR / "klinecharts.min.js"
+KC_SHA256 = "428b7c3bff6a74e121b4da8093bd0187d1c81b9fae8826f1143097280667a8a1"
+_KC_RENDER = r"""<script>
+const KC = __DATA__;
+const UP = '#F23645', DN = '#089981';
+const nz = v => (v === v ? v : null);
+klinecharts.registerIndicator({
+  name: 'CVOL', shortName: '量', precision: 0,
+  figures: [{ key: 'v', title: 'VOL: ', type: 'bar', baseValue: 0,
+    styles: ({ data }) => ({ color: data.current && data.current.up ? UP : DN, style: 'fill' }) }],
+  calc: l => l.map(d => ({ v: d.volume, up: d.close >= d.open }))
+});
+klinecharts.registerIndicator({
+  name: 'CJ', shortName: 'J', precision: 2,
+  figures: [{ key: 'j', title: 'J: ', type: 'line' }, { key: 'l13', title: '13: ', type: 'line' }],
+  calc: l => l.map(d => ({ j: nz(d.j), l13: 13 }))
+});
+klinecharts.registerIndicator({
+  name: 'CMACD', shortName: 'MACD', precision: 3,
+  figures: [
+    { key: 'dif', title: 'DIF: ', type: 'line' }, { key: 'dea', title: 'DEA: ', type: 'line' },
+    { key: 'h', title: 'MACD: ', type: 'bar', baseValue: 0,
+      styles: ({ data }) => ({ color: data.current && data.current.h >= 0 ? UP : DN, style: 'fill' }) }],
+  calc: l => l.map(d => ({ dif: nz(d.dif), dea: nz(d.dea), h: nz(d.hist) }))
+});
+function kcDraw(el) {
+  const p = KC[el.dataset.id], box = el.querySelector('.kc');
+  if (!p || !box || box.dataset.done) return;
+  box.dataset.done = '1';
+  const ch = klinecharts.init(box, { styles: {
+    candle: { bar: { upColor: UP, downColor: DN, upBorderColor: UP, downBorderColor: DN, upWickColor: UP, downWickColor: DN },
+              priceMark: { last: { show: false } } },
+    indicator: { lines: [{ color: '#E5A50A' }, { color: '#888888', style: 'dashed', dashedValue: [4, 4] }, { color: '#4C8BF5' }] } } });
+  ch.setSymbol({ ticker: p.code || 'x', pricePrecision: 2, volumePrecision: 0 });
+  ch.setPeriod({ span: 1, type: 'day' });
+  const bars = p.dates.map((d, i) => ({ timestamp: Date.parse(d + 'T15:00:00+08:00'), open: p.open[i], high: p.high[i],
+    low: p.low[i], close: p.close[i], volume: p.volume[i], j: p.j[i], dif: p.dif[i], dea: p.dea[i], hist: p.hist[i] }));
+  ch.setDataLoader({ getBars: ({ callback }) => callback(bars, false) });
+  ch.createIndicator({ name: 'CVOL', paneId: 'p_vol' });
+  ch.createIndicator({ name: 'CJ', paneId: 'p_j' });
+  ch.createIndicator({ name: 'CMACD', paneId: 'p_macd' });
+  const last = bars[bars.length - 1];
+  ch.createOverlay({ name: 'simpleAnnotation', points: [{ timestamp: last.timestamp, value: last.high }], extendData: '当根' });
+  el._kc = ch;
+}
+const kcObs = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { kcDraw(e.target); kcObs.unobserve(e.target); } }),
+  { rootMargin: '600px 0px' });
+document.querySelectorAll('div.s').forEach(el => kcObs.observe(el));
+</script>
+"""
+
+
+def kc_assets() -> Optional[str]:
+    """KLineChart 内联脚本（校验 sha256；缺失 / 不符 ⇒ None，图集退回静态 SVG）。"""
+    import hashlib  # noqa: PLC0415
+
+    from custos.core import code_freeze as _cf  # noqa: PLC0415
+
+    try:
+        b = _cf.read_bytes(KC_JS)
+    except OSError:
+        return None
+    if hashlib.sha256(b).hexdigest() != KC_SHA256:
+        print("[WARN] klinecharts.min.js 摘要不符，图集退回静态 SVG", file=sys.stderr)
+        return None
+    return b.decode("utf-8")
+
+
+def kc_section(chart_data: dict[str, Any]) -> str:
+    """图集交互图层：内联 KLineChart + 自定义指标（数值全来自 indicators.py，库只画图）+ 懒加载。"""
+    lib = kc_assets()
+    if lib is None:
+        return ""
+    data = json.dumps(chart_data, ensure_ascii=False).replace("</", "<\\/")
+    css = (
+        "<style>div.s .kc{height:540px;width:100%;max-width:1100px;border:1px solid #ddd}"
+        "div.s .t{font:14px sans-serif;margin:14px 0 4px}</style>"
+    )
+    return (
+        css
+        + "<script>"
+        + lib.replace("</script", "<\\/script")
+        + "</script>"
+        + _KC_RENDER.replace("__DATA__", data)
+    )
+
+
 def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
     d = out_dir / f"{rep['module']}__{rep['tag']}"
     d.mkdir(parents=True, exist_ok=True)
@@ -1301,6 +1396,7 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
                 w.writerow([*row, "", ""])
         it = iter(csv_rows)
         chart_data: dict[str, Any] = {}
+        use_kc = kc_assets() is not None
         for f, rows in rep["samples"].items():
             parts.append(f"<h2>{html.escape(f)}</h2>")
             for r in rows:
@@ -1309,14 +1405,25 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
                 title = f"#{row[0]} {row[2]} {row[3]} [{r['class']}] {f}={r['value']}"
                 if row[6]:
                     title += f"（边界：{row[6]}）"
-                parts.append(
-                    f"<div class='s' data-id='{row[0]}'>{svg_chart(fr[1], title) if fr else ''}</div>"
-                )
+                if use_kc:
+                    parts.append(
+                        f"<div class='s' data-id='{row[0]}'><div class='t'>{html.escape(title)}</div>"
+                        f"<div class='kc'></div></div>"
+                    )
+                else:
+                    parts.append(
+                        f"<div class='s' data-id='{row[0]}'>{svg_chart(fr[1], title) if fr else ''}</div>"
+                    )
                 if fr:
-                    chart_data[str(row[0])] = chart_payload(fr[1], title)
+                    chart_data[str(row[0])] = {
+                        **chart_payload(fr[1], title),
+                        "code": row[2],
+                    }
         (d / "chart_data.json").write_text(
             json.dumps(chart_data, ensure_ascii=False), encoding="utf-8"
         )
+        if use_kc:
+            parts.append(kc_section(chart_data))
         parts.append(label_ui(csv_rows, rep["mode"], f"calib:{d.name}"))
         parts.append("</body></html>")
         (d / "gallery.html").write_text("".join(parts), encoding="utf-8")

@@ -485,3 +485,30 @@ def test_term_chart_half_blocks_and_marker():
     assert "┄" in "\n".join(lines) and lines[-2].rstrip().endswith("▲ 当根")
     assert lines[-2].index("▲") == 9 + n - 1
     assert all(len(ln) <= 9 + n + 6 for ln in lines[1:-2])
+
+
+class TestKLineChartGalleryV0506:
+    """v0.506：gallery 改 KLineChart（vendored，sha256 钉死）；资源缺失退回静态 SVG。"""
+
+    def test_vendor_digest_and_license(self):
+        import hashlib
+
+        assert hashlib.sha256(cp.KC_JS.read_bytes()).hexdigest() == cp.KC_SHA256
+        for f in ("LICENSE", "NOTICE", "LICENSE-lightweight-charts", "README.md"):
+            assert (cp.KC_DIR / f).exists()
+
+    def test_section_inlines_lib_and_our_values(self):
+        sec = cp.kc_section(
+            {"1": {"dates": ["2022-01-03"], "j": [float("nan")], "code": "000001"}}
+        )
+        assert (
+            "klinecharts" in sec and "const KC = " in sec and "registerIndicator" in sec
+        )
+        assert "'当根'" in sec and "l13: 13" in sec  # 13 线 + 当根标注
+        assert (
+            "</script" not in sec.split("const KC = ")[1].split("\n")[0]
+        )  # 数据段不提前闭合
+
+    def test_missing_asset_falls_back(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(cp, "KC_JS", tmp_path / "nope.js")
+        assert cp.kc_assets() is None and cp.kc_section({}) == ""
