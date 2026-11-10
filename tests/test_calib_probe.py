@@ -493,7 +493,8 @@ class TestKLineChartGalleryV0506:
     def test_vendor_digest_and_license(self):
         import hashlib
 
-        assert hashlib.sha256(cp.KC_JS.read_bytes()).hexdigest() == cp.KC_SHA256
+        raw = cp.KC_JS.read_bytes().replace(b"\r\n", b"\n")  # Windows CRLF 检出同口径
+        assert hashlib.sha256(raw).hexdigest() == cp.KC_SHA256
         for f in ("LICENSE", "NOTICE", "LICENSE-lightweight-charts", "README.md"):
             assert (cp.KC_DIR / f).exists()
 
@@ -512,3 +513,22 @@ class TestKLineChartGalleryV0506:
     def test_missing_asset_falls_back(self, monkeypatch, tmp_path):
         monkeypatch.setattr(cp, "KC_JS", tmp_path / "nope.js")
         assert cp.kc_assets() is None and cp.kc_section({}) == ""
+
+
+def test_kc_digest_tolerates_crlf_checkout(monkeypatch, tmp_path):
+    """Windows autocrlf 检出（LF→CRLF）仍能通过摘要校验（2026-11-10 Windows CI 红）。"""
+    crlf = tmp_path / "klinecharts.min.js"
+    crlf.write_bytes(
+        cp.KC_JS.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+    )
+    monkeypatch.setattr(cp, "KC_JS", crlf)
+    assert cp.kc_assets() is not None
+
+
+def test_vendor_dir_marked_binary_in_gitattributes():
+    import pathlib
+
+    ga = (pathlib.Path(cp.__file__).resolve().parents[3] / ".gitattributes").read_text(
+        encoding="utf-8"
+    )
+    assert "src/custos/research/vendor/** -text" in ga

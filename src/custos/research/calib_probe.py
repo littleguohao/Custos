@@ -1393,6 +1393,8 @@ def kc_assets() -> Optional[str]:
         b = _cf.read_bytes(KC_JS)
     except OSError:
         return None
+    # 换行规范化后再比（Windows 旧检出可能是 CRLF；.gitattributes 已禁转换，此处兜底）
+    b = b.replace(b"\r\n", b"\n")
     if hashlib.sha256(b).hexdigest() != KC_SHA256:
         print("[WARN] klinecharts.min.js 摘要不符，图集退回静态 SVG", file=sys.stderr)
         return None

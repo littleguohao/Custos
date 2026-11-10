@@ -1,0 +1,2 @@
+# vendored 第三方资源按原字节入库与检出（Windows core.autocrlf 会把 LF 转 CRLF，致摘要不符）
+src/custos/research/vendor/** -text
