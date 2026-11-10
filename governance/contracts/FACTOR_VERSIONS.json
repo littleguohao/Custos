@@ -69,12 +69,17 @@
     },
     "b2_surge_factor": {
       "version": 1,
-      "source_digest": "8036a56b4a43d9526acf",
+      "source_digest": "49743b055927f16bc6dd",
       "history": [
         {
           "version": 1,
           "date": "2026-11-03",
           "change": "初始版本（定义校准前基线，TODO #121）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-10",
+          "refactor": "v0.505 新增 b2_series 与 _arr_pre 预计算通道（研究提速）；判定逻辑同一函数体，逐前缀完整报告等价钉测，语义不变"
         }
       ]
     },
@@ -201,12 +206,17 @@
     },
     "main_rally_factor": {
       "version": 1,
-      "source_digest": "c18bf7bd9fa410f2f720",
+      "source_digest": "57c3b0721ef61e7a5b3c",
       "history": [
         {
           "version": 1,
           "date": "2026-11-03",
           "change": "初始版本（定义校准前基线，TODO #121）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-10",
+          "refactor": "v0.505 三条件改按「序列+下标」判定、新增 main_rally_series/_arr 预计算通道（研究提速）；判定逻辑同一组函数，逐前缀等价钉测，语义不变"
         }
       ]
     },

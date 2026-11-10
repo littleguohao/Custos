@@ -45,7 +45,7 @@ import numpy as np
 import pandas as pd
 
 #: 指标包版本：**任何电池实现改动都要 bump**（见模块 docstring 的纪律段）。
-INDICATOR_PACK_VERSION = 1
+INDICATOR_PACK_VERSION = 2  # v0.505：gate_pre 增 qg_ok 惰性键组
 
 #: 默认缓存根（运行时数据目录；CLI 默认挂这里，测试注入 tmp_path）。
 DEFAULT_CACHE_ROOT = Path("data/cache/indicators")

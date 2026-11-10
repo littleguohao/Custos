@@ -105,6 +105,23 @@ def _arr(df: pd.DataFrame):
     )
 
 
+def b2_series(df: pd.DataFrame) -> dict[str, Any]:
+    """B2 / 底部异动所需序列一次算（v0.505 研究提速 ``_arr`` 通道）：OHLCV 数组 + MA60 + J。
+
+    前缀不变：MA60（rolling，第 0 根起）与 J（indicators.j_series，EWM 递归）全序列第 i 点 ==
+    ``df.iloc[:i+1]`` 末点；检测器只按 ``len(df)`` 截取 [0, n) 使用，判定逻辑不变（同一函数体）。"""
+    close, high, low, vol, open_ = _arr(df)
+    return {
+        "close": close,
+        "high": high,
+        "low": low,
+        "vol": vol,
+        "open": open_,
+        "ma60": pd.Series(close).rolling(SURGE_MA_CROSS).mean().to_numpy(),
+        "j": _j_series(df),
+    }
+
+
 def _prior_b1(j, t: int, b1_within: int):
     """① B1 之后:近 b1_within 根(不含当日)出现过 J<13 → (b1_before, b1_bars_ago)。"""
     lo = max(0, t - b1_within)
@@ -141,6 +158,7 @@ def detect_b2(
     code: str = "",
     b1_within: int = B2_B1_WITHIN,
     j_series: Optional[np.ndarray] = None,
+    _arr_pre: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """B2：B1 之后 + 涨幅>4% + 比前一交易日放量 + J<55 + 无上影线（加分）。绝不 raise。
 
@@ -154,8 +172,17 @@ def detect_b2(
                 "hit": False,
                 "reason": f"少于{B2_MIN_BARS}根K线",
             }
-        close, high, _low, vol, open_ = _arr(df)
-        j = j_series if j_series is not None else _j_series(df)
+        if _arr_pre is not None:  # v0.505：全序列预计算，只用 [0, n)
+            close, high, vol, open_ = (
+                _arr_pre["close"],
+                _arr_pre["high"],
+                _arr_pre["vol"],
+                _arr_pre["open"],
+            )
+            j = _arr_pre["j"]
+        else:
+            close, high, _low, vol, open_ = _arr(df)
+            j = j_series if j_series is not None else _j_series(df)
         if j is None:
             return {"available": False, "hit": False, "reason": "kdj_unavailable"}
         t = n - 1
@@ -192,7 +219,10 @@ def detect_b2(
 
 
 def detect_bottom_surge(
-    df: pd.DataFrame, code: str = "", lookback: int = SURGE_LOOKBACK
+    df: pd.DataFrame,
+    code: str = "",
+    lookback: int = SURGE_LOOKBACK,
+    _arr_pre: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """底部异动（巨量点火 + 量能维持 + 穿越 60 日线 + 9 个月新高）。绝不 raise。
 
@@ -206,8 +236,13 @@ def detect_bottom_surge(
                 "hit": False,
                 "reason": f"少于{SURGE_MIN_BARS}根K线（需{SURGE_NEW_HIGH_DAYS}日新高）",
             }
-        close, _high, _low, vol, _ = _arr(df)
-        ma60 = pd.Series(close).rolling(SURGE_MA_CROSS).mean().to_numpy()
+        if (
+            _arr_pre is not None
+        ):  # v0.505：全序列预计算；下方只按 n 截取（after/新高窗都以 n 为界）
+            close, vol, ma60 = _arr_pre["close"], _arr_pre["vol"], _arr_pre["ma60"]
+        else:
+            close, _high, _low, vol, _ = _arr(df)
+            ma60 = pd.Series(close).rolling(SURGE_MA_CROSS).mean().to_numpy()
 
         best = None
         start = max(SURGE_NEW_HIGH_DAYS, n - lookback)
@@ -274,6 +309,7 @@ def detect_surge_then_b1(
     code: str = "",
     lookback: int = SURGE_LOOKBACK,
     strict_surge: bool = False,
+    _arr_pre: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """原文「找异动之后的 B1」：回看窗内有底部异动 且 当日在 B1 区间（J<13）。
 
@@ -281,11 +317,15 @@ def detect_surge_then_b1(
     默认只要求"巨量点火 + 量随价升"（宽口径），由回测决定该收多严。
     """
     try:
-        surge = detect_bottom_surge(df, code, lookback=lookback)
+        surge = detect_bottom_surge(df, code, lookback=lookback, _arr_pre=_arr_pre)
         if not surge.get("available"):
             return {"available": False, "hit": False, "reason": surge.get("reason")}
         ok_surge = surge.get("strict_hit") if strict_surge else surge.get("hit")
-        j = _j_series(df)
+        if _arr_pre is not None:
+            jf = _arr_pre["j"]
+            j = jf[: len(df)] if jf is not None and len(df) >= 12 else None
+        else:
+            j = _j_series(df)
         if j is None or len(j) == 0 or j[-1] != j[-1]:
             return {
                 "available": False,

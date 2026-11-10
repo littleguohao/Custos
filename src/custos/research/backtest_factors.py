@@ -680,6 +680,50 @@ _WEEKLY_PRE_KEYS = frozenset(
     }
 )  # fmt: skip
 _MONTHLY_PRE_KEYS = frozenset({"monthly_bars", "monthly_dea", "monthly_dif"})
+#: v0.505：qg（共振 v2 成立 ∧ 未排除）逐 bar 布尔序列——惰性键组，只有 qg 系 gate 读
+_QG_PRE_KEYS = frozenset({"qg_ok"})
+#: v0.505：主升始发点三条件序列包（main_rally_factor.main_rally_series）——惰性键组
+_MR_PRE_KEYS = frozenset({"main_rally"})
+#: v0.505：b2 / 底部异动族序列包（b2_surge_factor.b2_series）——惰性键组
+_B2_PRE_KEYS = frozenset({"b2"})
+
+
+def _b2_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
+    if _b2_series is None:
+        return None
+    return {"b2": _b2_series(df)}
+
+
+def _mr_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
+    """主升始发点序列包（v0.505）：因子模块 ``main_rally_series`` 一次算，gate 经 ``_arr`` 点查询。"""
+    if _main_rally_series is None:
+        return None
+    return {"main_rally": _main_rally_series(df)}
+
+
+def _qg_gate_arrays(df: pd.DataFrame) -> Optional[dict[str, Any]]:
+    """共振 v2 全序列一次算（v0.505 提速，借鉴 qteasy「数据预打包 + 按步取用」）。
+
+    前缀不变性：``qsx_dks_resonance_v2`` 严格因果——事件只在 confirm_bar（≥ 收回根 / 反弹根）
+    起计数，前缀截断时尚未确认的事件在全序列里也不早于 confirm 生效；同根触两线去重取
+    confirm 最早者（前缀可见集里同样是它）；``_unrecovered_line`` 与 QSX/DKS 均为第 0 根起
+    递归。故全序列第 i 点 == ``qg_gate(df.iloc[:i+1])``。线未成形（NaN）根记 False，同慢路径。
+    逐 bar 等价由 tests/test_gate_precompute_equivalence.py 钉住（全 ENTRY_GATES 自动覆盖）。"""
+    if _qsx_dks_resonance_v2 is None or _dks_series is None:
+        return None
+    close = df["close"].astype(float)
+    qsx = _qsx_series(close)
+    dks = _dks_series(close)
+    hit, excluded = _qsx_dks_resonance_v2(
+        close,
+        df["low"].astype(float),
+        df["high"].astype(float),
+        df["volume"].astype(float),
+        qsx,
+        dks,
+    )
+    formed = ~(np.isnan(qsx.to_numpy()) | np.isnan(dks.to_numpy()))
+    return {"qg_ok": np.asarray(hit & ~excluded & formed, dtype=bool)}
 
 
 class _LazyGatePre(dict):
@@ -691,12 +735,24 @@ class _LazyGatePre(dict):
     def __init__(self, base: dict, df: pd.DataFrame) -> None:
         super().__init__(base)
         self._df: Optional[pd.DataFrame] = df
-        self._pending = {"weekly": True, "monthly": True}
+        self._pending = {
+            "weekly": True,
+            "monthly": True,
+            "qg": True,
+            "mr": True,
+            "b2": True,
+        }
 
     def _load(self, group: str) -> None:
         if self._pending.get(group) and self._df is not None:
             self._pending[group] = False
-            fn = _weekly_gate_arrays if group == "weekly" else _monthly_gate_arrays
+            fn = {
+                "weekly": _weekly_gate_arrays,
+                "monthly": _monthly_gate_arrays,
+                "qg": _qg_gate_arrays,
+                "mr": _mr_gate_arrays,
+                "b2": _b2_gate_arrays,
+            }[group]
             try:
                 dict.update(self, fn(self._df) or {})
             except Exception:  # noqa: BLE001 —— 同急切路径：算不出即缺键
@@ -709,10 +765,19 @@ class _LazyGatePre(dict):
             self._load("weekly")
         elif key in _MONTHLY_PRE_KEYS:
             self._load("monthly")
+        elif key in _QG_PRE_KEYS:
+            self._load("qg")
+        elif key in _MR_PRE_KEYS:
+            self._load("mr")
+        elif key in _B2_PRE_KEYS:
+            self._load("b2")
 
     def materialize(self) -> "_LazyGatePre":
         self._load("weekly")
         self._load("monthly")
+        self._load("qg")
+        self._load("mr")
+        self._load("b2")
         return self
 
     def __getitem__(self, key: Any) -> Any:
@@ -1845,6 +1910,8 @@ def qg_gate(df_slice: pd.DataFrame, precomputed: Optional[dict] = None) -> bool:
     if _qsx_dks_resonance_v2 is None or _dks_series is None:
         return False
     try:
+        if precomputed is not None and precomputed.get("qg_ok") is not None:
+            return bool(precomputed["qg_ok"][len(df_slice) - 1])  # v0.505 预计算点查询
         close = df_slice["close"].astype(float)
         qsx = _qsx_series(close)
         dks = _dks_series(close)
@@ -1867,7 +1934,10 @@ def weekly_j_low_qg_gate(
     df_slice: pd.DataFrame, precomputed: Optional[dict] = None
 ) -> bool:
     """周 J<13 ∧ 共振 v2 成立且未排除(R26):大周期超卖 + 干净双底结构。"""
-    return bool(weekly_j_low_gate(df_slice) and qg_gate(df_slice))
+    # v0.505：透传 precomputed（原先两个子门都走逐切片慢路径——profile 单票 70s/46 门）
+    return bool(
+        weekly_j_low_gate(df_slice, precomputed) and qg_gate(df_slice, precomputed)
+    )
 
 
 def qsx_gt_dks_gate(df_slice: pd.DataFrame, precomputed: Optional[dict] = None) -> bool:
@@ -1931,12 +2001,19 @@ detect_b2: Callable[..., Any] | None  # 导入失败退 None（缺依赖不阻�
 try:
     from custos.core.factors.b2_surge_factor import (
         b2_score as _b2_score,  # v0.220…B3b：合成公式唯一实现（裁决点②）
+        b2_series as _b2_series,  # v0.505 _arr_pre 预计算通道
         detect_b2,
         detect_bottom_surge,
         detect_surge_then_b1,
     )
 except Exception:  # noqa: BLE001
     detect_b2 = None
+    _b2_series = None  # type: ignore[assignment]
+
+
+def _b2pre(precomputed: Optional[dict]) -> Optional[dict]:
+    """b2 族 gate 的预计算包（v0.505；缺 ⇒ None ⇒ 因子逐切片慢路径）。"""
+    return precomputed.get("b2") if precomputed is not None else None
 
 
 def b2_gate(df_slice: pd.DataFrame, precomputed: Optional[dict] = None) -> bool:
@@ -1944,7 +2021,7 @@ def b2_gate(df_slice: pd.DataFrame, precomputed: Optional[dict] = None) -> bool:
     if detect_b2 is None:
         return False
     try:
-        return bool(detect_b2(df_slice).get("hit"))
+        return bool(detect_b2(df_slice, _arr_pre=_b2pre(precomputed)).get("hit"))
     except Exception:  # noqa: BLE001
         return False
 
@@ -1956,7 +2033,9 @@ def bottom_surge_gate(
     if detect_b2 is None:
         return False
     try:
-        return bool(detect_bottom_surge(df_slice).get("hit"))
+        return bool(
+            detect_bottom_surge(df_slice, _arr_pre=_b2pre(precomputed)).get("hit")
+        )
     except Exception:  # noqa: BLE001
         return False
 
@@ -1968,7 +2047,11 @@ def bottom_surge_strict_gate(
     if detect_b2 is None:
         return False
     try:
-        return bool(detect_bottom_surge(df_slice).get("strict_hit"))
+        return bool(
+            detect_bottom_surge(df_slice, _arr_pre=_b2pre(precomputed)).get(
+                "strict_hit"
+            )
+        )
     except Exception:  # noqa: BLE001
         return False
 
@@ -1980,7 +2063,9 @@ def surge_then_b1_gate(
     if detect_b2 is None:
         return False
     try:
-        return bool(detect_surge_then_b1(df_slice).get("hit"))
+        return bool(
+            detect_surge_then_b1(df_slice, _arr_pre=_b2pre(precomputed)).get("hit")
+        )
     except Exception:  # noqa: BLE001
         return False
 
@@ -1992,7 +2077,11 @@ def surge_strict_then_b1_gate(
     if detect_b2 is None:
         return False
     try:
-        return bool(detect_surge_then_b1(df_slice, strict_surge=True).get("hit"))
+        return bool(
+            detect_surge_then_b1(
+                df_slice, strict_surge=True, _arr_pre=_b2pre(precomputed)
+            ).get("hit")
+        )
     except Exception:  # noqa: BLE001
         return False
 
@@ -2012,7 +2101,9 @@ def bottom_surge_j13_gate(
     if detect_b2 is None:
         return False
     try:
-        return bool(detect_surge_then_b1(df_slice).get("hit"))
+        return bool(
+            detect_surge_then_b1(df_slice, _arr_pre=_b2pre(precomputed)).get("hit")
+        )
     except Exception:  # noqa: BLE001
         return False
 
@@ -2025,7 +2116,11 @@ def bottom_surge_strict_j13_gate(
     if detect_b2 is None:
         return False
     try:
-        return bool(detect_surge_then_b1(df_slice, strict_surge=True).get("hit"))
+        return bool(
+            detect_surge_then_b1(
+                df_slice, strict_surge=True, _arr_pre=_b2pre(precomputed)
+            ).get("hit")
+        )
     except Exception:  # noqa: BLE001
         return False
 
@@ -2095,10 +2190,12 @@ try:
     from custos.core.factors.main_rally_factor import (
         detect_main_rally_start,
         main_rally_score,
+        main_rally_series as _main_rally_series,
     )
 except Exception:  # noqa: BLE001
     rsi_state_score = None
     _rsi = None
+    _main_rally_series = None  # type: ignore[assignment]
 
 
 def _precompute_rsi_state_series(df: pd.DataFrame) -> Optional[dict[int, Any]]:
@@ -2249,11 +2346,17 @@ def j_low_rsi_deep_gate(
     )
 
 
-def _main_rally_gate(df_slice: pd.DataFrame, mode: str) -> bool:
+def _main_rally_gate(
+    df_slice: pd.DataFrame, mode: str, precomputed: Optional[dict] = None
+) -> bool:
     if rsi_state_score is None:
         return False
     try:
-        return bool(detect_main_rally_start(df_slice, cross_mode=mode).get("hit"))
+        arr = precomputed.get("main_rally") if precomputed is not None else None
+        # v0.505：预计算包走因子 _arr 通道（只读 len(df_slice)），逐位同逐前缀重算
+        return bool(
+            detect_main_rally_start(df_slice, cross_mode=mode, _arr=arr).get("hit")
+        )
     except Exception:  # noqa: BLE001
         return False
 
@@ -2262,14 +2365,14 @@ def main_rally_below_gate(
     df_slice: pd.DataFrame, precomputed: Optional[dict] = None
 ) -> bool:
     """主升始发点(**源码口径**:主升占比跌破 0.8)。"""
-    return _main_rally_gate(df_slice, "below")
+    return _main_rally_gate(df_slice, "below", precomputed)
 
 
 def main_rally_above_gate(
     df_slice: pd.DataFrame, precomputed: Optional[dict] = None
 ) -> bool:
     """主升始发点(**文字口径**:主升占比突破 0.8)——与源码相反,两者都测。"""
-    return _main_rally_gate(df_slice, "above")
+    return _main_rally_gate(df_slice, "above", precomputed)
 
 
 if rsi_state_score is not None:
@@ -2328,6 +2431,20 @@ _SLICE_FREE_GATES: dict[Callable, tuple[str, ...]] = {
     qsx_gt_dks_gate: ("qsx",),
     j_low_qsx_gt_dks_gate: ("qsx",),
     weekly_j_low_gate: ("weekly_j",),
+    # v0.505：共振 v2 预计算（precomputed 分支只读 qg_ok + len）
+    qg_gate: ("qg_ok",),
+    weekly_j_low_qg_gate: ("weekly_j", "qg_ok"),
+    # v0.505：主升始发点两档（因子 _arr 通道只读 len(df_slice)）
+    main_rally_below_gate: ("main_rally",),
+    main_rally_above_gate: ("main_rally",),
+    # v0.505：b2 / 底部异动族（因子 _arr_pre 通道只读 len(df_slice)）
+    b2_gate: ("b2",),
+    bottom_surge_gate: ("b2",),
+    bottom_surge_strict_gate: ("b2",),
+    surge_then_b1_gate: ("b2",),
+    surge_strict_then_b1_gate: ("b2",),
+    bottom_surge_j13_gate: ("b2",),
+    bottom_surge_strict_j13_gate: ("b2",),
     j_low_weekly_resonance_gate: ("weekly_j",),
     j_low_qsx_weekly_gate: ("weekly_j", "qsx"),
     weekly_qsx_gt_dks_gate: ("weekly_qsx",),
@@ -3110,8 +3227,15 @@ def simulate_b1_trade(
     ohlc: Optional[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = None,
     qsx: Optional[pd.Series] = None,
     qsx_exit_consec: int = 0,
+    entry_timing: str = "close",
 ) -> dict[str, Any]:
     """B1 交易规则模拟：买入当日收盘进场。
+
+    ``entry_timing``（v0.505，借鉴 qteasy ``use_latest_data_cycle``——进场口径显式化）：
+    ``"close"``（缺省，逐位不变）= 信号日收盘成交；``"next_open"`` = 信号日收盘出信号、**次日开盘**成交
+    （吃隔夜跳空）：次日停牌 / 开盘即涨停（开盘价 ≥ 前收 × (1+限幅−0.3%)）⇒ 买不到，返回
+    ``{"skipped": "entry_unfilled", "exit_idx": entry_idx}``（调用方不记交易）；初始止损仍按信号日
+    口径定（计划止损），风险分母按实际成交价；T+1：成交当日不判出场，从下一根起。
 
     止损位：stop_override 显式指定(如平台高×0.98)优先;否则 stop_mode='low'=买入当日最低价
     (B1.pdf「B1- 买入K线最低点或向下3-5个价位」,余量见 ``stop_tick_buffer``)；
@@ -3199,6 +3323,21 @@ def simulate_b1_trade(
         open_ = df["open"].astype(float).to_numpy()
     n = len(close)
     entry = float(close[entry_idx])
+    fill_idx = entry_idx
+    if entry_timing == "next_open":
+        fill_idx = entry_idx + 1
+        vol = (
+            df["volume"].astype(float).to_numpy()
+            if "volume" in df.columns
+            else np.ones(n)
+        )
+        if fill_idx >= n or vol[fill_idx] <= 0 or not entry:
+            return {"skipped": "entry_unfilled", "exit_idx": entry_idx}
+        if float(open_[fill_idx]) / entry - 1.0 >= _limit_pct(code) / 100.0 - 0.003:
+            return {"skipped": "entry_unfilled", "exit_idx": entry_idx}
+        entry = float(open_[fill_idx])
+    elif entry_timing != "close":
+        raise ValueError(f"entry_timing 只支持 close / next_open：{entry_timing!r}")
     stop = _initial_stop(
         df,
         low,
@@ -3214,6 +3353,7 @@ def simulate_b1_trade(
         atr=atr,
     )
     risk_frac = (entry - stop) / entry if entry else 0.0
+    entry_idx = fill_idx  # next_open：止损已按信号日定，持有 / 出场从成交根起算
     bbi_v = bbi.to_numpy()
     qsx_v = qsx.to_numpy() if qsx is not None else None  # QSX 跌破清仓线（v0.120）
     has_above = False
@@ -3918,6 +4058,9 @@ def _trades_from_signals(
             qsx=qsx,
             **sim_kw,
         )
+        if tr.get("skipped"):  # next_open 次日买不到（停牌 / 开盘涨停）⇒ 不记交易
+            i = _advance_i(i, step, tr, collect_all)
+            continue
         ret_net = tr["ret"] - cost
         rec = _trade_record(
             tr, ret_net, code, cand["date"], dates, i, cand.get("score")
@@ -4007,6 +4150,9 @@ def _single_pass_trades(
             qsx=prep["qsx"],
             **sim_kw,
         )
+        if tr.get("skipped"):  # next_open 次日买不到（停牌 / 开盘涨停）⇒ 不记交易
+            i = _advance_i(i, step, tr, collect_all)
+            continue
         ret_net = tr["ret"] - cost
         rec = _trade_record(tr, ret_net, code, entry_date, dates, i, res.get("score"))
         if feature_panel:
@@ -4049,6 +4195,7 @@ def evaluate_trades(
     cost_zone_bars: int = 0,
     cost_zone_pct: float = 3.0,
     qsx_exit_consec: int = 0,
+    entry_timing: str = "close",
     signals_out: Optional[list[dict[str, Any]]] = None,
     signals_in: Optional[dict[str, list[dict[str, Any]]]] = None,
     missing_out: Optional[list[str]] = None,
@@ -4138,6 +4285,7 @@ def evaluate_trades(
         "cost_zone_bars": cost_zone_bars,
         "cost_zone_pct": cost_zone_pct,
         "qsx_exit_consec": qsx_exit_consec,
+        "entry_timing": entry_timing,
     }
 
     trades: list[dict[str, Any]] = []

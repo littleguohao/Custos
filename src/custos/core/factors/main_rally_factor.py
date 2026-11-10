@@ -81,12 +81,11 @@ def flow_ratio(df: pd.DataFrame, win: int = FLOW_WIN) -> pd.Series:
 
 
 def _flow_cross_state(
-    df: pd.DataFrame, n: int, cross_mode: str, flow_threshold: float
+    fr: Any, i: int, cross_mode: str, flow_threshold: float
 ) -> dict[str, Any] | None:
-    """① 资金流入占比穿越状态；占比不可用返回 None。"""
-    fr = flow_ratio(df, FLOW_WIN)
-    cur_f = fr.iloc[-1]
-    prev_f = fr.iloc[-2] if n >= 2 else np.nan
+    """① 资金流入占比穿越状态（``fr`` = flow_ratio 序列，看第 i 根）；占比不可用返回 None。"""
+    cur_f = fr[i]
+    prev_f = fr[i - 1] if i >= 1 else np.nan
     if cur_f != cur_f or prev_f != prev_f:
         return None
     cur_f, prev_f = float(cur_f), float(prev_f)
@@ -106,10 +105,9 @@ def _flow_cross_state(
     }
 
 
-def _rsi_oversold_state(df: pd.DataFrame, rsi_oversold: float) -> dict[str, Any] | None:
+def _rsi_oversold_state(r: Any, i: int, rsi_oversold: float) -> dict[str, Any] | None:
     """② 超卖区金叉：前一日 RSI7 < rsi_oversold 且今日上行；RSI 不可用返回 None。"""
-    r = rsi(df["close"], RSI_N)
-    cur_r, prev_r = r.iloc[-1], r.iloc[-2]
+    cur_r, prev_r = r[i], r[i - 1]
     if cur_r != cur_r or prev_r != prev_r:
         return None
     cur_r, prev_r = float(cur_r), float(prev_r)
@@ -120,16 +118,14 @@ def _rsi_oversold_state(df: pd.DataFrame, rsi_oversold: float) -> dict[str, Any]
     }
 
 
-def _t1_state(df: pd.DataFrame, n: int, cci_extreme: float) -> dict[str, Any] | None:
+def _t1_state(cc: Any, j: Any, i: int, cci_extreme: float) -> dict[str, Any] | None:
     """③ CCI 极度偏离 + 上行；J 拐头向上（原文 T1 的核心两项）；CCI 不可用返回 None。"""
-    cc = cci(df, CCI_N)
-    cur_c, prev_c = cc.iloc[-1], cc.iloc[-2]
+    cur_c, prev_c = cc[i], cc[i - 1]
     if cur_c != cur_c or prev_c != prev_c:
         return None
     cur_c, prev_c = float(cur_c), float(prev_c)
     cci_ok = bool(cur_c < cci_extreme and cur_c > prev_c)
-    j = _j_series(df)
-    j0, j1, j2 = j.iloc[-1], j.iloc[-2], j.iloc[-3] if n >= 3 else np.nan
+    j0, j1, j2 = j[i], j[i - 1], j[i - 2] if i + 1 >= 3 else np.nan
     j_turn = bool(j0 == j0 and j1 == j1 and j2 == j2 and j0 > j1 and j1 < j2)
     return {
         "cur": cur_c,
@@ -138,6 +134,17 @@ def _t1_state(df: pd.DataFrame, n: int, cci_extreme: float) -> dict[str, Any] | 
         "j0": j0,
         "j_turn": j_turn,
         "ok": bool(cci_ok and j_turn),
+    }
+
+
+def main_rally_series(df: pd.DataFrame) -> dict[str, np.ndarray]:
+    """三条件所需序列一次算（v0.505）：flow_ratio / RSI7 / CCI14 / J，全部第 0 根起算的
+    rolling / EWM 递归 ⇒ 全序列第 i 点与 ``df.iloc[:i+1]`` 末点是同一串浮点运算（前缀不变）。"""
+    return {
+        "fr": flow_ratio(df, FLOW_WIN).to_numpy(),
+        "rsi": rsi(df["close"], RSI_N).to_numpy(),
+        "cci": cci(df, CCI_N).to_numpy(),
+        "j": _j_series(df).to_numpy(),
     }
 
 
@@ -179,8 +186,12 @@ def detect_main_rally_start(
     flow_threshold: float = FLOW_THRESHOLD,
     rsi_oversold: float = RSI_OVERSOLD,
     cci_extreme: float = CCI_EXTREME,
+    _arr: dict[str, np.ndarray] | None = None,
 ) -> dict[str, Any]:
     """「主升始发点」三条件（原文源码口径）。绝不 raise。
+
+    ``_arr``（v0.505 研究提速通道，同 QN 因子 ``_arr``）：``main_rally_series(全序列 df)`` 的预计算包；
+    给出时只读 ``len(df)`` 定位 i = len(df)−1，判定逻辑与逐前缀重算逐位一致（同一组 ``_*_state`` 函数）。
 
     ``cross_mode``：
       - ``"below"``（默认，**源码口径**）：主升占比**跌破** flow_threshold（CROSS(0.8,主升)）
@@ -196,25 +207,40 @@ def detect_main_rally_start(
                 "hit": False,
                 "reason": f"少于{MAIN_RALLY_MIN_BARS}根K线（原文 BARSCOUNT>60）",
             }
-        # ① 资金流入占比穿越
-        flow = _flow_cross_state(df, n, cross_mode, flow_threshold)
-        if flow is None:
-            return {"available": False, "hit": False, "reason": "flow_ratio 不可用"}
-        # ② 超卖区金叉：前一日 RSI7 < 20 且今日上行
-        rsi_st = _rsi_oversold_state(df, rsi_oversold)
-        if rsi_st is None:
-            return {"available": False, "hit": False, "reason": "RSI 不可用"}
-        # ③ CCI 极度偏离 + 上行；J 拐头向上（原文 T1 的核心两项）
-        t1 = _t1_state(df, n, cci_extreme)
-        if t1 is None:
-            return {"available": False, "hit": False, "reason": "CCI 不可用"}
-        return _main_rally_report(cross_mode, flow, rsi_st, t1)
+        ser = _arr if _arr is not None else main_rally_series(df)
+        return _main_rally_at(
+            ser, n - 1, cross_mode, flow_threshold, rsi_oversold, cci_extreme
+        )
     except Exception as exc:  # noqa: BLE001
         return {
             "available": False,
             "hit": False,
             "error": f"{type(exc).__name__}:{str(exc)[:80]}",
         }
+
+
+def _main_rally_at(
+    ser: dict[str, Any],
+    i: int,
+    cross_mode: str,
+    flow_threshold: float,
+    rsi_oversold: float,
+    cci_extreme: float,
+) -> dict[str, Any]:
+    """第 i 根的三条件判定（单一逻辑：逐前缀与预计算两路共用）。"""
+    # ① 资金流入占比穿越
+    flow = _flow_cross_state(ser["fr"], i, cross_mode, flow_threshold)
+    if flow is None:
+        return {"available": False, "hit": False, "reason": "flow_ratio 不可用"}
+    # ② 超卖区金叉：前一日 RSI7 < 20 且今日上行
+    rsi_st = _rsi_oversold_state(ser["rsi"], i, rsi_oversold)
+    if rsi_st is None:
+        return {"available": False, "hit": False, "reason": "RSI 不可用"}
+    # ③ CCI 极度偏离 + 上行；J 拐头向上（原文 T1 的核心两项）
+    t1 = _t1_state(ser["cci"], ser["j"], i, cci_extreme)
+    if t1 is None:
+        return {"available": False, "hit": False, "reason": "CCI 不可用"}
+    return _main_rally_report(cross_mode, flow, rsi_st, t1)
 
 
 def main_rally_score(

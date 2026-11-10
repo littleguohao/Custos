@@ -696,3 +696,142 @@ def test_weekly_part_vol_matches_resample_sum_bitwise():
         assert (fast["weekly_part_vol"] == slow).all(), (
             "weekly_part_vol 与 pandas resample sum 存在 ULP 级失配"
         )
+
+
+def test_qg_precompute_bitwise_and_not_vacuous_v0505():
+    """v0.505：qg_ok 惰性预计算 == 逐前缀 qg_gate（每根），且样本里确有命中（非空洞）。"""
+    import numpy as np
+    import pandas as pd
+
+    hits = 0
+    for seed in range(6):
+        rng = np.random.default_rng(seed)
+        n = 520
+        c = 10 * np.cumprod(1 + rng.normal(0.0004, 0.02, n))
+        o = c * (1 + rng.normal(0, 0.008, n))
+        h = np.maximum(o, c) * (1 + abs(rng.normal(0, 0.012, n)))
+        lo = np.minimum(o, c) * (1 - abs(rng.normal(0, 0.012, n)))
+        v = rng.lognormal(13, 0.5, n)
+        df = pd.DataFrame(
+            {
+                "date": pd.date_range("2018-01-01", periods=n, freq="B"),
+                "open": o,
+                "high": h,
+                "low": lo,
+                "close": c,
+                "volume": v,
+            }
+        )
+        pre = bt._precompute_gate_series(df)
+        assert pre is not None and pre.get("qg_ok") is not None
+        for i in range(120, n):
+            fast = bt.qg_gate(df.iloc[: i + 1], pre)
+            slow = bt.qg_gate(df.iloc[: i + 1])
+            assert fast == slow, (seed, i)
+            hits += fast
+            assert bt.weekly_j_low_qg_gate(
+                df.iloc[: i + 1], pre
+            ) == bt.weekly_j_low_qg_gate(df.iloc[: i + 1])
+    assert hits > 0
+
+
+def test_main_rally_precompute_bitwise_v0505():
+    """v0.505：main_rally 两档经因子 _arr 预计算 == 逐前缀重算（每根，完整报告字典逐位相等）。"""
+    import numpy as np
+    import pandas as pd
+
+    from custos.core.factors import main_rally_factor as mr
+
+    seen_avail = 0
+    for seed in range(4):
+        rng = np.random.default_rng(100 + seed)
+        n = 400
+        c = 10 * np.cumprod(1 + rng.normal(0, 0.025, n))
+        o = c * (1 + rng.normal(0, 0.01, n))
+        h = np.maximum(o, c) * (1 + abs(rng.normal(0, 0.015, n)))
+        lo = np.minimum(o, c) * (1 - abs(rng.normal(0, 0.015, n)))
+        df = pd.DataFrame(
+            {
+                "date": pd.date_range("2018-01-01", periods=n, freq="B"),
+                "open": o,
+                "high": h,
+                "low": lo,
+                "close": c,
+                "volume": np.full(n, 1e6),
+            }
+        )
+        ser = mr.main_rally_series(df)
+        for i in range(55, n):
+            s = df.iloc[: i + 1]
+            for mode in ("below", "above", "either"):
+                a = mr.detect_main_rally_start(s, cross_mode=mode)
+                b = mr.detect_main_rally_start(s, cross_mode=mode, _arr=ser)
+                assert a == b, (seed, i, mode)
+                seen_avail += a.get("available", False)
+        pre = bt._precompute_gate_series(df)
+        for i in range(55, n, 3):
+            s = df.iloc[: i + 1]
+            assert bt.main_rally_below_gate(s, pre) == bt.main_rally_below_gate(s)
+            assert bt.main_rally_above_gate(s, pre) == bt.main_rally_above_gate(s)
+    assert seen_avail > 0
+
+
+def test_b2_family_precompute_bitwise_v0505():
+    """v0.505：b2 / 底部异动三检测器经 _arr_pre == 逐前缀（完整报告逐位），且有命中（非空洞）。"""
+    import numpy as np
+    import pandas as pd
+
+    from custos.core.factors import b2_surge_factor as b2
+
+    hits = {"b2": 0, "surge": 0, "strict": 0, "stb1": 0}
+    for seed in range(4):
+        rng = np.random.default_rng(200 + seed)
+        n = 520
+        ret = rng.normal(0.0003, 0.022, n)
+        spikes = rng.random(n) < 0.03
+        ret[spikes] += 0.07
+        c = 10 * np.cumprod(1 + ret)
+        o = c / (1 + ret * 0.5)
+        h = np.maximum(o, c) * (1 + abs(rng.normal(0, 0.01, n)))
+        lo = np.minimum(o, c) * (1 - abs(rng.normal(0, 0.01, n)))
+        v = rng.lognormal(13, 0.4, n) * np.where(spikes, 5.0, 1.0)
+        df = pd.DataFrame(
+            {
+                "date": pd.date_range("2018-01-01", periods=n, freq="B"),
+                "open": o,
+                "high": h,
+                "low": lo,
+                "close": c,
+                "volume": v,
+            }
+        )
+        ser = b2.b2_series(df)
+        for i in range(25, n):
+            s = df.iloc[: i + 1]
+            a, b = b2.detect_b2(s), b2.detect_b2(s, _arr_pre=ser)
+            assert a == b, ("b2", seed, i)
+            hits["b2"] += a.get("hit", False)
+            a, b = b2.detect_bottom_surge(s), b2.detect_bottom_surge(s, _arr_pre=ser)
+            assert a == b, ("surge", seed, i)
+            hits["surge"] += a.get("hit", False)
+            hits["strict"] += bool(a.get("strict_hit"))
+            for st in (False, True):
+                a = b2.detect_surge_then_b1(s, strict_surge=st)
+                b = b2.detect_surge_then_b1(s, strict_surge=st, _arr_pre=ser)
+                assert a == b, ("stb1", st, seed, i)
+                hits["stb1"] += a.get("hit", False)
+        pre = bt._precompute_gate_series(df)
+        for g in (
+            "b2",
+            "bottom_surge",
+            "bottom_surge_strict",
+            "surge_then_b1",
+            "surge_strict_then_b1",
+            "bottom_surge_j13",
+            "bottom_surge_strict_j13",
+        ):
+            gate = bt.ENTRY_GATES[g]
+            for i in range(25, n, 5):
+                s = df.iloc[: i + 1]
+                assert gate(s, pre) == gate(s), (g, seed, i)
+    assert hits["b2"] and hits["surge"] and hits["stb1"], hits

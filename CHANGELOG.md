@@ -508,6 +508,8 @@
 | 2026-11-09 | v0.502 | **calib_probe 网页标注 + ingest 汇总**（#121 减负）：gallery.html 每图下点选判定 + 形态理由（浏览器本地存档、导出 / 导入 labels.csv，纯静态）；`--mode ui --dir` 给既有产物加界面不重算；`--mode ingest` 出逐字段对/错、误中/漏中清单与参数改向票；边界翻转参数带方向（如 `J×1.2`）。owner 定：不设改不改门槛，持续进化 | owner 2026-11-09 | TODO #121 |
 | 2026-11-09 | v0.503 | **calib_probe 终端标注 `--mode label`**（owner 要命令行形式）：逐条在终端画 K 线 / 量 / J（13 线）/ MACD（末 60 根，只到 as-of 当根），按键判定 + 写形态理由，每条立即原子写回 labels.csv、可随时退出续标、边界样本优先；sample / review 产物新增 `chart_data.json`（旧产物须重跑该模块） | owner 2026-11-09 | TODO #121 |
 | 2026-11-10 | v0.504 | **终端标注图升级为半格版**（owner 评估外部库后选「借鉴不引入」）：K 线 / 量 / J / MACD 改半格字符（纵向分辨率翻倍，画法借鉴 ccharts，零依赖），J 加 13 线、MACD 柱叠 DIF / DEA 点与零轴、末根 ▲ 竖标当根；指标仍只走 indicators.py | owner 2026-11-10 | TODO #121 |
+| 2026-11-10 | v0.505 | **进场口径显式化 `entry_timing`**（借鉴 qteasy use_latest_data_cycle）：`simulate_b1_trade` / `evaluate_trades` 新增 close（缺省，逐位不变）/ next_open（次日开盘成交，停牌或开盘涨停买不到不记交易，止损按信号日，T+1）；开发机 1000 票快照描述读数：次日开盘 margin A +5.14→+5.61%、B +4.85→+5.30%，现行口径未高估 | owner 2026-11-10 | `scripts/dev/entry_timing_compare.py` |
+| 2026-11-10 | v0.505 | **慢门预计算提速**：qg（共振 v2）/ main_rally 两档 / b2 底部异动族 7 门改「全序列一次算 + 点查询」（因子 `_arr` 通道，判定同一函数体；main_rally_factor、b2_surge_factor 按 refactor 登记），周 J∧qg 透传 precomputed；单票 46 门 144s→20s（7.3×），6 票×2 窗×46 门 35,867 信号与旧代码逐字节相同；INDICATOR_PACK_VERSION 1→2 | owner 2026-11-10 | 等价性钉测 +3 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 
