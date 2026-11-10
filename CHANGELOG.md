@@ -511,6 +511,7 @@
 | 2026-11-10 | v0.505 | **进场口径显式化 `entry_timing`**（借鉴 qteasy use_latest_data_cycle）：`simulate_b1_trade` / `evaluate_trades` 新增 close（缺省，逐位不变）/ next_open（次日开盘成交，停牌或开盘涨停买不到不记交易，止损按信号日，T+1）；开发机 1000 票快照描述读数：次日开盘 margin A +5.14→+5.61%、B +4.85→+5.30%，现行口径未高估 | owner 2026-11-10 | `scripts/dev/entry_timing_compare.py` |
 | 2026-11-10 | v0.505 | **慢门预计算提速**：qg（共振 v2）/ main_rally 两档 / b2 底部异动族 7 门改「全序列一次算 + 点查询」（因子 `_arr` 通道，判定同一函数体；main_rally_factor、b2_surge_factor 按 refactor 登记），周 J∧qg 透传 precomputed；单票 46 门 144s→20s（7.3×），6 票×2 窗×46 门 35,867 信号与旧代码逐字节相同；INDICATOR_PACK_VERSION 1→2 | owner 2026-11-10 | 等价性钉测 +3 |
 | 2026-11-10 | v0.506 | **校准图集改 KLineChart**（owner 同意引入）：vendored klinecharts 10.1.0（Apache-2.0，`research/vendor/klinecharts/`，sha256 钉测）内联进 gallery.html（离线、懒加载）；K 线 / 量 / J（13 线）/ MACD 四窗格联动、十字光标读数、当根标注；J / MACD 数值仍喂 indicators.py 结果，库只画图；资源缺失退回静态 SVG；chart_data 存 120 根（终端图取末 60 根） | owner 2026-11-10 | TODO #121 |
+| 2026-11-10 | v0.507 | **N 结构候选定义：MACD 平台结构**（owner 通达信公式转译）：红柱段阴线最高开 = 平台顶、绿柱段阴线最低收 = 平台底（无阴线段跳过、不设最短段长）；最近两组 L2>L1 ∧ H2>H1 ⇒ 上升、反之下降、其余横盘震荡，上升中收盘 < L2 ⇒ 破位；`technical_monitor.macd_platform_structure` 只在 calib_probe n_structure 并排输出、不进 live；图集画平台线与 L1/L2/H1/H2 | owner 2026-11-10 | TODO #121 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

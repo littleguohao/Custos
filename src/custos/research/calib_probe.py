@@ -43,6 +43,9 @@ MODULES: dict[str, dict[str, Any]] = {
             "n_structure.fresh_breach",
             "descending_n_structure.status",
             "descending_n_structure.fresh_breach",
+            # v0.507 候选：MACD 平台结构（owner 通达信公式转译；只在探针里并排，不进 live analyze）
+            "n_structure_macd.state",
+            "n_structure_macd.breached",
         ],
         "params": [
             "N_PIVOT_LEFT",
@@ -302,7 +305,10 @@ def evaluate(
         from custos.pipeline.market_timing import technical_monitor as tm  # noqa: PLC0415
 
         with patched(defmod, overrides):
-            an = tm.analyze(df_long.reset_index(drop=True), code)
+            dfl = df_long.reset_index(drop=True)
+            an = tm.analyze(dfl, code)
+            if any(f.startswith("n_structure_macd.") for f in fields):
+                an["n_structure_macd"] = tm.macd_platform_structure(dfl)
             return {f: field_value(an, f) for f in fields}
     aliases = next(
         (v.get("aliases") for v in MODULES.values() if v["defmod"] == defmod), None
@@ -1332,6 +1338,16 @@ function kcDraw(el) {
   ch.createIndicator({ name: 'CVOL', paneId: 'p_vol' });
   ch.createIndicator({ name: 'CJ', paneId: 'p_j' });
   ch.createIndicator({ name: 'CMACD', paneId: 'p_macd' });
+  const ts = d => Date.parse(d + 'T15:00:00+08:00');
+  const first = bars[0].timestamp;
+  (p.marks || []).forEach(m => {
+    const col = m.kind === 'H' ? '#E5A50A' : '#7E57C2';
+    const s = Math.max(ts(m.start), first);
+    ch.createOverlay({ name: 'segment', lock: true, points: [{ timestamp: s, value: m.price }, { timestamp: ts(m.end), value: m.price }],
+      styles: { line: { color: col, size: m.label ? 2 : 1, style: m.ongoing ? 'dashed' : 'solid' } } });
+    if (m.label) ch.createOverlay({ name: 'simpleTag', lock: true, points: [{ timestamp: ts(m.date), value: m.price }], extendData: m.label + ' ' + m.price,
+      styles: { line: { color: col }, text: { backgroundColor: col, borderColor: col } } });
+  });
   const last = bars[bars.length - 1];
   ch.createOverlay({ name: 'simpleAnnotation', points: [{ timestamp: last.timestamp, value: last.high }], extendData: '当根' });
   el._kc = ch;
@@ -1341,6 +1357,30 @@ const kcObs = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersect
 document.querySelectorAll('div.s').forEach(el => kcObs.observe(el));
 </script>
 """
+
+
+#: 图集上画 MACD 平台线（L1 / L2 / H1 / H2）的模块（v0.507）
+_MARK_MODULES = frozenset({"n_structure", "trend_box"})
+
+
+def platform_marks(df: Any) -> list[dict[str, Any]]:
+    """图窗（末 CHART_BARS 根）内的 MACD 平台点；最近两组平台底 / 顶标 L1 L2 / H1 H2。"""
+    from custos.pipeline.market_timing import technical_monitor as tm  # noqa: PLC0415
+
+    segs = tm.macd_platform_segments(df)
+    first = str(df["date"].iloc[max(0, len(df) - CHART_BARS)])[:10]
+    for kind, names in (("L", ("L1", "L2")), ("H", ("H1", "H2"))):
+        ks = [x for x in segs if x["kind"] == kind][-2:]
+        for x, nm in zip(ks, names[-len(ks) :]):
+            x["label"] = nm
+    return [
+        {
+            k: x.get(k)
+            for k in ("kind", "price", "date", "start", "end", "label", "ongoing")
+        }
+        for x in segs
+        if x["end"] >= first
+    ]
 
 
 def kc_assets() -> Optional[str]:
@@ -1418,6 +1458,9 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
                     chart_data[str(row[0])] = {
                         **chart_payload(fr[1], title),
                         "code": row[2],
+                        "marks": platform_marks(fr[1])
+                        if rep["module"] in _MARK_MODULES
+                        else [],
                     }
         (d / "chart_data.json").write_text(
             json.dumps(chart_data, ensure_ascii=False), encoding="utf-8"

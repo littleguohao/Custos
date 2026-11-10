@@ -508,7 +508,7 @@
     },
     "technical_monitor": {
       "version": 2,
-      "source_digest": "d7655b9dbf2abb338815",
+      "source_digest": "863865aa39414e012fc6",
       "history": [
         {
           "version": 1,
@@ -519,6 +519,16 @@
           "version": 2,
           "date": "2026-11-03",
           "change": "持仓/主题技术面改前复权（owner 2026-11-03「需要全部前复权」，v0.486）：除权缺口不再误触发 N 结构/箱体跌破"
+        },
+        {
+          "version": 2,
+          "date": "2026-11-10",
+          "refactor": "v0.507 新增候选 macd_platform_segments / macd_platform_structure（owner 通达信公式转译），不进 analyze、live 输出与判定不变"
+        },
+        {
+          "version": 2,
+          "date": "2026-11-10",
+          "refactor": "v0.507 候选 MACD 平台结构 state 取中文三态（仍不进 analyze）"
         }
       ]
     }

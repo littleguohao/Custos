@@ -31,6 +31,7 @@ import pandas as pd
 # 构成「底层依赖决策层」的分层反转。本模块自己也用它们，故导入回来。
 from custos.core.indicators import (
     bbi_series,  # noqa: E402
+    macd_series,
     resample,
     kdj,
     macd,
@@ -641,6 +642,104 @@ def descending_n_structure_state(
         "stale": stale,
         "fresh_breach": bool(confirmed and not stale),
         "pivot_window": {"left": left, "right": right, "lookback": lookback},
+    }
+
+
+def macd_platform_segments(df: pd.DataFrame) -> list[dict[str, Any]]:
+    """MACD 红 / 绿柱分段的平台点（**候选定义**，v0.507；owner 2026-11-10 通达信公式转译）。
+
+    - 分段：连续 ``MACD>0``（红柱）/ ``MACD<0``（绿柱）为一段（MACD = indicators.macd_series 的中式 ×2 柱）；
+      ``MACD==0`` 的根不属任何段。不设最短段长（owner：按公式）。
+    - 红柱段平台顶 = 段内**阴线**（收 < 开）开盘价的最高值；绿柱段平台底 = 段内阴线收盘价的最低值；
+      段内无阴线 ⇒ 该段跳过（owner：跳过）。
+    - as-of：只用截至末根的数据；末段（进行中）的平台值随新 K 线更新，标 ``ongoing``。
+    返回按时间顺序的 ``[{kind: "H"|"L", price, idx, date, start, end, ongoing}]``。"""
+    if df is None or len(df) < 2:
+        return []
+    x = df.reset_index(drop=True)
+    o = x["open"].astype(float).to_numpy()
+    c = x["close"].astype(float).to_numpy()
+    _dif, _dea, hist = macd_series(x["close"])
+    h = hist.to_numpy()
+    n = len(x)
+    out: list[dict[str, Any]] = []
+    i = 0
+    while i < n:
+        sgn = 1 if h[i] > 0 else (-1 if h[i] < 0 else 0)
+        j = i
+        while j + 1 < n and (1 if h[j + 1] > 0 else (-1 if h[j + 1] < 0 else 0)) == sgn:
+            j += 1
+        if sgn != 0:
+            bears = [k for k in range(i, j + 1) if c[k] < o[k]]
+            if bears:
+                if sgn > 0:
+                    k = max(bears, key=lambda t: (o[t], t))
+                    price = float(o[k])
+                else:
+                    k = min(bears, key=lambda t: (c[t], -t))
+                    price = float(c[k])
+                out.append(
+                    {
+                        "kind": "H" if sgn > 0 else "L",
+                        "price": round(price, 4),
+                        "idx": int(k),
+                        "date": _date_at(x, k),
+                        "start": _date_at(x, i),
+                        "end": _date_at(x, j),
+                        "ongoing": bool(j == n - 1),
+                    }
+                )
+        i = j + 1
+    return out
+
+
+def macd_platform_structure(df: pd.DataFrame) -> dict[str, Any]:
+    """MACD 平台结构（**候选**，v0.507，未接 live）：取最近两组平台底 / 平台顶判结构。
+
+    owner 2026-11-10 定：L2>L1 且 H2>H1 ⇒ 上升；L2<L1 且 H2<H1 ⇒ 下降；其余 ⇒ 横盘震荡（取值即这三个中文词，与趋势三态同词表）。
+    上升结构里收盘 < L2 ⇒ ``breached``（结构破位，对应现行 P0 语义）；下降结构里收盘 > H2 ⇒
+    ``reclaimed``。上升 N 的「确认」= 最新平台底（L2）之后收盘站上其前一个平台顶（H1）。
+    平台点含进行中的末段（as-of 当时值）。平台底 / 顶各不足两个 ⇒ ``available=False``。"""
+    segs = macd_platform_segments(df)
+    lows = [s for s in segs if s["kind"] == "L"]
+    highs = [s for s in segs if s["kind"] == "H"]
+    if len(lows) < 2 or len(highs) < 2:
+        return {
+            "available": False,
+            "reason": "MACD 平台底 / 顶不足两组",
+            "n_lows": len(lows),
+            "n_highs": len(highs),
+        }
+    l1, l2 = lows[-2], lows[-1]
+    h1, h2 = highs[-2], highs[-1]
+    if l2["price"] > l1["price"] and h2["price"] > h1["price"]:
+        state = "上升"
+    elif l2["price"] < l1["price"] and h2["price"] < h1["price"]:
+        state = "下降"
+    else:
+        state = "横盘震荡"
+    x = df.reset_index(drop=True)
+    close = x["close"].astype(float).to_numpy()
+    cur = float(close[-1])
+    prior_h = [s for s in highs if s["idx"] < l2["idx"]]
+    confirmed = bool(
+        prior_h
+        and any(
+            close[k] > prior_h[-1]["price"] for k in range(l2["idx"] + 1, len(close))
+        )
+    )
+    return {
+        "available": True,
+        "state": state,
+        "L1": l1,
+        "L2": l2,
+        "H1": h1,
+        "H2": h2,
+        "current_close": round(cur, 4),
+        "confirmed": confirmed if state == "上升" else None,
+        "breached": bool(state == "上升" and cur < l2["price"]),
+        "reclaimed": bool(state == "下降" and cur > h2["price"]),
+        "definition": "macd_platform_v1（owner 2026-11-10 通达信公式转译：红柱段阴线最高开 / 绿柱段阴线最低收）",
     }
 
 
