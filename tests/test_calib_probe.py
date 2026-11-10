@@ -461,3 +461,27 @@ class TestTerminalLabelV0503:
         cd.update(title="t", dates=["2022-01-01"] * 5)
         txt = cp.term_chart(cd, color=False)
         assert txt.startswith("t") and "MACD" in txt
+
+
+def test_term_chart_half_blocks_and_marker():
+    """半格版：上涨实体用 █▀▄、影线 │╵╷；末根底部 ▲ 竖标；13 线 ┄；宽度 = 9 + 根数。"""
+    n = 30
+    cd = {
+        "title": "t",
+        "dates": [f"2022-01-{i + 1:02d}" for i in range(n)],
+        "open": [10.0 + i * 0.1 for i in range(n)],
+        "high": [10.6 + i * 0.1 for i in range(n)],
+        "low": [9.4 + i * 0.1 for i in range(n)],
+        "close": [10.3 + i * 0.1 for i in range(n)],
+        "volume": [1000.0 + 10 * i for i in range(n)],
+        "j": [60.0 - 3 * i for i in range(n)],
+        "dif": [0.05 * (i - 15) for i in range(n)],
+        "dea": [0.04 * (i - 15) for i in range(n)],
+        "hist": [0.02 * (i - 15) for i in range(n)],
+    }
+    lines = cp.term_chart(cd, color=False).split("\n")
+    body = "\n".join(lines[1:13])
+    assert set(body) & set("█▀▄") and set(body) & set("│╵╷")
+    assert "┄" in "\n".join(lines) and lines[-2].rstrip().endswith("▲ 当根")
+    assert lines[-2].index("▲") == 9 + n - 1
+    assert all(len(ln) <= 9 + n + 6 for ln in lines[1:-2])

@@ -1095,55 +1095,113 @@ def chart_payload(df: Any, title: str) -> dict[str, Any]:
     }
 
 
+def _half(up: str, lo: str) -> str:
+    """一格 = 上下两个半格：b=实体 w=影线 ' '=空。实体优先（ccharts 同法），纵向分辨率翻倍。"""
+    if up == "b" and lo == "b":
+        return "█"
+    if up == "b":
+        return "▀"
+    if lo == "b":
+        return "▄"
+    if up == "w" and lo == "w":
+        return "│"
+    if up == "w":
+        return "╵"
+    if lo == "w":
+        return "╷"
+    return " "
+
+
 def term_chart(cd: dict[str, Any], color: bool = True) -> str:
-    """终端 K 线（v0.503）：价格 14 行（│ 影线、█ 实体，红涨绿跌）+ 量 3 行 + J 4 行（· 为 13 线）+ MACD 柱 4 行。"""
-    R, G, Y, Z = ("\033[31m", "\033[32m", "\033[33m", "\033[0m") if color else ("",) * 4
+    """终端 K 线（v0.504 半格版，画法借鉴 ccharts；零依赖）。
+
+    价格 12 行（=24 个半格：█▀▄ 实体、│╵╷ 影线，红涨绿跌）+ 量 3 行 + J 4 行（┄ 为 13 线）+
+    MACD 6 行（半格柱红绿、DIF 黄点 / DEA 白点叠在柱上、┄ 为零轴）；最末一根 = as-of 当根，底部 ▲ 竖标。"""
+    R, G, Y, W, D, Z = (
+        ("\033[31m", "\033[32m", "\033[33m", "\033[37m", "\033[2m", "\033[0m")
+        if color
+        else ("",) * 6
+    )
     o, h, lo, c = cd["open"], cd["high"], cd["low"], cd["close"]
     n = len(c)
     if not n:
         return "（无图数据）"
-    top, bot = max(h), min(lo)
-    span = (top - bot) or 1.0
-    rows = 14
-
-    def lv(x: float) -> int:
-        return int(round((x - bot) / span * (rows - 1)))
-
-    grid = [[" "] * n for _ in range(rows)]
-    for i in range(n):
-        col = R if c[i] >= o[i] else G
-        a, b = sorted((lv(o[i]), lv(c[i])))
-        for y in range(lv(lo[i]), lv(h[i]) + 1):
-            grid[y][i] = col + ("█" if a <= y <= b else "│") + Z
     out = [cd["title"]]
-    for y in range(rows - 1, -1, -1):
-        out.append(f"{bot + span * y / (rows - 1):8.2f} " + "".join(grid[y]))
+
+    def scale(vals: list[float], lo_v: float, hi_v: float, sub: int) -> list[int]:
+        sp = (hi_v - lo_v) or 1.0
+        return [int(round((v - lo_v) / sp * (sub - 1))) for v in vals]
+
+    # ── 价格：24 个半格 ──
+    rows, sub = 12, 24
+    top, bot = max(h), min(lo)
+    hi_i, lo_i = scale(h, bot, top, sub), scale(lo, bot, top, sub)
+    o_i, c_i = scale(o, bot, top, sub), scale(c, bot, top, sub)
+    cell: list[list[str]] = [[" "] * sub for _ in range(n)]
+    for i in range(n):
+        for y in range(lo_i[i], hi_i[i] + 1):
+            cell[i][y] = "w"
+        for y in range(min(o_i[i], c_i[i]), max(o_i[i], c_i[i]) + 1):
+            cell[i][y] = "b"
+    span = (top - bot) or 1.0
+    for r in range(rows - 1, -1, -1):
+        line = []
+        for i in range(n):
+            ch = _half(cell[i][2 * r + 1], cell[i][2 * r])
+            line.append((R if c[i] >= o[i] else G) + ch + Z if ch != " " else " ")
+        px = bot + span * (2 * r + 1) / (sub - 1)
+        out.append(f"{px:8.2f} " + "".join(line))
+    # ── 量：3 行 = 6 半格，柱色随 K 线 ──
     vm = max(cd["volume"]) or 1.0
-    for y in (3, 2, 1):
-        out.append(
-            ("      量 " if y == 3 else " " * 9)
-            + "".join("█" if v / vm * 3 >= y - 0.5 else " " for v in cd["volume"])
+    vh = [int(round(v / vm * 6)) for v in cd["volume"]]
+    for r in (2, 1, 0):
+        line = []
+        for i, k in enumerate(vh):
+            ch = "█" if k >= 2 * r + 2 else ("▄" if k == 2 * r + 1 else " ")
+            line.append((R if c[i] >= o[i] else G) + ch + Z if ch != " " else " ")
+        out.append(("      量 " if r == 2 else " " * 9) + "".join(line))
+
+    # ── 点线面板（J / MACD）：半格点，参考线 ┄ ──
+    def dots(
+        series: list[tuple[list[float], str]], ref: float, rows_n: int, bars: Any = None
+    ) -> tuple[list[str], float, float]:
+        allv = [v for s, _c in series for v in s] + [ref] + ([*bars] if bars else [])
+        vb, vt = min(allv), max(allv)
+        subn = rows_n * 2
+        ref_i = scale([ref], vb, vt, subn)[0]
+        grid = [[" "] * n for _ in range(rows_n)]
+        if bars:
+            b_i = scale(list(bars), vb, vt, subn)
+            for i, bi in enumerate(b_i):
+                a, z = sorted((bi, ref_i))
+                fill = [a <= y <= z for y in range(subn)]
+                col = R if bars[i] >= 0 else G
+                for r in range(rows_n):
+                    ch = _half(
+                        "b" if fill[2 * r + 1] else " ", "b" if fill[2 * r] else " "
+                    )
+                    if ch != " ":
+                        grid[r][i] = col + ch + Z
+        for i in range(n):
+            if grid[ref_i // 2][i] == " ":
+                grid[ref_i // 2][i] = D + "┄" + Z
+        for s, col in series:
+            for i, yi in enumerate(scale(s, vb, vt, subn)):
+                grid[yi // 2][i] = col + ("▀" if yi % 2 else "▄") + Z
+        return ["".join(grid[r]) for r in range(rows_n - 1, -1, -1)], vb, vt
+
+    jl, jb, jt = dots([(cd["j"], Y)], 13.0, 4)
+    for k, ln in enumerate(jl):
+        lab = (
+            f"  J{jt:5.0f} "
+            if k == 0
+            else (f"   {jb:5.0f} " if k == len(jl) - 1 else " " * 9)
         )
-    jv = cd["j"]
-    jt, jb = max(max(jv), 13.0), min(min(jv), 13.0)
-    js = (jt - jb) or 1.0
-    l13 = int(round((13.0 - jb) / js * 3))
-    for y in range(3, -1, -1):
-        cells = [
-            (Y + "●" + Z)
-            if int(round((v - jb) / js * 3)) == y
-            else ("·" if l13 == y else " ")
-            for v in jv
-        ]
-        out.append(f"  J{jb + js * y / 3:5.0f} " + "".join(cells))
-    hm = max(abs(x) for x in cd["hist"]) or 1.0
-    for y in (2, 1, -1, -2):
-        cells = []
-        for x in cd["hist"]:
-            k = x / hm * 2
-            on = (k >= y - 0.5) if y > 0 else (k <= y + 0.5)
-            cells.append(((R if x >= 0 else G) + "▌" + Z) if on else " ")
-        out.append(("   MACD " if y == 2 else " " * 9) + "".join(cells))
+        out.append(lab + ln)
+    ml, _mb, _mt = dots([(cd["dea"], W), (cd["dif"], Y)], 0.0, 6, bars=cd["hist"])
+    for k, ln in enumerate(ml):
+        out.append(("   MACD " if k == 0 else " " * 9) + ln)
+    out.append(" " * (9 + n - 1) + Y + "▲" + Z + " 当根")
     out.append(" " * 9 + cd["dates"][0] + " " * max(1, n - 20) + cd["dates"][-1])
     return "\n".join(out)
 
