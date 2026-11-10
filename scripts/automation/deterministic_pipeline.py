@@ -44,6 +44,14 @@ PIPELINES: dict[str, dict[str, Any]] = {
         "runner_timeout": 1500,
         "task_timeout_ms": 1800000,
     },
+    "1800": {
+        "runner": "src/custos/pipeline/run_1800.py",
+        "report": "{day}/{day}_1800_candidate_table.md",
+        "title": "每日选股",
+        "publish": False,
+        "runner_timeout": 3300,
+        "task_timeout_ms": 3600000,
+    },
     "calendar": {
         "runner": "src/custos/datasource/trading_calendar.py",
         "require_refresh": True,
@@ -57,6 +65,7 @@ TASK_PIPELINES = {
     "automation_f4000a0c-673e-4fe9-9fa9-471ed632a45e": "0905",
     "automation_4b658250-ee41-405b-a78e-b032d0f8e78f": "1445",
     "automation_44f0790b-93f4-48f4-a7ec-1e366bb8fdde": "1700",
+    "automation_d5f253a6-5b04-4195-8149-6c81d214d317": "1800",
     "automation_a0d643ef-60f3-4fa0-a042-b9f20a01d9ea": "calendar",
 }
 
@@ -113,22 +122,127 @@ def build_plan(pipeline: str, day: str, repo: Path = REPO) -> dict[str, Any]:
         report = (
             repo / "artifacts" / "reports" / "daily" / cfg["report"].format(day=day)
         )
-        commands.append(
-            {
-                "name": "publish",
-                "command": _python_command(
-                    "src/custos/pipeline/feishu_report_publisher.py",
-                    "--report",
-                    str(report),
-                    "--title",
-                    str(cfg["title"]),
-                    "--date",
-                    day,
-                ),
-                "timeout": 120,
-            }
-        )
+        if cfg.get("publish", True):
+            commands.append(
+                {
+                    "name": "publish",
+                    "command": _python_command(
+                        "src/custos/pipeline/feishu_report_publisher.py",
+                        "--report",
+                        str(report),
+                        "--title",
+                        str(cfg["title"]),
+                        "--date",
+                        day,
+                    ),
+                    "timeout": 120,
+                }
+            )
     return {"commands": commands, "report": report}
+
+
+def _load_json_object(path: Path, label: str) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise PipelineError(f"{label}缺失或不可解析: {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise PipelineError(f"{label}必须是 JSON 对象: {path}")
+    return data
+
+
+def _complete_screening(
+    day: str, repo: Path, artifact: dict[str, Any], report: Path | None
+) -> dict[str, Any]:
+    """验收 18:00 日志与候选表，直接汇总分层和降级原因，不调用模型。"""
+    run_log_path = repo / "artifacts" / "logs" / f"{day}_1800_run_log.json"
+    run_log = _load_json_object(run_log_path, "18:00 运行日志")
+    if run_log.get("date") != day:
+        raise PipelineError(f"18:00 运行日志日期不符: {run_log.get('date')!r} != {day}")
+    run_status = str(run_log.get("status") or "")
+    if run_status == "closed":
+        artifact.update(
+            status="skipped",
+            summary="非交易日，每日选股按日历门跳过",
+            reason="trading_calendar_closed",
+            run_log=str(run_log_path),
+        )
+        return artifact
+    if run_status not in {"completed", "degraded"}:
+        raise PipelineError(f"18:00 运行日志状态异常: {run_status or '缺失'}")
+    if report is None or not report.is_file() or report.stat().st_size == 0:
+        raise PipelineError(f"1800 候选表缺失或为空: {report}")
+
+    pool_path = repo / "data" / "stock_pool" / f"{day}_stock_pool.json"
+    try:
+        pool = json.loads(pool_path.read_text(encoding="utf-8"))
+        if not isinstance(pool, dict):
+            pool = {}
+    except (OSError, ValueError):
+        pool = {}
+    if pool and pool.get("date") != day:
+        raise PipelineError(f"stock_pool 日期不符: {pool.get('date')!r} != {day}")
+
+    raw_counts = pool.get("bucket_counts")
+    counts = (
+        {bucket: raw_counts.get(bucket) for bucket in ("A", "B", "C", "D")}
+        if isinstance(raw_counts, dict)
+        else {}
+    )
+    if not all(type(value) is int and value >= 0 for value in counts.values()):
+        counts = {}
+
+    stages = run_log.get("stages") or []
+    warning_stages = [
+        str(stage.get("name"))
+        for stage in stages
+        if isinstance(stage, dict) and stage.get("ok") is False and stage.get("name")
+    ]
+    degraded_stages = [name for name in warning_stages if name.startswith("screening_")]
+    reasons: list[str] = []
+    status = run_status
+    pool_status = str(pool.get("status") or "")
+    pool_reason = str(pool.get("degraded_reason") or "").strip()
+    if run_status == "degraded" or pool_status in {
+        "degraded",
+        "partial",
+        "unavailable",
+        "missing_pool",
+    }:
+        status = "degraded"
+        reasons.extend(degraded_stages)
+        if pool_reason:
+            reasons.append(pool_reason)
+    if not counts:
+        status = "degraded"
+        reasons.append("stock_pool 缺失或 A/B/C/D 计数不可用")
+    if status == "degraded" and not reasons:
+        reasons.append("选股链降级，详见运行日志")
+    reasons = list(dict.fromkeys(reasons))
+
+    count_text = (
+        "，".join(f"{bucket}={counts[bucket]}" for bucket in ("A", "B", "C", "D"))
+        if counts
+        else "分层计数不可用"
+    )
+    summary = (
+        f"每日选股{'完成（降级）' if status == 'degraded' else '已完成'}：{count_text}"
+    )
+    if reasons:
+        summary += "；降级：" + "、".join(reasons)
+    if warning_stages:
+        summary += "；告警：" + "、".join(warning_stages)
+    artifact.update(
+        status=status,
+        summary=summary,
+        report=str(report),
+        run_log=str(run_log_path),
+        stock_pool=str(pool_path),
+        bucket_counts=counts,
+        warning_stages=warning_stages,
+        degraded_reason="；".join(reasons),
+    )
+    return artifact
 
 
 def execute(
@@ -186,6 +300,8 @@ def execute(
         return artifact
 
     report = plan["report"]
+    if pipeline == "1800":
+        return _complete_screening(day, repo, artifact, report)
     if report is None or not report.is_file() or report.stat().st_size == 0:
         raise PipelineError(f"{pipeline} 报告缺失或为空，拒绝投递: {report}")
 

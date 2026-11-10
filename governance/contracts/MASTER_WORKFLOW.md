@@ -359,7 +359,10 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 | 每日 09:05 | `automation_f4000a0c-673e-4fe9-9fa9-471ed632a45e` | `run_0905` + 盘前日报飞书投递 |
 | 交易日 14:45 | `automation_4b658250-ee41-405b-a78e-b032d0f8e78f` | `run_1445` + 尾盘报告飞书投递；日历门退出码 3 静默跳过 |
 | 交易日 17:00 | `automation_44f0790b-93f4-48f4-a7ec-1e366bb8fdde` | `run_1700` + 最终复盘飞书投递；日历门退出码 3 静默跳过 |
+| 交易日 18:00 | `automation_d5f253a6-5b04-4195-8149-6c81d214d317` | `run_1800` + 当日日志/候选表验收；输出 A/B/C/D 与降级/告警，不推飞书 |
 | 每周五 14:35 | `automation_a0d643ef-60f3-4fa0-a042-b9f20a01d9ea` | 本地通达信交易日历 `--require-refresh` |
+
+18:00 无聊天选股（v0.509）：以当日 `1800_run_log` 的 `closed` 状态识别休市，交易日必须验收当日非空候选表；从 `stock_pool` 直接提取 A/B/C/D 计数并汇总降级原因和各段告警，不调用模型、不新增飞书推送。原 `automation_341000ca-a4fa-4b27-b18e-40ef2149fd97` 已停用保留。
 
 15:00 独立验收同样无聊天（v0.492）：活动任务 `automation_0bf14305-8705-4e55-b0cd-d1a8cee9724d` 直接运行 `scripts/automation/review_1445_delivery.py`，核对 run log 与当前日期目录的非空尾盘报告；正常静默，异常才写 `daily/YYYY-MM-DD/YYYY-MM-DD_1445_delivery_alert.md` 并推飞书。原 15:00 `local_conversation(reuse)` 任务已停用保留。
 
