@@ -783,6 +783,13 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--c4-min-pool", type=int, default=C4_MIN_POOL)
     ap.add_argument("--seed", type=int, default=20261021)
     ap.add_argument(
+        "--warm-procs",
+        type=int,
+        default=0,
+        help="预热（加载 + j_low 扫描）进程并行路数（v0.508；>1 优先于 --load-workers 线程，读数逐位不变、"
+        "不进配置哈希；建议 = 物理核数 − 2）",
+    )
+    ap.add_argument(
         "--load-workers",
         type=int,
         default=1,

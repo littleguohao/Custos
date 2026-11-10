@@ -887,3 +887,49 @@ class TestYearlyStabilityV0501:
         )
         rep = _world_run(0, edge=True)
         assert not any(v["replicated"] for v in rep["objects"].values())
+
+
+@pytest.mark.skipif(
+    __import__("multiprocessing").get_start_method(allow_none=False) != "fork",
+    reason="fork 平台验证（Windows spawn 由生产冒烟覆盖）",
+)
+def test_build_window_scan_procs_bit_identical_v0508(monkeypatch):
+    """v0.508：缺省工厂下 QN 扫描进程并行与串行逐位一致。"""
+    import numpy as np
+    import pandas as pd
+
+    from custos.research import regime_style_study as rs
+
+    monkeypatch.setattr(
+        rs, "_default_shares_fn", lambda code: None
+    )  # 不碰网络（fork 继承）
+
+    bars = {}
+    for k, code in enumerate(("600001", "600002", "000003")):
+        rng = np.random.default_rng(k)
+        n = 420
+        c = 10 * np.cumprod(1 + rng.normal(0.0005, 0.025, n))
+        o = c * (1 + rng.normal(0, 0.01, n))
+        bars[code] = pd.DataFrame(
+            {
+                "date": pd.date_range("2021-06-01", periods=n, freq="B"),
+                "open": o,
+                "high": np.maximum(o, c) * 1.01,
+                "low": np.minimum(o, c) * 0.99,
+                "close": c,
+                "volume": rng.lognormal(13, 0.4, n),
+            }
+        )
+    kw = dict(
+        bars=bars,
+        b1_layers={o: [] for o in sr.B1_OBJECTS},
+        qn_scan_fn=sr.default_qn_scan_fn(),
+        mcap_fn=sr.default_mcap_fn(),
+    )
+    a = sr._build_window("mining_b", "2022-01-01", "2023-01-31", **kw)
+    b = sr._build_window("mining_b", "2022-01-01", "2023-01-31", scan_procs=2, **kw)
+    assert set(a) == set(b)
+    for key in a:
+        if key.startswith("_"):
+            continue
+        assert repr(a[key]) == repr(b[key]), key

@@ -308,40 +308,13 @@ def _warm_code(
     }
 
 
-_WARM_CTX: dict[str, Any] = {}
-
-
-def _warm_init(ctx: dict[str, Any]) -> None:
-    _WARM_CTX.clear()
-    _WARM_CTX.update(ctx)
-
-
-def _warm_task(code: str) -> Optional[dict]:
-    return _warm_code(code, **_WARM_CTX)
-
-
 def _warm_parallel_procs(
     codes: list[str], ctx: dict[str, Any], procs: int
 ) -> dict[str, dict]:
-    """进程池逐票预热；``map`` 按提交序产出 ⇒ 装配与串行同序同值。
-    worker 继承代码冻结环境（Windows spawn 经 custos/__init__ 装快照）。"""
-    from concurrent.futures import ProcessPoolExecutor  # noqa: PLC0415
+    """进程池逐票预热（v0.508 收口到 ``exit_campaign.run_codes_procs`` 单一来源；逐位不变）。"""
+    from custos.research import exit_campaign as ec  # noqa: PLC0415
 
-    out: dict[str, dict] = {}
-    with ProcessPoolExecutor(
-        max_workers=procs, initializer=_warm_init, initargs=(ctx,)
-    ) as ex:
-        for i, (code, res) in enumerate(
-            zip(codes, ex.map(_warm_task, codes, chunksize=4)), 1
-        ):
-            if i % 200 == 0:
-                print(
-                    f"[warmup] {ctx['start']}~{ctx['end']} {i}/{len(codes)}",
-                    file=sys.stderr,
-                )
-            if res is not None:
-                out[code] = res
-    return out
+    return ec.run_codes_procs(codes, _warm_code, ctx, procs)
 
 
 def collect_gate_signals(per_code: dict[str, dict], gate: str) -> list[dict]:

@@ -190,3 +190,28 @@ def test_warm_procs_not_in_config_hash():
     assert jb.config_hash("bear_regime_study", a) == jb.config_hash(
         "bear_regime_study", b
     )
+
+
+@pytest.mark.skipif(
+    __import__("multiprocessing").get_start_method(allow_none=False) != "fork",
+    reason="依赖 fork 继承 monkeypatch",
+)
+def test_warm_v0_signals_procs_bit_identical(monkeypatch):
+    """v0.508 --warm-procs：R44/R47/R48/R49/R50 共用的 V0 预热进程并行与串行逐位一致。"""
+    _patch_warm(monkeypatch)
+    kw = dict(count=100, cost_bps=25.0, start="2022-01-01", end="2022-12-31")
+    serial = ec.warm_v0_signals(CODES, {}, None, **kw)
+    par = ec.warm_v0_signals(CODES, {}, None, warm_procs=3, **kw)
+    _packs_equal(serial, par)
+    assert "600005" not in par and "600009" not in par
+
+
+def test_warm_procs_cli_registered():
+    """五个工具都有 --warm-procs，且不进配置哈希（已在簿记键）。"""
+    from custos.research import plan_rules_replay as prr
+    from custos.research import swing_recall_study as sr
+    from custos.research import tail_explore_study as te
+    from custos.research import tail_feature_study as tf
+
+    for mod in (prr, tf, te, sr):
+        assert "--warm-procs" in mod._build_parser().format_help(), mod.__name__

@@ -515,6 +515,7 @@ def run_study(
                 warmup_bars=300 if layout == "v2" else 0,
                 load_workers=int(getattr(args, "load_workers", 1) or 1),
                 score_workers=int(getattr(args, "score_workers", 1) or 1),
+                warm_procs=int(getattr(args, "warm_procs", 0) or 0),
             )
 
     # ── 逐段 warm →（v2）段末隔离带 clip → attach 配对剔除 ──
@@ -1176,6 +1177,7 @@ def _scan_prepare(
                 warmup_bars=300,  # 段前预热 300 根（v0.359，v2 纪律）
                 load_workers=int(getattr(args, "load_workers", 1) or 1),
                 score_workers=int(getattr(args, "score_workers", 1) or 1),
+                warm_procs=int(getattr(args, "warm_procs", 0) or 0),
             )
 
     # ── 逐段 warm → 段末隔离带 clip → 锚点附着（x=0 建子集；低档化在重放时）──
@@ -1483,6 +1485,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--c4-min-pool", type=int, default=C4_MIN_POOL)
     ap.add_argument("--seed", type=int, default=20261009)
+    ap.add_argument(
+        "--warm-procs",
+        type=int,
+        default=0,
+        help="预热（加载 + j_low 扫描）进程并行路数（v0.508；>1 优先于 --load-workers 线程，读数逐位不变、"
+        "不进配置哈希；建议 = 物理核数 − 2）",
+    )
     ap.add_argument(
         "--load-workers",
         type=int,

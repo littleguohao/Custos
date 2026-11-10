@@ -400,6 +400,37 @@ def _quantiles(xs: list[float]) -> Optional[dict[str, float]]:
 # ---------------------------------------------------------------------------
 
 
+_SCAN_FNS: dict[str, Any] = {}
+
+
+def _scan_default_task(job: tuple[str, Any, str, str]) -> dict[str, Any]:
+    """进程池单票块（v0.508）：与 ``_build_window._one`` 同步骤同顺序，qn / mcap 用生产缺省工厂。"""
+    code, df, start, end = job
+    if not _SCAN_FNS:
+        _SCAN_FNS["qn"] = default_qn_scan_fn()
+        _SCAN_FNS["mcap"] = default_mcap_fn()
+    dates = df["date"].astype(str).str[:10].tolist()
+    closes = df["close"].astype(float).tolist()
+    sw, dr = identify_swings(dates, closes, seg_start=start, seg_end=end)
+    mc = _SCAN_FNS["mcap"](code, df)
+    return {
+        "dates": dates,
+        "swings": sw,
+        "dropped": dr,
+        "qn": _SCAN_FNS["qn"](code, df, start, end),
+        "mcap": mc,
+        "low": local_low_mask(closes),
+    }
+
+
+def _load_bars_task(code: str, *, count: int, start: str, end: str) -> Any:
+    """进程池加载（v0.508）：空表 ⇒ None（同串行剔除口径）。"""
+    from custos.research import backtest_factors as bt  # noqa: PLC0415
+
+    df = bt._load_one_bars(code, count, start, end, warmup_bars=300)
+    return df if df is not None and len(df) else None
+
+
 def _build_window(
     name: str,
     start: str,
@@ -410,6 +441,7 @@ def _build_window(
     qn_scan_fn: Callable[[str, Any, str, str], dict[str, list[int]]],
     mcap_fn: Callable[[str, Any], dict[str, float]],
     scan_workers: int = 1,
+    scan_procs: int = 0,
 ) -> dict[str, Any]:
     """单挖掘段装配：波段识别 + QN as-of 扫描 + B1 层 + 对照集分层母体。
 
@@ -432,7 +464,18 @@ def _build_window(
         }
 
     codes = sorted(bars)
-    if scan_workers > 1 and len(codes) > 1:
+    if scan_procs > 1 and len(codes) > 1:
+        # v0.508：进程并行（仅生产缺省 qn_scan_fn / mcap_fn——worker 内按工厂重建，逐位同线程 / 串行）
+        from concurrent.futures import ProcessPoolExecutor  # noqa: PLC0415
+
+        with ProcessPoolExecutor(max_workers=scan_procs) as ex:
+            res = ex.map(
+                _scan_default_task,
+                [(c, bars[c], start, end) for c in codes],
+                chunksize=4,
+            )
+            scanned = dict(zip(codes, res))
+    elif scan_workers > 1 and len(codes) > 1:
         from custos.research import backtest_factors as bt  # noqa: PLC0415
 
         scanned = bt.run_codes_parallel(codes, lambda c: _one(c, bars[c]), scan_workers)
@@ -1168,8 +1211,10 @@ def run_study(
     elif regime is None:
         raise ValueError("注入路径必须显式给 regime（0AMV 台账映射）")
     assert bars_fn is not None and regime is not None  # noqa: S101 — 收窄类型
+    default_scan = qn_scan_fn is None and mcap_fn is None  # 进程并行只走生产缺省工厂
     qn_scan_fn = qn_scan_fn or default_qn_scan_fn()
     mcap_fn = mcap_fn or default_mcap_fn()
+    procs = int(getattr(args, "warm_procs", 0) or 0)
 
     wins: dict[str, dict[str, Any]] = {}
     per_code_of: dict[str, dict[str, dict]] = {}
@@ -1187,6 +1232,7 @@ def run_study(
             qn_scan_fn=qn_scan_fn,
             mcap_fn=mcap_fn,
             scan_workers=int(getattr(args, "load_workers", 1) or 1),
+            scan_procs=procs if default_scan else 0,
         )
     n_sw = {w: sum(len(v) for v in wins[w]["swings_of"].values()) for w in wins}
     if any(v == 0 for v in n_sw.values()):
@@ -1449,6 +1495,7 @@ def _production(
         .reset_index(drop=True)
     )
     workers = int(getattr(args, "load_workers", 1) or 1)
+    procs = int(getattr(args, "warm_procs", 0) or 0)
 
     def warm_fn(start: str, end: str) -> dict[str, dict]:
         return ec.warm_v0_signals(
@@ -1462,12 +1509,20 @@ def _production(
             warmup_bars=300,  # 段前预热（v2 纪律；预热只读价格）
             load_workers=workers,
             score_workers=int(getattr(args, "score_workers", 1) or 1),
+            warm_procs=procs,
         )
 
     def bars_fn(start: str, end: str) -> dict[str, Any]:
         def _one(code: str) -> Any:
             return bt._load_one_bars(code, args.count, start, end, warmup_bars=300)
 
+        if procs > 1 and len(codes) > 1:
+            return ec.run_codes_procs(
+                codes,
+                _load_bars_task,
+                {"count": args.count, "start": start, "end": end},
+                procs,
+            )
         if workers > 1 and len(codes) > 1:
             # v0.469：同串行分支剔空表（无日线票返回无 date 列的空 df ⇒ _build_window KeyError，
             # 开发机快照冒烟实锤；生产机遇退市 / 空 vipdoc 票同样会在 warm 数小时后崩）
@@ -1524,6 +1579,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "传与 MIN_N 不同的值会把它当成簇数门，不是信号数门）",
     )
     ap.add_argument("--seed", type=int, default=20261023)
+    ap.add_argument(
+        "--warm-procs",
+        type=int,
+        default=0,
+        help="预热 / 加载 / QN 扫描进程并行路数（v0.508；>1 优先于 --load-workers 线程，读数逐位不变、"
+        "不进配置哈希；建议 = 物理核数 − 2）",
+    )
     ap.add_argument(
         "--load-workers",
         type=int,

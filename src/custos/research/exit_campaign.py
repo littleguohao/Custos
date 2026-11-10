@@ -889,6 +889,76 @@ def run_campaign(
 # ---------------------------------------------------------------------------
 
 
+def _v0_warm_code(
+    code: str,
+    *,
+    count: int,
+    cost_bps: float,
+    start: str,
+    end: str,
+    warmup_bars: int,
+    regime: dict[str, str],
+) -> Optional[dict]:
+    """单票 V0 预热（模块级，v0.508：进程池可 pickle；串行 / 线程 / 进程三路调同一函数）。"""
+    from custos.research import backtest_factors as bt  # noqa: PLC0415
+
+    df = bt._load_one_bars(code, count, start, end, warmup_bars=warmup_bars)
+    if df is None or not len(df):
+        return None
+    sigs: list[dict] = []
+    bt.evaluate_trades(
+        {code: df},
+        scorer=bt.SCORERS["baseline"],
+        entry_gate=bt.j_low_gate,
+        amv_regime=regime,
+        cost_bps=cost_bps,
+        collect_all=True,
+        signals_out=sigs,
+    )
+    if warmup_bars > 0:
+        sigs = [s for s in sigs if str(s.get("date") or "")[:10] >= start]
+    if not sigs:
+        return None
+    todo = list(
+        {s["date"]: s["i"] for s in sigs}.items()
+    )  # 同日去重（原逐信号覆盖同值）
+    return {"df": df, "signals": sigs, "scores": {}, "_to_score": todo}
+
+
+_PROC_CTX: dict[str, Any] = {}
+
+
+def _proc_init(fn: Callable[..., Any], ctx: dict[str, Any]) -> None:
+    _PROC_CTX["fn"] = fn
+    _PROC_CTX["ctx"] = ctx
+
+
+def _proc_task(code: str) -> Any:
+    return _PROC_CTX["fn"](code, **_PROC_CTX["ctx"])
+
+
+def run_codes_procs(
+    codes: list[str], fn: Callable[..., Any], ctx: dict[str, Any], procs: int
+) -> dict[str, Any]:
+    """逐票进程并行（v0.508 单一来源）：``fn`` 须模块级（可 pickle），``ctx`` 每 worker 只传一次；
+    ``map`` 按 codes 提交序产出 ⇒ 装配与串行同序同值；``None`` 结果剔除（同串行）。
+    worker 继承代码冻结环境（spawn 时经 custos/__init__ 装快照）。"""
+    from concurrent.futures import ProcessPoolExecutor  # noqa: PLC0415
+
+    out: dict[str, Any] = {}
+    with ProcessPoolExecutor(
+        max_workers=procs, initializer=_proc_init, initargs=(fn, ctx)
+    ) as ex:
+        for i, (code, res) in enumerate(
+            zip(codes, ex.map(_proc_task, codes, chunksize=4)), 1
+        ):
+            if i % 500 == 0:
+                print(f"[warmup] procs {i}/{len(codes)}", file=sys.stderr)
+            if res is not None:
+                out[code] = res
+    return out
+
+
 def warm_v0_signals(
     codes: list[str],
     regime: dict[str, str],
@@ -901,6 +971,7 @@ def warm_v0_signals(
     warmup_bars: int = 0,
     load_workers: int = 1,
     score_workers: int = 1,
+    warm_procs: int = 0,
 ) -> dict[str, dict]:
     """V0 重放信号预热：逐股加载 → j_low+0AMV 信号扫描 → as-of V0 技术分。
 
@@ -915,6 +986,8 @@ def warm_v0_signals(
     逐位一致；默认 1=原行为。
     ``score_workers``（v0.447）：信号扫完后批量打 as-of V0 分（``score_pool``：>1 多进程 + 跨研究落盘缓存），
     读数与原逐信号串行逐位一致（失败信号同样丢弃）。
+    ``warm_procs``（v0.508）：>1 时「加载 + 扫描」改**进程**并行（优先于 load_workers 线程；
+    线程受 GIL 限制，R40 实测只吃满 ~1 核），按 codes 提交序装配，逐位一致。
     """
     from custos.research import backtest_factors as bt  # noqa: PLC0415
     from custos.research import score_pool  # noqa: PLC0415
@@ -922,31 +995,22 @@ def warm_v0_signals(
 
     _t0 = _time.time()  # TODO #92 warm 耗时埋点（[TIME] warm 行，return 前打印）
 
+    ctx: dict[str, Any] = {
+        "count": count,
+        "cost_bps": cost_bps,
+        "start": start,
+        "end": end,
+        "warmup_bars": warmup_bars,
+        "regime": regime,
+    }
+
     def _one(code: str) -> Optional[dict]:
-        df = bt._load_one_bars(code, count, start, end, warmup_bars=warmup_bars)
-        if df is None or not len(df):
-            return None
-        sigs: list[dict] = []
-        bt.evaluate_trades(
-            {code: df},
-            scorer=bt.SCORERS["baseline"],
-            entry_gate=bt.j_low_gate,
-            amv_regime=regime,
-            cost_bps=cost_bps,
-            collect_all=True,
-            signals_out=sigs,
-        )
-        if warmup_bars > 0:
-            sigs = [s for s in sigs if str(s.get("date") or "")[:10] >= start]
-        if not sigs:
-            return None
-        todo = list(
-            {s["date"]: s["i"] for s in sigs}.items()
-        )  # 同日去重（原逐信号覆盖同值）
-        return {"df": df, "signals": sigs, "scores": {}, "_to_score": todo}
+        return _v0_warm_code(code, **ctx)
 
     per_code: dict[str, dict] = {}
-    if load_workers and load_workers > 1 and len(codes) > 1:
+    if warm_procs and warm_procs > 1 and len(codes) > 1:
+        per_code = run_codes_procs(codes, _v0_warm_code, ctx, int(warm_procs))
+    elif load_workers and load_workers > 1 and len(codes) > 1:
         per_code = bt.run_codes_parallel(codes, _one, load_workers)
     else:
         for i, code in enumerate(codes, 1):
