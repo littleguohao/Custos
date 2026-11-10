@@ -345,7 +345,7 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 - 14:45：采集尾盘行情，运行严格持仓检查并投递尾盘报告
 - 15:15：单个补数任务先接收入站回复（按**消息发送日**归属登记，|0AMV|>±15% 拒自动登记转人工），再检查当天 confirmed 且未 superseded 的 0AMV 与成交/no_trades 记录；已齐则不提醒不轮询，缺项只提醒一次，随后每 10 分钟接收入站回复并复查，两项收齐立即停止本轮，最多 11 轮至 17:00 截止并留痕。无常驻轮询（0AMV 录入：`market_timing_collector --amv <值>`，录入即确认；超 ±15% 需 `--confirm-extreme` 二次确认）
 - 17:00：用户补数后运行确定性盘后流水线和最终复盘；18:00 独立运行每日选股链
-- 周日：周度复盘
+- 周六 10:07：周度复盘
 - 月末最后一个交易日数据确认后：月度复盘
 
 交易日历优先级：人工`overrides` > 交易所官方休市安排 > 本地通达信缓存 > 周末规则 > `unknown`。非交易日跳过并保持安静（例外：08:50/09:05 经 `--run-on-closed` 每日化后按休市口径续跑，见上；1445/1700/1800 时点 runner 仍在日历门退出）。
@@ -375,6 +375,14 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 1. `scripts/automation/premarket_pipeline.py collect` 依次执行 `run_0850` 和 `wind_announcement_collector`；后者以固定 Wind 工具逐持仓查询公告，按 CSV 表头解析，任一失败即停且不紧密重试，其余持仓标 `skipped`，材料落 `artifacts/cache/premarket/`。完整公告由脚本把 `files[].content` 按原始 UTF-8 字节落 `artifacts/cache/kimiwork/`（v0.491），不得只信插件声称的附件路径；Windows 下不得二次转换 CRLF。
 2. 模型只读当日 RSS 候选、主题聚类与公告摘要；长公告仅重大风险需要时读完整缓存。写出情报后必须以 `premarket_pipeline.py validate` 验收，未通过不得报成功；研判不进入交易权限。
 3. 当日有效情报已存在时返回 `already_completed`，不重复采集、不调用插件、不覆盖文件；人工确需重做才用 `collect --force`。原 08:50 `local_conversation(reuse)` 任务已停用保留，禁止与新任务同时启用。
+
+### 周度无聊天独立研判（v0.510）
+
+活动任务 `automation_e9f4cc7f-5073-4876-959b-4ffd6df681be`，每周六 10:07 以独立后台运行（无聊天窗口、无跨周对话历史），模型每周消耗一次 credits：
+
+1. 先运行 `close_review/weekly_review.py`，验收当前 ISO 周的 `artifacts/reports/weekly/<ISO周>_weekly_review.md` 与 `data/review/weekly/<ISO周>_weekly_review.json`；周次、区间或文件不符即失败，不得使用旧周报。
+2. 模型只读当周脚本事实与操作反事实附录，写操作评价、盈亏主因、执行/策略问题和一到两条改进建议；数字须可回溯、带样本量、缺口如实披露。归因追加前查重，追加后验收，不修改脚本章节、策略或交易权限。
+3. 报告经 `feishu_report_publisher.py` 投递，只有退出码 0 且返回 `sent=true` 才成功；半成功不得冒充成功或紧密重试。原 `automation_63f0ba71-f7a5-42bb-9b9a-5195aa127b8d` 已停用保留，禁止与新任务同时启用。
 
 所有任务必须先检查交易日或统计周期完整性。任务失败应记录原因并告警，不得以空报告冒充成功。
 
