@@ -166,7 +166,7 @@ git commit -m "batch b1 reads" && git push
 
 ## 第二批预告（不在第一批，第一批判定段读完后再跑）
 
-> **提速（v0.508）**：第二批四工具（R47 / R48 / R49 / R50）一律加 `--warm-procs <物理核数-2>`（替代 `--load-workers`）；开发机实测 V0 预热 300 票 6.6×、R50 100 票端到端 627s → 66s（9.5×），产物逐字段相同。🔄 **v0.514 更正**：66s 是 V0 分缓存命中的读数；冷缓存实测 482s，其中 V0 打分占 435s（90%）——第二批真瓶颈是打分，`--score-workers` 一律取 `<物理核数-2>`（冷缓存全宇宙打分估 3~4 小时，看 stderr `[warm-score]` / `[TIME] warm` 核）；打分相关源码任何改动都会让缓存整体失效，跑数前勿改 `core/**`、`pipeline/screening/**`、`score_return_study.py`、契约 JSON。R50 命令同理：`swing_recall_study --tag r50_v1 --warm-procs <物理核数-2> --score-workers <物理核数-2>`。
+> **提速（v0.508）**：第二批四工具（R47 / R48 / R49 / R50）一律加 `--warm-procs <物理核数-2>`（替代 `--load-workers`）；开发机实测 V0 预热 300 票 6.6×、R50 100 票端到端 627s → 66s（9.5×），产物逐字段相同。🔄 **v0.514 更正**：66s 是 V0 分缓存命中的读数；冷缓存实测 482s，其中 V0 打分占 435s（90%）——第二批真瓶颈是打分，`--score-workers` 一律取 `<物理核数-2>`（估：R50 冷缓存实测约 71ms/bar/进程、每票约 490 根待打分 bar ⇒ 全宇宙 5,500 票约 2.7M bar，10 进程约 5 小时、20 进程约 2.7 小时；以 stderr `[warm-score]` / `[TIME] warm` 为准）；打分相关源码任何改动都会让缓存整体失效，跑数前勿改 `core/**`、`pipeline/screening/**`、`score_return_study.py`、契约 JSON。R50 命令同理：`swing_recall_study --tag r50_v1 --warm-procs <物理核数-2> --score-workers <物理核数-2>`。
 
 > **判据口径（v0.501，owner 2026-11-09）**：第二批四单元资格门改簇稳健 95% 下界（底线 ≥30 簇）+ 挖掘 B 2022~2025 逐年稳定；跑数用 ≥ 该版本代码（产物 provenance `criteria_version` 应为 v0.501）。
 > **顺序（owner 2026-11-04）**：R40 跑完 → **#121 定义校准**（持仓 N 结构 → `b1_thresholds` → 其余 P0 选股因子，升版后）→ 第二批 R47/R48/R49 → R50。
