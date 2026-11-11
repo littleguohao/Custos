@@ -51,8 +51,9 @@ def test_units_exist():
     # 2026-10-21：+R48（B1 大单入场特征，右尾识别，预注册草案）
     # 2026-10-21：+R49（B1 高盈亏比交易逆向画像，探索）
     # 2026-10-23：+R50（≥20% 波段逆向匹配 B1 / QN，探索）
-    assert len(UNITS) == 49, (
-        f"预期 49 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
+    # 2026-11-11：+R51（0AMV 状态机行为，探索）
+    assert len(UNITS) == 50, (
+        f"预期 50 个研究单元，实际 {len(UNITS)}：{[p.name for p in UNITS]}"
     )
 
 

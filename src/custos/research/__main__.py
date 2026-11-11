@@ -202,6 +202,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "（live compute_metrics 同口径）；--mode sample 出命中/未命中/边界抽检图（纯 SVG）+ 标注表 labels.csv，"
         "--mode sensitivity 逐参数改动报命中数与 Jaccard（只描述）；生产机运行",
     ),
+    "amv_regime_study": (
+        "study",
+        "R51 0AMV 状态机行为（探索，只读挖掘 A∪B）：段内 0AMV / 上证幅度与持续、翻转后 5/10/20 日反复率与位置分层、"
+        "「连续 2 日合计 >4%」翻多 vs 单日 >4% 是否等效（快照无增量 ⇒ 只出指数侧）",
+    ),
     "swing_recall_study": (
         "study",
         "R50 ≥20% 波段逆向匹配（v0.456，探索）：ZigZag 双阈值波段（+20% 成立/−10% 确认 T1，前复权收盘，"

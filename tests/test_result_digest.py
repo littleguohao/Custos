@@ -287,3 +287,10 @@ def test_r50(tmp_path):
     low_keys = [k for k in d["fields"] if k.endswith(".lift_low")]
     assert len(low_keys) == len(rep["objects"]) * 2
     assert any(k.endswith(".baseline_low") for k in d["fields"])
+
+
+def test_r51(tmp_path, monkeypatch):
+    import test_amv_regime_study as tar
+
+    rep = tar.world_report(tmp_path, monkeypatch)
+    _assert_complete("r51", _dump(tmp_path, "r51", rep))
