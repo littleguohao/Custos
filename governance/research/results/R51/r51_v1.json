@@ -1,0 +1,1079 @@
+{
+  "digest_version": 1,
+  "fields": {
+    "amv_source": "ledger",
+    "criteria_version": "v0.511",
+    "provenance.cmdline": "C:\\Users\\gh\\.openclaw-tdxclaw\\workspace\\strategy_team\\src\\custos\\research\\amv_regime_study.py --tag r51_v1",
+    "provenance.data_last_date": "2026-11-10",
+    "provenance.git_dirty": false,
+    "provenance.git_sha": "ea130ab755",
+    "provenance.n_codes": null,
+    "provenance.universe_rule": null,
+    "provenance.universe_sha256": null,
+    "two_day": {
+      "mining_a": {
+        "aux": {
+          "extra_long_days": 448,
+          "extra_next_day_ret_mean": -0.0187,
+          "lead_days_vs_s0": {
+            "mean": 7.3125,
+            "n": 16,
+            "p10": 1.0,
+            "p25": 1.0,
+            "p50": 7.0,
+            "p75": 9.0,
+            "p90": 20.0
+          },
+          "s0_long_days": 1621,
+          "s0_never_long_in_segment": 42,
+          "s0_next_day_ret_mean": 0.0764
+        },
+        "events": [
+          {
+            "date": "2000-03-20",
+            "fwd20": 5.6384,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 2.67
+          },
+          {
+            "date": "2000-07-13",
+            "fwd20": 4.3826,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 3.36
+          },
+          {
+            "date": "2001-03-09",
+            "fwd20": 4.8189,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 3.54
+          },
+          {
+            "date": "2001-05-15",
+            "fwd20": 1.4555,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 1.96
+          },
+          {
+            "date": "2001-07-23",
+            "fwd20": -10.8124,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 0.87
+          },
+          {
+            "date": "2001-09-05",
+            "fwd20": -9.7234,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 1.58
+          },
+          {
+            "date": "2002-12-16",
+            "fwd20": 4.1412,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 2.57
+          },
+          {
+            "date": "2004-06-02",
+            "fwd20": -10.7149,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 1.12
+          },
+          {
+            "date": "2004-07-15",
+            "fwd20": -3.7523,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 3.84
+          },
+          {
+            "date": "2004-10-11",
+            "fwd20": -7.7076,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 3.19
+          },
+          {
+            "date": "2004-10-27",
+            "fwd20": 1.2161,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 2.97
+          },
+          {
+            "date": "2005-06-07",
+            "fwd20": 0.7857,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 3.63
+          },
+          {
+            "date": "2005-12-15",
+            "fwd20": 7.0588,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 1.55
+          },
+          {
+            "date": "2006-06-02",
+            "fwd20": 0.1683,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 1.06
+          },
+          {
+            "date": "2006-06-30",
+            "fwd20": -0.6088,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 0.98
+          },
+          {
+            "date": "2006-11-20",
+            "fwd20": 15.6225,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 2.99
+          },
+          {
+            "date": "2006-12-18",
+            "fwd20": 18.202,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 3.79
+          },
+          {
+            "date": "2007-01-29",
+            "fwd20": -5.4308,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 3.41
+          },
+          {
+            "date": "2007-02-15",
+            "fwd20": 2.6134,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 3.93
+          },
+          {
+            "date": "2007-05-22",
+            "fwd20": 3.8717,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 2.62
+          },
+          {
+            "date": "2007-06-07",
+            "fwd20": -7.0662,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 3.43
+          },
+          {
+            "date": "2007-07-09",
+            "fwd20": 19.1823,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 1.94
+          },
+          {
+            "date": "2007-10-15",
+            "fwd20": -13.9693,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 2.11
+          },
+          {
+            "date": "2008-12-02",
+            "fwd20": -3.0022,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 2.1
+          },
+          {
+            "date": "2009-02-23",
+            "fwd20": 0.8544,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 3.61
+          },
+          {
+            "date": "2009-05-04",
+            "fwd20": 8.5425,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 3.85
+          },
+          {
+            "date": "2009-06-02",
+            "fwd20": 8.6283,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 1.26
+          },
+          {
+            "date": "2009-07-02",
+            "fwd20": 8.5388,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 2.75
+          },
+          {
+            "date": "2009-07-31",
+            "fwd20": -16.1594,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 3.31
+          },
+          {
+            "date": "2009-08-21",
+            "fwd20": 0.0642,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 1.53
+          },
+          {
+            "date": "2009-11-02",
+            "fwd20": 3.8565,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 3.96
+          },
+          {
+            "date": "2009-12-01",
+            "fwd20": -0.7294,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 2.35
+          },
+          {
+            "date": "2010-04-21",
+            "fwd20": -15.7368,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 4.0
+          },
+          {
+            "date": "2010-08-31",
+            "fwd20": 3.7873,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 2.07
+          },
+          {
+            "date": "2011-01-04",
+            "fwd20": -1.8821,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 3.47
+          },
+          {
+            "date": "2011-02-11",
+            "fwd20": 3.7657,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 2.7
+          },
+          {
+            "date": "2011-08-10",
+            "fwd20": -1.2981,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 2.53
+          },
+          {
+            "date": "2012-04-13",
+            "fwd20": 0.6646,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 2.26
+          },
+          {
+            "date": "2012-05-29",
+            "fwd20": -7.2274,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 3.95
+          },
+          {
+            "date": "2012-09-28",
+            "fwd20": 1.4802,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 3.2
+          },
+          {
+            "date": "2013-01-29",
+            "fwd20": -1.3849,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 2.02
+          },
+          {
+            "date": "2013-03-21",
+            "fwd20": -3.531,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 1.07
+          },
+          {
+            "date": "2013-05-06",
+            "fwd20": 3.0513,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 2.92
+          },
+          {
+            "date": "2013-06-26",
+            "fwd20": 4.1932,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 2.73
+          },
+          {
+            "date": "2013-08-12",
+            "fwd20": 5.2939,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 3.95
+          },
+          {
+            "date": "2013-10-14",
+            "fwd20": -5.7334,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 2.26
+          },
+          {
+            "date": "2014-03-24",
+            "fwd20": 0.317,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 1.44
+          },
+          {
+            "date": "2014-06-16",
+            "fwd20": -0.9267,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 2.49
+          },
+          {
+            "date": "2014-09-02",
+            "fwd20": 5.1517,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 3.79
+          },
+          {
+            "date": "2015-01-06",
+            "fwd20": -4.3724,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 1.22
+          },
+          {
+            "date": "2015-04-17",
+            "fwd20": -0.0889,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 2.87
+          },
+          {
+            "date": "2015-07-17",
+            "fwd20": 0.2017,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 3.87
+          },
+          {
+            "date": "2015-09-09",
+            "fwd20": 0.5967,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 3.33
+          },
+          {
+            "date": "2015-10-09",
+            "fwd20": 12.7823,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 1.24
+          },
+          {
+            "date": "2015-10-23",
+            "fwd20": 6.3905,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 3.68
+          },
+          {
+            "date": "2015-12-18",
+            "fwd20": -18.5842,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 0.48
+          },
+          {
+            "date": "2016-01-19",
+            "fwd20": -3.4714,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 3.55
+          },
+          {
+            "date": "2016-03-31",
+            "fwd20": -2.1838,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 0.88
+          }
+        ],
+        "fwd20_diff_ci95": [
+          -2.923,
+          2.145
+        ],
+        "fwd20_diff_pp": -0.4779,
+        "fwd20_single": {
+          "mean": 0.6714,
+          "n": 119
+        },
+        "fwd20_two_day": {
+          "mean": 0.1935,
+          "n": 58
+        },
+        "gate": {
+          "a_rev": true,
+          "b_fwd": true,
+          "c_n": true
+        },
+        "n_single": 119,
+        "n_two_day": 58,
+        "rev10_diff_ci95": [
+          -18.9076,
+          11.0693
+        ],
+        "rev10_diff_pp": -4.32,
+        "rev10_single": {
+          "n": 119,
+          "rate": 0.6639
+        },
+        "rev10_two_day": {
+          "n": 58,
+          "rate": 0.6207
+        }
+      },
+      "mining_b": {
+        "aux": {
+          "extra_long_days": 68,
+          "extra_next_day_ret_mean": 0.2409,
+          "lead_days_vs_s0": {
+            "mean": 10.75,
+            "n": 4,
+            "p10": 1.0,
+            "p25": 1.0,
+            "p50": 3.0,
+            "p75": 3.0,
+            "p90": 38.0
+          },
+          "s0_long_days": 451,
+          "s0_never_long_in_segment": 3,
+          "s0_next_day_ret_mean": 0.0419
+        },
+        "events": [
+          {
+            "date": "2022-05-11",
+            "fwd20": 5.893,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 2.93
+          },
+          {
+            "date": "2022-10-13",
+            "fwd20": 0.6554,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 0.74
+          },
+          {
+            "date": "2023-10-25",
+            "fwd20": 2.3368,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 2.48
+          },
+          {
+            "date": "2024-01-24",
+            "fwd20": 6.8917,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 2.6
+          },
+          {
+            "date": "2025-05-06",
+            "fwd20": 1.8121,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 3.53
+          },
+          {
+            "date": "2025-06-25",
+            "fwd20": 3.6554,
+            "rev10": false,
+            "trigger": "two_day",
+            "trigger_chg": 3.59
+          },
+          {
+            "date": "2026-08-06",
+            "fwd20": 1.0702,
+            "rev10": true,
+            "trigger": "two_day",
+            "trigger_chg": 0.83
+          }
+        ],
+        "fwd20_diff_ci95": [
+          -2.9051,
+          3.2801
+        ],
+        "fwd20_diff_pp": 0.2486,
+        "fwd20_single": {
+          "mean": 2.9392,
+          "n": 19
+        },
+        "fwd20_two_day": {
+          "mean": 3.1878,
+          "n": 7
+        },
+        "gate": {
+          "a_rev": false,
+          "b_fwd": true,
+          "c_n": false
+        },
+        "n_single": 19,
+        "n_two_day": 7,
+        "rev10_diff_ci95": [
+          -27.8195,
+          54.1353
+        ],
+        "rev10_diff_pp": 15.03,
+        "rev10_single": {
+          "n": 19,
+          "rate": 0.4211
+        },
+        "rev10_two_day": {
+          "n": 7,
+          "rate": 0.5714
+        }
+      }
+    },
+    "two_day_verdict": "insufficient",
+    "window_usage": {
+      "k": null,
+      "note": "只读挖掘 A∪B——判定段只用于状态延续不出读数、window_usage 不登记",
+      "window": "not_read"
+    },
+    "windows.mining_a.down.duration": {
+      "mean": 18.5,
+      "n": 134,
+      "p10": 2,
+      "p25": 6,
+      "p50": 13,
+      "p75": 25,
+      "p90": 43
+    },
+    "windows.mining_a.down.idx": {
+      "adv": {
+        "mean": 2.5897,
+        "n": 135,
+        "p10": 0.0,
+        "p25": 0.0,
+        "p50": 1.1572,
+        "p75": 3.1626,
+        "p90": 7.6101
+      },
+      "end": {
+        "mean": -2.8607,
+        "n": 134,
+        "p10": -13.4818,
+        "p25": -6.1066,
+        "p50": -1.5429,
+        "p75": 1.1903,
+        "p90": 2.9813
+      },
+      "fav": {
+        "mean": -5.1642,
+        "n": 135,
+        "p10": -14.2388,
+        "p25": -6.6401,
+        "p50": -3.8354,
+        "p75": -0.3279,
+        "p90": 0.0
+      }
+    },
+    "windows.mining_a.down.n_flips": 135,
+    "windows.mining_a.down.rev10_by_position": {
+      "amv_prior_seg": {
+        "10~20%": {
+          "n": 21,
+          "rate": 0.3333
+        },
+        "5~10%": {
+          "n": 14,
+          "rate": 0.4286
+        },
+        "<5%": {
+          "n": 59,
+          "rate": 0.5424
+        },
+        "≥20%": {
+          "n": 41,
+          "rate": 0.3171
+        }
+      },
+      "idx_pos": {
+        ">−5%": {
+          "n": 40,
+          "rate": 0.2
+        },
+        "−10~−20%": {
+          "n": 33,
+          "rate": 0.4848
+        },
+        "−5~−10%": {
+          "n": 35,
+          "rate": 0.3429
+        },
+        "≤−20%": {
+          "n": 27,
+          "rate": 0.8148
+        }
+      },
+      "trigger_chg": {
+        "−2.3~−3%": {
+          "n": 68,
+          "rate": 0.3235
+        },
+        "−3~−5%": {
+          "n": 56,
+          "rate": 0.4821
+        },
+        "≤−5%": {
+          "n": 11,
+          "rate": 0.8182
+        }
+      }
+    },
+    "windows.mining_a.down.reversal": {
+      "rev10": {
+        "n": 135,
+        "rate": 0.4296
+      },
+      "rev20": {
+        "n": 134,
+        "rate": 0.694
+      },
+      "rev5": {
+        "n": 135,
+        "rate": 0.237
+      }
+    },
+    "windows.mining_a.span": [
+      "2000-01-01",
+      "2016-12-31"
+    ],
+    "windows.mining_a.up.amv": {
+      "adv": {
+        "mean": -0.7943,
+        "n": 135,
+        "p10": -2.8213,
+        "p25": 0.0,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p90": 0.0
+      },
+      "end": {
+        "mean": 23.7431,
+        "n": 135,
+        "p10": -0.7282,
+        "p25": 0.6193,
+        "p50": 8.4634,
+        "p75": 28.3293,
+        "p90": 83.0941
+      },
+      "fav": {
+        "mean": 25.908,
+        "n": 135,
+        "p10": 0.0,
+        "p25": 1.8642,
+        "p50": 9.4822,
+        "p75": 31.2206,
+        "p90": 83.0941
+      }
+    },
+    "windows.mining_a.up.duration": {
+      "mean": 12.0074,
+      "n": 135,
+      "p10": 2,
+      "p25": 4,
+      "p50": 7,
+      "p75": 15,
+      "p90": 32
+    },
+    "windows.mining_a.up.idx": {
+      "adv": {
+        "mean": -1.0159,
+        "n": 135,
+        "p10": -3.0442,
+        "p25": -1.6287,
+        "p50": -0.4942,
+        "p75": 0.0,
+        "p90": 0.0
+      },
+      "end": {
+        "mean": 3.303,
+        "n": 135,
+        "p10": -1.944,
+        "p25": -0.3052,
+        "p50": 0.843,
+        "p75": 4.8261,
+        "p90": 12.8952
+      },
+      "fav": {
+        "mean": 4.683,
+        "n": 135,
+        "p10": 0.0,
+        "p25": 0.1165,
+        "p50": 1.7923,
+        "p75": 6.9917,
+        "p90": 14.0024
+      }
+    },
+    "windows.mining_a.up.n_censored": 0,
+    "windows.mining_a.up.n_flips": 135,
+    "windows.mining_a.up.rev10_by_position": {
+      "amv_prior_seg": {
+        ">−5%": {
+          "n": 41,
+          "rate": 0.4878
+        },
+        "−10~−20%": {
+          "n": 24,
+          "rate": 0.75
+        },
+        "−5~−10%": {
+          "n": 24,
+          "rate": 0.7917
+        },
+        "≤−20%": {
+          "n": 46,
+          "rate": 0.6522
+        }
+      },
+      "idx_pos": {
+        "10~20%": {
+          "n": 26,
+          "rate": 0.6154
+        },
+        "5~10%": {
+          "n": 42,
+          "rate": 0.6429
+        },
+        "<5%": {
+          "n": 49,
+          "rate": 0.7143
+        },
+        "≥20%": {
+          "n": 18,
+          "rate": 0.5
+        }
+      },
+      "trigger_chg": {
+        "4~5%": {
+          "n": 46,
+          "rate": 0.5435
+        },
+        "5~7%": {
+          "n": 45,
+          "rate": 0.7111
+        },
+        "≥7%": {
+          "n": 44,
+          "rate": 0.6818
+        }
+      }
+    },
+    "windows.mining_a.up.reversal": {
+      "rev10": {
+        "n": 135,
+        "rate": 0.6444
+      },
+      "rev20": {
+        "n": 135,
+        "rate": 0.8148
+      },
+      "rev5": {
+        "n": 135,
+        "rate": 0.3704
+      }
+    },
+    "windows.mining_b.down.duration": {
+      "mean": 27.4545,
+      "n": 22,
+      "p10": 5,
+      "p25": 6,
+      "p50": 21,
+      "p75": 42,
+      "p90": 54
+    },
+    "windows.mining_b.down.idx": {
+      "adv": {
+        "mean": 2.734,
+        "n": 23,
+        "p10": 0.0,
+        "p25": 1.1729,
+        "p50": 1.8228,
+        "p75": 4.1546,
+        "p90": 6.46
+      },
+      "end": {
+        "mean": -1.4033,
+        "n": 22,
+        "p10": -7.2001,
+        "p25": -5.7354,
+        "p50": -1.2277,
+        "p75": 0.4307,
+        "p90": 5.3894
+      },
+      "fav": {
+        "mean": -3.3998,
+        "n": 23,
+        "p10": -7.7118,
+        "p25": -5.4456,
+        "p50": -2.7273,
+        "p75": -0.119,
+        "p90": 0.0
+      }
+    },
+    "windows.mining_b.down.n_flips": 23,
+    "windows.mining_b.down.rev10_by_position": {
+      "amv_prior_seg": {
+        "10~20%": {
+          "n": 4,
+          "rate": 0.0
+        },
+        "5~10%": {
+          "n": 3,
+          "rate": 0.0
+        },
+        "<5%": {
+          "n": 9,
+          "rate": 0.4444
+        },
+        "≥20%": {
+          "n": 7,
+          "rate": 0.2857
+        }
+      },
+      "idx_pos": {
+        ">−5%": {
+          "n": 11,
+          "rate": 0.0
+        },
+        "−10~−20%": {
+          "n": 3,
+          "rate": 0.0
+        },
+        "−5~−10%": {
+          "n": 9,
+          "rate": 0.6667
+        },
+        "≤−20%": {
+          "n": 0,
+          "rate": null
+        }
+      },
+      "trigger_chg": {
+        "−2.3~−3%": {
+          "n": 16,
+          "rate": 0.25
+        },
+        "−3~−5%": {
+          "n": 7,
+          "rate": 0.2857
+        },
+        "≤−5%": {
+          "n": 0,
+          "rate": null
+        }
+      }
+    },
+    "windows.mining_b.down.reversal": {
+      "rev10": {
+        "n": 23,
+        "rate": 0.2609
+      },
+      "rev20": {
+        "n": 23,
+        "rate": 0.4783
+      },
+      "rev5": {
+        "n": 23,
+        "rate": 0.1739
+      }
+    },
+    "windows.mining_b.span": [
+      "2022-01-01",
+      "2026-09-04"
+    ],
+    "windows.mining_b.up.amv": {
+      "adv": {
+        "mean": -1.7944,
+        "n": 23,
+        "p10": -5.2828,
+        "p25": -2.8699,
+        "p50": 0.0,
+        "p75": 0.0,
+        "p90": 0.0
+      },
+      "end": {
+        "mean": 15.6327,
+        "n": 23,
+        "p10": -4.6616,
+        "p25": -1.4835,
+        "p50": 9.4387,
+        "p75": 26.4,
+        "p90": 32.8979
+      },
+      "fav": {
+        "mean": 19.9735,
+        "n": 23,
+        "p10": 0.55,
+        "p25": 4.5331,
+        "p50": 10.3717,
+        "p75": 27.9585,
+        "p90": 36.1318
+      }
+    },
+    "windows.mining_b.up.duration": {
+      "mean": 19.6087,
+      "n": 23,
+      "p10": 4,
+      "p25": 8,
+      "p50": 16,
+      "p75": 28,
+      "p90": 40
+    },
+    "windows.mining_b.up.idx": {
+      "adv": {
+        "mean": -1.1354,
+        "n": 23,
+        "p10": -3.0034,
+        "p25": -1.4144,
+        "p50": -0.2568,
+        "p75": 0.0,
+        "p90": 0.0
+      },
+      "end": {
+        "mean": 2.1938,
+        "n": 23,
+        "p10": -2.0547,
+        "p25": 0.3607,
+        "p50": 1.2305,
+        "p75": 3.5895,
+        "p90": 5.4489
+      },
+      "fav": {
+        "mean": 3.9934,
+        "n": 23,
+        "p10": 0.1414,
+        "p25": 1.6265,
+        "p50": 3.5261,
+        "p75": 4.5749,
+        "p90": 6.411
+      }
+    },
+    "windows.mining_b.up.n_censored": 0,
+    "windows.mining_b.up.n_flips": 23,
+    "windows.mining_b.up.rev10_by_position": {
+      "amv_prior_seg": {
+        ">−5%": {
+          "n": 9,
+          "rate": 0.2222
+        },
+        "−10~−20%": {
+          "n": 5,
+          "rate": 0.2
+        },
+        "−5~−10%": {
+          "n": 1,
+          "rate": 0.0
+        },
+        "≤−20%": {
+          "n": 8,
+          "rate": 0.75
+        }
+      },
+      "idx_pos": {
+        "10~20%": {
+          "n": 4,
+          "rate": 0.0
+        },
+        "5~10%": {
+          "n": 3,
+          "rate": 0.6667
+        },
+        "<5%": {
+          "n": 15,
+          "rate": 0.4667
+        },
+        "≥20%": {
+          "n": 1,
+          "rate": 0.0
+        }
+      },
+      "trigger_chg": {
+        "4~5%": {
+          "n": 11,
+          "rate": 0.2727
+        },
+        "5~7%": {
+          "n": 11,
+          "rate": 0.5455
+        },
+        "≥7%": {
+          "n": 1,
+          "rate": 0.0
+        }
+      }
+    },
+    "windows.mining_b.up.reversal": {
+      "rev10": {
+        "n": 23,
+        "rate": 0.3913
+      },
+      "rev20": {
+        "n": 23,
+        "rate": 0.6957
+      },
+      "rev5": {
+        "n": 23,
+        "rate": 0.1304
+      }
+    }
+  },
+  "kind": "r51",
+  "missing": [],
+  "path": "results/R51/r51_v1.json",
+  "schema": "result_digest/v1",
+  "source_name": "01a1c99a-d5d6-7962-af82-e5562d39d008-_amv_regime__r51_v1.json",
+  "source_sha256": "60f3b33533ff34a25eda077da9de77a63fcf311aa5820e9d36b20093eab7cf67",
+  "tag": "r51_v1",
+  "unit": "R51"
+}
