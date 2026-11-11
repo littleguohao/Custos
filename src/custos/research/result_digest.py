@@ -445,6 +445,7 @@ SPECS: dict[str, tuple[str, list[str]]] = {
             "windows.*.down.duration",
             "windows.*.down.reversal",
             "windows.*.down.idx",
+            "windows.*.down.amv",
             "windows.*.down.rev10_by_position",
             "two_day",
             "two_day_verdict",

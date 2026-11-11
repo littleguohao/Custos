@@ -38,6 +38,8 @@
 | ④多翻空后反复 | 10 日内翻回做多 43% / 26%，20 日内 69% / 48% | 比空翻多少反复 |
 | ⑤两日型 vs 单日型 | A：两日型 58 次，10 日翻回 62% vs 单日型 66%（差 −4.3pp），20 日上证 +0.19% vs +0.67%（差 −0.48pp），两条都过；B：两日型 7 次（<10），翻回 57% vs 42% | **证据不足**（B 段样本不够）。附报（描述）：A 段 S1 多出 448 个做多日，次日上证均值 −0.02%，S0 做多日 +0.08%；58 次两日型翻多里 42 次所在空头段 S0 整段没翻多，即 S1 主要是「多出做多段」而非「提前翻多」 |
 
+**live 用法（v0.513，owner 2026-11-11）**：B 段 ①~④ 读数作为 1800 报告头部「0AMV 背景」的参考数（`pipeline/market_timing/amv_context.py`），只描述、不进任何判定；本单元结论变动 ⇒ 对账钉测 `tests/test_amv_context.py` 红 ⇒ 同步常量。
+
 **本单元不给「改不改」**：⑤ 证据不足，且即便等效，改状态机也须另立单元叠 B1 组合读数并走判定段批次。
 
 ---
@@ -116,6 +118,7 @@ bootstrap（2000 次，seed 0）报，只作描述，不进判定。附报（描
 | `two_day` | {"mining_a": {"aux": {"extra_long_days": 448, "extra_next_day_ret_mean": -0.0187, "lead_days_vs_s0": {"mean": 7.3125, "n": 16, "p10": 1.0, "p25": 1.0, "p50": 7.0, "p75": 9.0, "p90": 20.0}, "s0_long_days": 1621, "s0_never_long_in_segment": 42, "s0_next_day_ret_mean": 0.0764}, "events": "见子表 two_day.mining_a.events（58 行）", "fwd20_diff_ci95": [-2.923, 2.145], "fwd20_diff_pp": -0.4779, "fwd20_single": {"mean": 0.6714, "n": 119}, "fwd20_two_day": {"mean": 0.1935, "n": 58}, "gate": {"a_rev": true, "b_fwd": true, "c_n": true}, "n_single": 119, "n_two_day": 58, "rev10_diff_ci95": [-18.9076, 11.0693], "rev10_diff_pp": -4.32, "rev10_single": {"n": 119, "rate": 0.6639}, "rev10_two_day": {"n": 58, "rate": 0.6207}}, "mining_b": {"aux": {"extra_long_days": 68, "extra_next_day_ret_mean": 0.2409, "lead_days_vs_s0": {"mean": 10.75, "n": 4, "p10": 1.0, "p25": 1.0, "p50": 3.0, "p75": 3.0, "p90": 38.0}, "s0_long_days": 451, "s0_never_long_in_segment": 3, "s0_next_day_ret_mean": 0.0419}, "events": "见子表 two_day.mining_b.events（7 行）", "fwd20_diff_ci95": [-2.9051, 3.2801], "fwd20_diff_pp": 0.2486, "fwd20_single": {"mean": 2.9392, "n": 19}, "fwd20_two_day": {"mean": 3.1878, "n": 7}, "gate": {"a_rev": false, "b_fwd": true, "c_n": false}, "n_single": 19, "n_two_day": 7, "rev10_diff_ci95": [-27.8195, 54.1353], "rev10_diff_pp": 15.03, "rev10_single": {"n": 19, "rate": 0.4211}, "rev10_two_day": {"n": 7, "rate": 0.5714}}} |
 | `two_day_verdict` | "insufficient" |
 | `window_usage` | {"k": null, "note": "只读挖掘 A∪B——判定段只用于状态延续不出读数、window_usage 不登记", "window": "not_read"} |
+| `windows.mining_a.down.amv` | {"adv": {"mean": 2.6014, "n": 135, "p10": 0.0, "p25": 0.0, "p50": 0.0, "p75": 2.2, "p90": 9.2779}, "end": {"mean": -14.7105, "n": 134, "p10": -36.9012, "p25": -24.9661, "p50": -10.3201, "p75": -2.7282, "p90": 1.72}, "fav": {"mean": -17.2493, "n": 135, "p10": -37.9022, "p25": -26.2467, "p50": -14.0444, "p75": -6.45, "p90": 0.0}} |
 | `windows.mining_a.down.duration` | {"mean": 18.5, "n": 134, "p10": 2, "p25": 6, "p50": 13, "p75": 25, "p90": 43} |
 | `windows.mining_a.down.idx` | {"adv": {"mean": 2.5897, "n": 135, "p10": 0.0, "p25": 0.0, "p50": 1.1572, "p75": 3.1626, "p90": 7.6101}, "end": {"mean": -2.8607, "n": 134, "p10": -13.4818, "p25": -6.1066, "p50": -1.5429, "p75": 1.1903, "p90": 2.9813}, "fav": {"mean": -5.1642, "n": 135, "p10": -14.2388, "p25": -6.6401, "p50": -3.8354, "p75": -0.3279, "p90": 0.0}} |
 | `windows.mining_a.down.n_flips` | 135 |
@@ -129,6 +132,7 @@ bootstrap（2000 次，seed 0）报，只作描述，不进判定。附报（描
 | `windows.mining_a.up.n_flips` | 135 |
 | `windows.mining_a.up.rev10_by_position` | {"amv_prior_seg": {">−5%": {"n": 41, "rate": 0.4878}, "−10~−20%": {"n": 24, "rate": 0.75}, "−5~−10%": {"n": 24, "rate": 0.7917}, "≤−20%": {"n": 46, "rate": 0.6522}}, "idx_pos": {"10~20%": {"n": 26, "rate": 0.6154}, "5~10%": {"n": 42, "rate": 0.6429}, "<5%": {"n": 49, "rate": 0.7143}, "≥20%": {"n": 18, "rate": 0.5}}, "trigger_chg": {"4~5%": {"n": 46, "rate": 0.5435}, "5~7%": {"n": 45, "rate": 0.7111}, "≥7%": {"n": 44, "rate": 0.6818}}} |
 | `windows.mining_a.up.reversal` | {"rev10": {"n": 135, "rate": 0.6444}, "rev20": {"n": 135, "rate": 0.8148}, "rev5": {"n": 135, "rate": 0.3704}} |
+| `windows.mining_b.down.amv` | {"adv": {"mean": 3.6138, "n": 23, "p10": 0.0, "p25": 0.0, "p50": 1.6282, "p75": 3.6759, "p90": 5.1549}, "end": {"mean": -9.6247, "n": 22, "p10": -27.598, "p25": -22.7578, "p50": -10.176, "p75": 0.1012, "p90": 5.1549}, "fav": {"mean": -13.9816, "n": 23, "p10": -27.598, "p25": -22.1693, "p50": -12.6828, "p75": -2.4911, "p90": -0.92}} |
 | `windows.mining_b.down.duration` | {"mean": 27.4545, "n": 22, "p10": 5, "p25": 6, "p50": 21, "p75": 42, "p90": 54} |
 | `windows.mining_b.down.idx` | {"adv": {"mean": 2.734, "n": 23, "p10": 0.0, "p25": 1.1729, "p50": 1.8228, "p75": 4.1546, "p90": 6.46}, "end": {"mean": -1.4033, "n": 22, "p10": -7.2001, "p25": -5.7354, "p50": -1.2277, "p75": 0.4307, "p90": 5.3894}, "fav": {"mean": -3.3998, "n": 23, "p10": -7.7118, "p25": -5.4456, "p50": -2.7273, "p75": -0.119, "p90": 0.0}} |
 | `windows.mining_b.down.n_flips` | 23 |
