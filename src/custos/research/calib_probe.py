@@ -45,6 +45,7 @@ MODULES: dict[str, dict[str, Any]] = {
             "descending_n_structure.fresh_breach",
             # v0.507 候选：MACD 平台结构（owner 通达信公式转译；只在探针里并排，不进 live analyze）
             "n_structure_macd.state",
+            "n_structure_macd.transition",
             "n_structure_macd.breached",
         ],
         "params": [
@@ -1364,15 +1365,17 @@ _MARK_MODULES = frozenset({"n_structure", "trend_box"})
 
 
 def platform_marks(df: Any) -> list[dict[str, Any]]:
-    """图窗（末 CHART_BARS 根）内的 MACD 平台点；最近两组平台底 / 顶标 L1 L2 / H1 H2。"""
+    """图窗（末 CHART_BARS 根）内的 MACD 平台点；往回匹配的三组标 L1~L3 / H1~H3（v0.512）。"""
     from custos.pipeline.market_timing import technical_monitor as tm  # noqa: PLC0415
 
     segs = tm.macd_platform_segments(df)
     first = str(df["date"].iloc[max(0, len(df) - CHART_BARS)])[:10]
-    for kind, names in (("L", ("L1", "L2")), ("H", ("H1", "H2"))):
-        ks = [x for x in segs if x["kind"] == kind][-2:]
-        for x, nm in zip(ks, names[-len(ks) :]):
-            x["label"] = nm
+    # v0.512：标号与候选结构同源（往回匹配三组，同类合并取极值；L1/H1 最早、L3/H3 最新）
+    pts = tm.macd_platform_points(segs, 3)
+    for kind in ("L", "H"):
+        ks = [x for x in pts if x["kind"] == kind][:3]
+        for n, x in enumerate(ks):
+            x["label"] = f"{kind}{len(ks) - n}"
     return [
         {
             k: x.get(k)

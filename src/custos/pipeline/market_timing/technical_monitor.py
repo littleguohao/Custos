@@ -693,53 +693,89 @@ def macd_platform_segments(df: pd.DataFrame) -> list[dict[str, Any]]:
     return out
 
 
-def macd_platform_structure(df: pd.DataFrame) -> dict[str, Any]:
-    """MACD 平台结构（**候选**，v0.507，未接 live）：取最近两组平台底 / 平台顶判结构。
+def macd_platform_points(
+    segs: list[dict[str, Any]], groups: int = 3
+) -> list[dict[str, Any]]:
+    """往回交替匹配平台点（v0.512，owner 2026-11-11 定：从当根往回、B2、同类合并取极值）。
 
-    owner 2026-11-10 定：L2>L1 且 H2>H1 ⇒ 上升；L2<L1 且 H2<H1 ⇒ 下降；其余 ⇒ 横盘震荡（取值即这三个中文词，与趋势三态同词表）。
-    上升结构里收盘 < L2 ⇒ ``breached``（结构破位，对应现行 P0 语义）；下降结构里收盘 > H2 ⇒
-    ``reclaimed``。上升 N 的「确认」= 最新平台底（L2）之后收盘站上其前一个平台顶（H1）。
-    平台点含进行中的末段（as-of 当时值）。平台底 / 顶各不足两个 ⇒ ``available=False``。"""
+    从最新的平台点（含进行中末段）往回交替收 L / H；连续同类（中间段无阴线被跳过）合并为一个——
+    L 取更低、H 取更高（并列取较新者）；凑满 ``groups`` 个 L 与 ``groups`` 个 H 即停。
+    返回按时间**从新到旧**的代表点列表（字段同 ``macd_platform_segments``）。"""
+    seq: list[dict[str, Any]] = []
+    for sg in reversed(segs):
+        if seq and seq[-1]["kind"] == sg["kind"]:
+            cur = seq[-1]
+            if (sg["kind"] == "L" and sg["price"] < cur["price"]) or (
+                sg["kind"] == "H" and sg["price"] > cur["price"]
+            ):
+                seq[-1] = sg
+            continue
+        n_l = sum(1 for x in seq if x["kind"] == "L")
+        n_h = len(seq) - n_l
+        if n_l >= groups and n_h >= groups:
+            break
+        seq.append(sg)
+    return seq
+
+
+def _platform_state(l_a: float, l_b: float, h_a: float, h_b: float) -> str:
+    if l_b > l_a and h_b > h_a:
+        return "上升"
+    if l_b < l_a and h_b < h_a:
+        return "下降"
+    return "横盘震荡"
+
+
+def macd_platform_structure(df: pd.DataFrame) -> dict[str, Any]:
+    """MACD 平台结构（**候选**，未接 live）：往回匹配三组平台点判结构。
+
+    v0.512（owner 2026-11-11 对图确认「可以对上」）：从当根往回交替匹配 L / H（``macd_platform_points``，
+    同类相邻合并取极值），凑满三组，标号 L1/H1 最早、L3/H3 最新。**最近两组定状态**：L3>L2 且 H3>H2 ⇒ 上升，
+    反之 ⇒ 下降，其余 ⇒ 横盘震荡；**第三组判延续 / 转折**：前一状态 = 同规则作用于 (L1→L2, H1→H2)，
+    ``transition`` = 「延续」或「由<前一状态>转」。（v0.507 原定义 = L、H 各自取最近两个，已被本版取代。）
+    上升结构里收盘 < L3 ⇒ ``breached``；下降结构里收盘 > H3 ⇒ ``reclaimed``；上升 N 的「确认」= L3 之后
+    收盘站上 L3 之前最近的平台顶。平台点含进行中的末段（as-of 当时值）。不足三组 ⇒ ``available=False``。"""
     segs = macd_platform_segments(df)
-    lows = [s for s in segs if s["kind"] == "L"]
-    highs = [s for s in segs if s["kind"] == "H"]
-    if len(lows) < 2 or len(highs) < 2:
+    pts = macd_platform_points(segs, 3)
+    lows = [x for x in pts if x["kind"] == "L"][:3][::-1]  # 旧 → 新
+    highs = [x for x in pts if x["kind"] == "H"][:3][::-1]
+    if len(lows) < 3 or len(highs) < 3:
         return {
             "available": False,
-            "reason": "MACD 平台底 / 顶不足两组",
+            "reason": "MACD 平台底 / 顶不足三组",
             "n_lows": len(lows),
             "n_highs": len(highs),
         }
-    l1, l2 = lows[-2], lows[-1]
-    h1, h2 = highs[-2], highs[-1]
-    if l2["price"] > l1["price"] and h2["price"] > h1["price"]:
-        state = "上升"
-    elif l2["price"] < l1["price"] and h2["price"] < h1["price"]:
-        state = "下降"
-    else:
-        state = "横盘震荡"
+    l1, l2, l3 = lows
+    h1, h2, h3 = highs
+    state = _platform_state(l2["price"], l3["price"], h2["price"], h3["price"])
+    prior = _platform_state(l1["price"], l2["price"], h1["price"], h2["price"])
     x = df.reset_index(drop=True)
     close = x["close"].astype(float).to_numpy()
     cur = float(close[-1])
-    prior_h = [s for s in highs if s["idx"] < l2["idx"]]
+    prior_h = [sg for sg in segs if sg["kind"] == "H" and sg["idx"] < l3["idx"]]
     confirmed = bool(
         prior_h
         and any(
-            close[k] > prior_h[-1]["price"] for k in range(l2["idx"] + 1, len(close))
+            close[k] > prior_h[-1]["price"] for k in range(l3["idx"] + 1, len(close))
         )
     )
     return {
         "available": True,
         "state": state,
+        "prior_state": prior,
+        "transition": "延续" if state == prior else f"由{prior}转",
         "L1": l1,
         "L2": l2,
+        "L3": l3,
         "H1": h1,
         "H2": h2,
+        "H3": h3,
         "current_close": round(cur, 4),
         "confirmed": confirmed if state == "上升" else None,
-        "breached": bool(state == "上升" and cur < l2["price"]),
-        "reclaimed": bool(state == "下降" and cur > h2["price"]),
-        "definition": "macd_platform_v1（owner 2026-11-10 通达信公式转译：红柱段阴线最高开 / 绿柱段阴线最低收）",
+        "breached": bool(state == "上升" and cur < l3["price"]),
+        "reclaimed": bool(state == "下降" and cur > h3["price"]),
+        "definition": "macd_platform_v2（往回交替匹配三组，同类合并取极值；最近两组定状态，第三组判延续 / 转折）",
     }
 
 

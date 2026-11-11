@@ -23,7 +23,7 @@
 | 118 | R49 逆向画像跑数：工具已落地 v0.443（`tail_explore_study`）；与 R47/R48 同排第二批，命令见 runbook「第二批预告」；线索两窗复现 + 过 q95 者另行预注册 | P2 | 生产机 | 排在 #121 定义校准之后（owner 2026-11-04）；之后 r49_v1 + 摘要入库 | [R49](governance/research/R49_tail_reverse_profile.md) |
 | 119 | R50 ≥20% 波段逆向匹配工具 `swing_recall_study`（ZigZag 波段 + B1 L1~L4 / QN 12 门召回、精度 lift、提前量、漏斗、兑现）；排期在第二批之后最后跑 | P3 | 生产机 | 排在第二批之后（#121 校准后），用 v0.469+ 代码跑 r50_v1（`swing_recall_study --tag r50_v1`）+ 摘要入库 | [R50](governance/research/R50_swing_winner_recall.md) |
 | 120 | holdout 跟踪月报：汇总选股练习台账 / plan 影子台账 / trade_counterfactual，按月报现行规则在 2026-09-05 后的表现（大单率 / 大亏率 / 胜率 / 盈亏比 / 与回测分布对照）；纯描述、不作判据、不改规则 | P2 | 生产机 | 工具已落地 v0.455（月报附录 + 伴生 JSON，契约已登记）；生产机月度节点跑 `monthly_review` 自动生成，首月（2026-10）复核格式与读数 | owner 2026-10-26 |
-| 121 | 信号参数**定义校准**（A 类：检测器是否测对形态，不拿收益寻优；B 类效果校准待 A 全部完成再议）：P0 live 判定 70 个参数 / 9 个模块优先，逐模块抽检图 + owner 标注 + 敏感性描述；定义改动按清单登记受影响 R 重跑 | P0 | owner | 标注已改网页点选（v0.502，gallery 内导出 labels.csv）；owner 先标持仓 n_structure（生产机 holdings_v1，pull 后 `--mode ui --dir` 加界面）与 b1_thresholds（mining_v1）→ `--mode ingest` 出汇总 → v(n+1) 候选；不设门槛、持续进化 | [清单](governance/research/calibration_inventory.md) |
+| 121 | 信号参数**定义校准**（A 类：检测器是否测对形态，不拿收益寻优；B 类效果校准待 A 全部完成再议）：P0 live 判定 70 个参数 / 9 个模块优先，逐模块抽检图 + owner 标注 + 敏感性描述；定义改动按清单登记受影响 R 重跑 | P0 | owner | MACD 平台候选已定为往回匹配三组（v0.512，owner 对图确认）；生产机 pull 后重跑持仓 review `--tag holdings_v3cand` 供标注，再标 mining_v1（b1_thresholds 起）→ `--mode ingest` → v(n+1) 候选；不设门槛、持续进化 | [清单](governance/research/calibration_inventory.md) |
 | 122 | R51 0AMV 状态机行为（探索，`amv_regime_study`）：①段内幅度 / 持续 ②④翻转后反复率 ③反复位置 ⑤连续 2 日合计 >4% 翻多与单日 >4% 是否等效 | P2 | 生产机 | 开发机已出指数侧 ①~④；生产机读 0AMV 台账跑全量：`uv run python -m custos.research amv_regime_study --tag r51_v1`，回填 R51 | owner 2026-11-11 · R51 |
 
 ## 已闭环索引

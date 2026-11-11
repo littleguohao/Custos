@@ -508,7 +508,7 @@
     },
     "technical_monitor": {
       "version": 2,
-      "source_digest": "863865aa39414e012fc6",
+      "source_digest": "f14e0fcaa7dc4880bd24",
       "history": [
         {
           "version": 1,
@@ -529,6 +529,11 @@
           "version": 2,
           "date": "2026-11-10",
           "refactor": "v0.507 候选 MACD 平台结构 state 取中文三态（仍不进 analyze）"
+        },
+        {
+          "version": 2,
+          "date": "2026-11-11",
+          "refactor": "v0.512 MACD 平台结构候选改往回匹配三组（不进 analyze，live 输出不变）"
         }
       ]
     }
