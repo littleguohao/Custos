@@ -164,9 +164,33 @@ def test_wired_into_1800_header_not_into_decisions():
     import inspect
 
     from custos.pipeline.close_review import final_close_review as fcr
+    from custos.pipeline.screening import candidate_table as ct
 
-    src = inspect.getsource(fcr.main)
-    assert "amv_context.context_lines(" in src
-    # 只在报告行里出现，不参与任何判定函数
-    for fn in (fcr._buy_point_hits, fcr._habit_hits, fcr.build_payload):
+    src = inspect.getsource(ct.main)
+    assert "context_lines=amv_context.context_lines" in src
+    assert "amv_context.context_lines(" not in inspect.getsource(fcr.main)
+    # 只在 18:00 候选表报告行里出现，不参与任何选股判定函数
+    for fn in (ct._signal_overview, ct._unified_table, ct._status_of):
         assert "amv_context" not in inspect.getsource(fn)
+
+
+def test_candidate_table_header_renders_injected_context():
+    from custos.pipeline.screening import candidate_table as ct
+
+    pool = {
+        "status": "ok",
+        "amv_state": "空头",
+        "market_permission": "观察",
+        "candidates": [],
+    }
+    md = ct.render_table(
+        pool,
+        "2026-11-11",
+        gate={"market_quality": {"status": "pass"}, "position_gate": {}},
+        context_lines=lambda day, regime: [f"> 0AMV 背景：{day} {regime}"],
+    )
+
+    assert "> 0AMV 背景：2026-11-11 空头" in md
+    assert md.index("> 选股链状态") < md.index("> 0AMV 背景")
+    assert md.index("> 0AMV 背景") < md.index("> 本表为证据层候选")
+    assert md.index("> 0AMV 背景") < md.index("## ⭐ 今日信号一览")

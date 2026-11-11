@@ -17,7 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -26,6 +26,7 @@ if hasattr(sys.stdout, "reconfigure"):
 from custos.core.paths import PLANS, QUALITY_DIR, STOCK_POOL_DIR, daily_report_dir  # noqa: E402
 from custos.core.runtime_guards import normalize_regime  # noqa: E402
 from custos.core import report_audit  # noqa: E402
+from custos.pipeline.market_timing import amv_context  # noqa: E402  L3 同层，只描述
 
 PATTERN_LABELS = {
     "bbi_above": "BBI上",
@@ -529,8 +530,12 @@ def _legend_section() -> list[str]:
     return out
 
 
-def _header_lines(pool: dict, date: str) -> list[str]:
-    """表头 + 可审计块 + 选股链状态行。"""
+def _header_lines(
+    pool: dict,
+    date: str,
+    context_lines: Optional[Callable[[str, str], list[str]]] = None,
+) -> list[str]:
+    """表头 + 可审计块 + 选股链状态行；背景由生产入口显式注入。"""
     # 可审计块（原待办 #29，已实现）：本表实际读过的输入（stock_pool 本体 + 门控结论）
     audit = report_audit.build(
         date,
@@ -540,6 +545,11 @@ def _header_lines(pool: dict, date: str) -> list[str]:
             QUALITY_DIR / f"{date}_runtime_gate.json",
         ],
     )
+    amv_background = (
+        context_lines(date, str(pool.get("amv_state") or ""))
+        if context_lines is not None
+        else []
+    )
     return [
         f"# 公式选股备选池｜{date}",
         "",
@@ -547,6 +557,7 @@ def _header_lines(pool: dict, date: str) -> list[str]:
         f"> 选股链状态：{pool.get('status', '未知')}"
         + (f"（{pool['degraded_reason']}）" if pool.get("degraded_reason") else "")
         + f"；0AMV：{pool.get('amv_state', '未知')}；市场许可：{pool.get('market_permission', '未知')}",
+        *amv_background,
         "> 本表为证据层候选，不构成买入计划；可买 / 观察价位亦须经总控与风控审批。列含义见文末。",
         "",
     ]
@@ -586,8 +597,13 @@ def _split_watch(watch_all: list[dict]) -> tuple[list[dict], list[dict]]:
     return watch, watch_capped
 
 
-def render_table(pool: dict, date: str, gate: Optional[dict] = None) -> str:
-    lines = _header_lines(pool, date)
+def render_table(
+    pool: dict,
+    date: str,
+    gate: Optional[dict] = None,
+    context_lines: Optional[Callable[[str, str], list[str]]] = None,
+) -> str:
+    lines = _header_lines(pool, date, context_lines=context_lines)
     candidates = pool.get("candidates") or []
     # 先看全景分组(供置顶信号一览 + 后续各区复用)
     watch_all = _resonant_watch(candidates)
@@ -686,7 +702,9 @@ def main(argv: Optional[list] = None) -> int:
         )
         status = "missing_pool"
     else:
-        text = render_table(pool, args.date)
+        text = render_table(
+            pool, args.date, context_lines=amv_context.context_lines
+        )  # 真正的 18:00 候选表头部（v0.515）
         status = pool.get("status", "ok")
 
     # 归到**目标交易日**的目录（candidate_table 的 --date 就是 target）：

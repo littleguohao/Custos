@@ -32,7 +32,6 @@ from custos.core.fmt import pct_text  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 from custos.core.exit_rules import LOSS_REDUCTION_PCT  # noqa: E402  L0，−7% 减仓线唯一来源
 from custos.core.trades.position_plans import load_plans  # noqa: E402  L2，持仓计划影子读取
-from custos.pipeline.market_timing import amv_context  # noqa: E402  L3 同层，0AMV 背景信息（只描述）
 from custos.pipeline.market_timing.amv_state import (  # noqa: E402  L3 同层，0AMV 阈值唯一来源
     AMV_LONG_PCT,
     AMV_SHORT_PCT,
@@ -1056,9 +1055,6 @@ def main():
         f"> 报告质量：**{'complete' if not enrichment.get('unavailable') and news.get('status') == 'complete' else 'degraded'}**",
         f"> 0AMV当日变动：**{float(value):+.2f}%**{_amv_source_label(amv)}；有效状态：**{regime}**",
         *([_amv_alert] if _amv_alert else []),
-        *amv_context.context_lines(
-            day, regime
-        ),  # R51 B 段背景（只描述，旁路隔离，v0.513）
         f"> 今日实际交易：**{'无交易动作' if not today else str(len(today)) + '笔'}**",
         f"> 持仓确认：**{freshness.get('status')}** — {freshness.get('reason')}",
         "",
