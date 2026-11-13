@@ -860,7 +860,7 @@ def label_ui(rows: list[list[Any]], mode: str, store_key: str) -> str:
         "<label><input type='checkbox' id='onlyTodo'>只看未标</label>　"
         "<button id='exp'>导出 labels.csv</button>　"
         "导入续标 <input type='file' id='imp' accept='.csv'>　"
-        "<span style='color:#888'>（形态理由写形态，不写后来涨跌；标注存在本浏览器，换机器请先导出）</span></div>"
+        "<span style='color:#888'>（判定 = 检测器测得对不对；买点判断请写在备注开头「买点：」，作选股练习素材。理由写形态，不写后来涨跌；标注存在本浏览器，换机器请先导出）</span></div>"
     )
     js = r"""
 <script>
@@ -938,6 +938,76 @@ def _csv_rows(rep: dict[str, Any], frames: dict) -> list[list[Any]]:
     return out
 
 
+#: 每个字段「检测器在测什么」的中文说明（v0.516，owner 2026-11-13：放在每张图最上方）。
+#: 只说定义，不说好坏；出处见各检测器 docstring。键 = summary 里的字段名。
+FIELD_DEF: dict[str, str] = {
+    "n_structure.status": "上升 N 型结构（分型版）：前低 → 前高 → 回踩不破前低形成更高的低点；状态为成立 / 确认 / 破位等",
+    "n_structure.fresh_breach": "上升 N 型结构是否刚刚被跌破（收盘跌破结构前低）",
+    "descending_n_structure.status": "下降 N 型结构（分型版）：高点、低点依次下移",
+    "descending_n_structure.fresh_breach": "下降 N 型结构是否刚刚被向上突破",
+    "n_structure_macd.state": "MACD 平台结构（往回匹配三组平台点）：最近两组平台底 / 顶都抬高 = 上升，都下移 = 下降，其余 = 横盘震荡",
+    "n_structure_macd.transition": "MACD 平台结构：当前状态是延续，还是刚由另一状态转来（第三组平台点判定）",
+    "n_structure_macd.breached": "MACD 平台上升结构里，当根收盘是否跌破最新平台底 L3",
+    "trend.state": "趋势三态：收盘与 MA25 / MA60 的排列、MA25 斜率、近 20 日高低点抬升或下移，判上涨 / 下跌 / 横盘震荡",
+    "box_20d.position": "收盘在近 20 日高低点箱体里的位置（上沿 / 中部 / 下沿等）",
+    "box_60d.position": "收盘在近 60 日高低点箱体里的位置（上沿 / 中部 / 下沿等）",
+    "patterns.j_low": "日线 KDJ 的 J 值是否低于 13（B1 硬门槛）",
+    "patterns.reversal_k_candidate": "是否出现反转 K 线候选（低位止跌的反转形态 K 线）",
+    "patterns.volume_contraction": "是否缩量（当根量能相对近期均量明显收缩）",
+    "weekly_j_low": "周线 KDJ 的 J 值是否处于低位",
+    "patterns.bbi_above": "收盘是否站上 BBI 多空线",
+    "patterns.relative_strength_strong": "近 20 日涨幅是否明显强于上证指数（相对强势）",
+    "non_one_wave.status": "非一波流（B1 §四），看最近一段上涨 + 回调：①上涨段温和放量（单日量 < 段均量 2 倍）②阶段高点前后 3 日无放量大阴（跌 >3% 且量 > 前 5 日均量 1.5 倍）③回调段缩量（均量 < 上涨段 0.7 倍）。confirmed = 三条全满足；revoked = 出现顶部放量大阴或回调放量破位；insufficient = 其余或没有完整上涨 + 回调段",
+    "repair_signals.signals": "B1 修复信号（B1 §四.2）：J 拐头向上（昨日 J≤20 今日上拐）、缩量止跌（量比≤0.7 且涨跌幅在 ±2% 内）是否出现",
+    "five_day_entry.hit": "五日战法入场三条件（CZ §十六，缺一不可）：①收盘 > 5 日均价 ②近 3 日量逐日放大，或 3 日都 ≥ 20 日均量 ③近 7 日内有一天量 ≥ 前一日的 1.45 倍",
+    "stop_loss_ref.price": "建议止损参考位 = 近 10 个交易日（含当根）的最低价",
+    "liquidity.avg_amount_yi": "流动性 = 近 20 个交易日的日均成交额（亿元）",
+    "volume_sustain.status": "量能持续性（CZ §14.6）：主线放量确认 / 量能退潮 / 中性",
+    "leader_volume.hit": "龙头量能（CZ §九）：连续 3 日成交量都 ≥ 前 20 日最低日量的 1.7 倍",
+    "three_lows.hit": "三低形态是否成立",
+    "bottom_volume.hit": "底部巨量（CZ §14.6）：从高点回撤 ≥40%，当日量 ≥250 日均量的 2 倍，且最低价未跌破此前 20 日最低",
+    "ignition.hit": "放量点火：前段缩量之后，出现放量收阳的启动 K 线",
+    "pullback_shrink.hit": "回调缩量企稳：自窗口高点回撤，回调段缩量，收盘守住多空线",
+    "b1_ignition.hit": "B1 点火：B1 低位之后出现放量启动 K 线",
+    "macd_technics.zone": "MACD 所处区域（DIF / DEA 在 0 轴上方、下方或附近）",
+    "macd_technics.bottom_divergence.hit": "MACD 底背离：价格创新低而 MACD 没有创新低",
+    "macd_technics.top_divergence.hit": "MACD 顶背离：价格创新高而 MACD 没有创新高",
+    "macd_technics.three_peaks.hit": "MACD 三峰形态是否出现",
+    "macd_technics.overextended.hit": "MACD 是否过度伸展（偏离过大）",
+    "distribution.risk_level": "主力出货五方式（B1 §七.3）的风险等级（顶部派发迹象有多强）",
+    "distribution_confirm.revoked": "出货确认是否被撤销（后续走势否定了派发判断）",
+    "wave.wave_type": "拉升波三分类（B1 §四.0）：冲刺波 sprint / 拉升波 rally / 建仓波 buildup，冲突时取保守",
+    "@capital_intent.level": "资金意图等级（主力资金进出的综合判断）",
+}
+
+_CLASS_ASK = {
+    "hit": "检测器判定：<b>成立</b>（{v}）。请判断：图上当根是否真的成立？成立 = 对；不该成立 = 错。",
+    "miss": "检测器判定：<b>不成立</b>（{v}）。请判断：图上当根是否确实不成立？其实成立（漏判）= 错。",
+    "boundary": "边界样本（{v}；参数小幅变动就会翻转：{b}）。请判断：当前判定对不对？",
+}
+
+
+def ask_html(field: str, cls: str, value: Any, boundary: str = "") -> str:
+    """图块顶部「检测器在问什么」说明（v0.516）。数值型字段问「这个数算得对吗」。"""
+    d = FIELD_DEF.get(field, f"{field}（定义见检测器源码）")
+    v = html.escape(str(value))
+    is_bool = str(value).strip().lower() in ("true", "false")
+    if field in ("stop_loss_ref.price", "liquidity.avg_amount_yi"):
+        q = f"检测器算出：<b>{v}</b>。请判断：按上面的定义，这个数算得对吗？"
+    elif not is_bool:  # 状态 / 分类型字段：直接问判定对不对（revoked 等不说「成立」）
+        q = f"检测器判定：<b>{v}</b>。请判断：按上面的定义，这个判定对不对？"
+        if cls == "boundary" and boundary:
+            q += f"（边界样本，参数小幅变动会翻转：{html.escape(boundary)}）"
+    else:
+        q = _CLASS_ASK.get(cls, "检测器结果：{v}。请判断是否测对。").format(
+            v=v, b=html.escape(boundary or "—")
+        )
+    return (
+        "<div class='q' style='font:14px sans-serif;background:#f4f7fb;border-left:4px solid #3b6fb6;"
+        f"padding:6px 10px;margin:6px 0'><b>检测器在问：</b>{html.escape(d)}<br>{q}</div>"
+    )
+
+
 def upgrade_gallery(d: Path) -> int:
     """给既有产物目录的 gallery.html 加标注 UI（不重算）：第 n 个图块 ⇔ labels.csv 第 n 行。返回行数。"""
     import re as _re  # noqa: PLC0415
@@ -950,6 +1020,7 @@ def upgrade_gallery(d: Path) -> int:
         r"\n*<script>\nconst M = .*?</script>", "", g, flags=_re.S
     )  # 幂等：去旧 UI
     g = _re.sub(r"<style>\.lbl.*?</style><div id='bar'>.*?</div>", "", g, flags=_re.S)
+    g = _re.sub(r"<div class='q'[^>]*>.*?</div>", "", g, flags=_re.S)  # v0.516 幂等
     if "const KC = " in g:  # v0.506 KLineChart 版：图块已带 data-id，不再包裹
         n = g.count("<div class='s' data-id=")
     else:
@@ -964,6 +1035,16 @@ def upgrade_gallery(d: Path) -> int:
         raise RuntimeError(
             f"gallery 图块数 {n} ≠ labels.csv 行数 {len(rows)}——产物不配套，拒绝升级"
         )
+    # v0.516：每图顶部「检测器在问」说明（幂等：旧说明已在计数前去掉，再按 labels.csv 同序注入）
+    by_id = {r[0]: r for r in rows}
+
+    def _inject(m: Any) -> str:
+        r = by_id.get(m.group(1))
+        if r is None:
+            return m.group(0)
+        return m.group(0) + ask_html(r[1], r[4], r[5], r[6])
+
+    g = _re.sub(r"<div class='s' data-id='(\d+)'>", _inject, g)
     ui = label_ui(rows, summ["mode"], f"calib:{d.name}")
     g = g.replace("</body></html>", ui + "</body></html>")
     (d / "gallery.html").write_text(g, encoding="utf-8")
@@ -1452,7 +1533,9 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
                     title += f"（边界：{row[6]}）"
                 if use_kc:
                     parts.append(
-                        f"<div class='s' data-id='{row[0]}'><div class='t'>{html.escape(title)}</div>"
+                        f"<div class='s' data-id='{row[0]}'>"
+                        f"{ask_html(f, r['class'], r['value'], row[6])}"
+                        f"<div class='t'>{html.escape(title)}</div>"
                         f"<div class='kc'></div></div>"
                     )
                 else:

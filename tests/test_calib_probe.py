@@ -532,3 +532,16 @@ def test_vendor_dir_marked_binary_in_gitattributes():
         encoding="utf-8"
     )
     assert "src/custos/research/vendor/** -text" in ga
+
+
+def test_every_module_field_has_chinese_question_v0516():
+    """owner 2026-11-13：每张图顶部写「检测器在问什么」——所有模块字段都要有中文定义。"""
+    missing = [
+        f for m in cp.MODULES.values() for f in m["fields"] if f not in cp.FIELD_DEF
+    ]
+    assert not missing, missing
+    h = cp.ask_html("five_day_entry.hit", "miss", "false")
+    assert "检测器在问" in h and "不成立" in h and "漏判" in h
+    assert "算得对吗" in cp.ask_html("stop_loss_ref.price", "hit", "5.59")
+    st = cp.ask_html("non_one_wave.status", "hit", "revoked")
+    assert "判定对不对" in st and "成立</b>" not in st
