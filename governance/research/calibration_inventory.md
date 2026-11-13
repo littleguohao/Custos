@@ -104,7 +104,9 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
   五日战法是看**前方低位是否有爆量**的追涨买法，不是 B1 当根形态。处理：`SCREEN_FORMULA_REGISTRY.json` 的 `scoring.weights.five_day_entry` 8 → 0，
   检测器保留（CZ 与证据列仍可用）。**随本模块 v2 升版一起生效**（一次 `--bump`，避免 V0 分缓存在第二批前多次失效）。
 - 新特征想法（owner，未立项）：「B1 之前的低位是否出现过爆量」——与 `volume_detectors.bottom_volume` / `ignition` 相近，作右尾特征候选时再预注册。
-- 待 owner 定：一波流结局（revoked / insufficient）、顶部放量大阴的比较基准、止损参考位与流动性两个口径。
+- owner 定稿（2026-11-13，v0.520）：一波流 ⇒ 证据不足；顶部放量大阴须**同时**满足「≥前 5 日均量 1.5 倍」与「大于区内最大阳线量」；
+  止损参考位不校准——live 止损以**买入价固定 7%** 为准（`stop_loss_ref` 近 10 日最低价只作展示）；流动性口径（近 20 日日均成交额）认可，维持只打标记。
+- v2 确认图集：`b1_structure_v2__mining_v2cand`（36 张，同 mining_v1 的 2000 bar 池）；owner 确认后与五日战法退出打分一起 `--bump`。
 
 ## P0H 持仓大形态（v0.485 纳入，**排在 P0 之前**）
 

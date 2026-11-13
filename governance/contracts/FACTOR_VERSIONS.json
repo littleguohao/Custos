@@ -58,7 +58,7 @@
     },
     "b1_structure": {
       "version": 1,
-      "source_digest": "848860d9d60832fba07e",
+      "source_digest": "5e3e24567a128726bc00",
       "history": [
         {
           "version": 1,
@@ -74,6 +74,11 @@
           "version": 1,
           "date": "2026-11-13",
           "refactor": "v2 候选段涨幅改用 indicators.pct_change（live 输出不变）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-13",
+          "refactor": "v0.520 v2 候选：一波流按证据不足、放量大阴另须大于区内最大阳线量（不进 detect，live 不变）"
         }
       ]
     },

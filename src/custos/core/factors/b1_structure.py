@@ -330,9 +330,8 @@ NOW_V2_VOL_RATIO = (
     1.5  # 「放量」统一口径：当日量 ≥ 前 5 日均量 1.5 倍（放量大阴 / 放量破位共用）
 )
 NOW_V2_MAX_GAIN_PCT = 50.0  # 上涨段累计涨幅 > 50% ⇒ 一波流
-NOW_V2_ONE_WAVE_STATUS = (
-    "revoked"  # 一波流的结局（待 owner 定：revoked / insufficient）
-)
+# 一波流结局（owner 2026-11-13 定：不能判确认，按证据不足）
+NOW_V2_ONE_WAVE_STATUS = "insufficient"
 NOW_V2_MIN_GAIN_PCT = 0.0  # 「明显上涨段」下限：段涨幅不足 ⇒ insufficient（无可评价的上涨段；待 owner 定）
 
 
@@ -382,11 +381,18 @@ def _v2_vol_up(vol, t: int) -> bool:
 
 
 def _v2_big_bear_zone(close, opn, vol, center: int, lo: int, hi: int) -> bool:
-    for t in range(
-        max(lo, center - NOW_TOP_ZONE, 1), min(hi, center + NOW_TOP_ZONE + 1)
-    ):
+    """高点 ±NOW_TOP_ZONE 日内的放量大阴（owner 2026-11-13「都要」）：阴线、跌 ≥3%、量 ≥ 前 5 日均量 1.5 倍，
+    **且**量大于区内最大阳线量（「最高点阳量大于阴量」属正常换手，不算派发）。"""
+    zone = range(max(lo, center - NOW_TOP_ZONE, 1), min(hi, center + NOW_TOP_ZONE + 1))
+    up_max = max((vol[t] for t in zone if close[t] >= opn[t]), default=0.0)
+    for t in zone:
         drop = (close[t] / close[t - 1] - 1) * 100
-        if close[t] < opn[t] and drop <= NOW_BEAR_DROP_PCT and _v2_vol_up(vol, t):
+        if (
+            close[t] < opn[t]
+            and drop <= NOW_BEAR_DROP_PCT
+            and _v2_vol_up(vol, t)
+            and vol[t] > up_max
+        ):
             return True
     return False
 
@@ -398,7 +404,8 @@ def check_non_one_wave_v2(df) -> dict[str, Any]:
       最低价日——v1 在这种情形下放量破位反而判不出来；
     - 「放量」统一为当日量 ≥ 前 5 日均量 1.5 倍：放量大阴（阴线、跌 ≥3%）与放量破位（收盘跌破启动低点收盘）共用；
     - 次高点（上涨段内阶段高点之前最高的局部高点，±3 日窗口内的最高）前后 3 日的放量大阴也撤销；
-    - 上涨段累计涨幅（阶段高点最高价 / 启动低点最低价 − 1）> 50% ⇒ 一波流，撤销。
+    - 上涨段累计涨幅（阶段高点最高价 / 启动低点最低价 − 1）> 50% ⇒ 一波流：不能判确认，按证据不足（owner 定）；
+    - 放量大阴另须量大于该高点区内最大阳线量（owner 定）。
     温和放量（单日量 < 段均量 2 倍）与回调缩量（< 0.7 倍）沿用 v1。"""
     from custos.core.factors.wave_type import WAVE_LOOKBACK  # noqa: PLC0415
 
