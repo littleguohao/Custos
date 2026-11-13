@@ -1080,11 +1080,14 @@ def upgrade_gallery(d: Path) -> int:
         prefill=rl.get("prefill"),
         hidden=rl.get("hidden"),
     )
+    g = _re.sub(r"<div class='rl'[^>]*>.*?</div>", "", g, flags=_re.S)  # 幂等
     if rl.get("note"):
-        ui = (
-            f"<div style='font:14px sans-serif;background:#fff3cd;padding:8px;margin:6px 0'>{html.escape(rl['note'])}</div>"
-            + ui
+        note = (
+            "<div class='rl' style='font:14px sans-serif;background:#fff3cd;padding:8px;margin:6px 0'>"
+            f"{html.escape(rl['note'])}</div>"
         )
+        k = g.find("<h2>")
+        g = g[:k] + note + g[k:] if k >= 0 else g.replace("<body>", "<body>" + note, 1)
     g = g.replace("</body></html>", ui + "</body></html>")
     (d / "gallery.html").write_text(g, encoding="utf-8")
     return n
