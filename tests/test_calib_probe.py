@@ -545,3 +545,18 @@ def test_every_module_field_has_chinese_question_v0516():
     assert "算得对吗" in cp.ask_html("stop_loss_ref.price", "hit", "5.59")
     st = cp.ask_html("non_one_wave.status", "hit", "revoked")
     assert "判定对不对" in st and "成立</b>" not in st
+
+
+def test_label_ui_prefill_and_hidden_v0518():
+    ui = cp.label_ui(
+        [[1, "f", "600001", "2024-01-02", "hit", "x", ""]],
+        "sample",
+        "k:v2",
+        prefill={"1": "买点：错，放量"},
+        hidden=["2"],
+    )
+    assert (
+        '"prefill": {"1": "买点：错，放量"}' in ui
+        and '"hidden": ["2"]' in ui
+        and "HID.has" in ui
+    )

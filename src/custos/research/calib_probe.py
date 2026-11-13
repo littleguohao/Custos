@@ -847,6 +847,8 @@ def label_ui(
     *,
     head: Optional[list[str]] = None,
     hint: Optional[str] = None,
+    prefill: Optional[dict[str, str]] = None,
+    hidden: Optional[list[str]] = None,
 ) -> str:
     """网页内标注（v0.502，owner 2026-11-09）：每图下「判定按钮 + 形态理由」，浏览器本地存档
     （localStorage，可分多次标），一键导出与 labels.csv 同列的 CSV；可导入已有 labels.csv 续标。
@@ -858,6 +860,8 @@ def label_ui(
             "head": (head or CSV_HEAD) + CSV_TAIL[mode],
             "key": store_key,
             "ph": "批语（看到什么、等什么条件）" if mode == "buypoint" else "形态理由",
+            "prefill": prefill or {},
+            "hidden": [str(x) for x in (hidden or [])],
         },
         ensure_ascii=False,
     )
@@ -887,17 +891,19 @@ const ls = window.localStorage;
 const K = id => M.key + ':' + id;
 function get(id){ try { return JSON.parse(ls.getItem(K(id)) || '{}'); } catch(e) { return {}; } }
 function put(id, v){ ls.setItem(K(id), JSON.stringify(v)); }
+Object.entries(M.prefill || {}).forEach(([id, r]) => { if (!ls.getItem(K(id))) put(id, {c: '', r: r}); });
+const HID = new Set(M.hidden || []);
 function refresh(){
   let n = 0;
   document.querySelectorAll('div.s').forEach(d => {
     const v = get(d.dataset.id), done = !!v.c;
-    n += done ? 1 : 0;
+    n += (done && !HID.has(d.dataset.id)) ? 1 : 0;
     d.classList.toggle('done', done);
-    d.style.display = (document.getElementById('onlyTodo').checked && done) ? 'none' : '';
+    d.style.display = (HID.has(d.dataset.id) || (document.getElementById('onlyTodo').checked && done)) ? 'none' : '';
     d.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.textContent === v.c));
     const inp = d.querySelector('input'); if (document.activeElement !== inp) inp.value = v.r || '';
   });
-  document.getElementById('prog').textContent = n + ' / ' + M.rows.length;
+  document.getElementById('prog').textContent = n + ' / ' + (M.rows.length - HID.size) + (HID.size ? '（另 ' + HID.size + ' 张已隐藏，不需逐张标）' : '');
 }
 document.querySelectorAll('div.s').forEach(d => {
   const id = d.dataset.id, box = document.createElement('div');
@@ -1063,7 +1069,22 @@ def upgrade_gallery(d: Path) -> int:
         return m.group(0) + ask_html(r[1], r[4], r[5], r[6])
 
     g = _re.sub(r"<div class='s' data-id='(\d+)'>", _inject, g)
-    ui = label_ui(rows, summ["mode"], f"calib:{d.name}")
+    # v0.518 重标：目录内 relabel.json = {key_suffix, prefill: {id: 备注}, hidden: [id], note}
+    rl_path = d / "relabel.json"
+    rl = json.loads(rl_path.read_text(encoding="utf-8-sig")) if rl_path.exists() else {}
+    key = f"calib:{d.name}" + (f":{rl['key_suffix']}" if rl.get("key_suffix") else "")
+    ui = label_ui(
+        rows,
+        summ["mode"],
+        key,
+        prefill=rl.get("prefill"),
+        hidden=rl.get("hidden"),
+    )
+    if rl.get("note"):
+        ui = (
+            f"<div style='font:14px sans-serif;background:#fff3cd;padding:8px;margin:6px 0'>{html.escape(rl['note'])}</div>"
+            + ui
+        )
     g = g.replace("</body></html>", ui + "</body></html>")
     (d / "gallery.html").write_text(g, encoding="utf-8")
     return n
