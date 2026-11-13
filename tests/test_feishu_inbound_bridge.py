@@ -138,3 +138,77 @@ def test_file_message_uses_message_day(env, monkeypatch):
         [{"message_id": "m6", "ts": ts, "msg_type": "file", "text": ""}],
     )
     assert handled == [_day_of_ts(ts)]
+
+
+def test_has_trade_classification_and_no_trade_precedence():
+    assert bridge._classify("有交易") == ("has_trade", None)
+    assert bridge._classify("有交易 0AMV-0.87%") == ("trade_amv", -0.87)
+    assert bridge._classify("没有交易") == ("no_trade", None)
+    assert bridge._classify("无交易 0AMV -0.87%") == ("both", -0.87)
+
+
+def test_has_trade_refreshes_tzzb_on_message_day(env, monkeypatch):
+    ts = _ts_days_ago(0, 16)
+    refreshed: list[str] = []
+    monkeypatch.setattr(
+        bridge,
+        "_refresh_tzzb_trades",
+        lambda day: refreshed.append(day) or "投资账本已核对",
+    )
+
+    out = _run_with(monkeypatch, [_text_msg(ts, "有交易 0AMV-0.87%", "m7")])
+
+    assert refreshed == [_day_of_ts(ts)]
+    assert out["registered"] == [(_day_of_ts(ts), -0.87)]
+    assert "投资账本已核对" in out["artifact"]["actions"]
+    assert not bridge.CONFIRM_PATH.exists()
+
+
+def test_tzzb_failure_leaves_trade_fact_unwritten_and_notifies(env, monkeypatch):
+    ts = _ts_days_ago(0, 16)
+
+    def fail(_day):
+        raise RuntimeError("PC 同步未覆盖收盘")
+
+    monkeypatch.setattr(bridge, "_refresh_tzzb_trades", fail)
+    out = _run_with(monkeypatch, [_text_msg(ts, "有交易", "m8")])
+
+    assert out["artifact"]["actions"] == []
+    assert "投资账本刷新失败" in out["artifact"]["notes"]
+    assert "未写台账" in out["artifact"]["notes"]
+    assert not bridge.CONFIRM_PATH.exists()
+    assert any("投资账本刷新失败" in line for line in out["sent"][0].splitlines())
+
+
+def _write_ledger_source(repo: Path, day: str, note: str) -> None:
+    path = repo / "data" / "trades" / "master_trade_ledger.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"成交日期,备注\n{day},{note}\n", encoding="utf-8-sig")
+
+
+def test_tzzb_refresh_rejects_existing_csv_rows(env):
+    day = datetime.now(bridge.CST).date().isoformat()
+    _write_ledger_source(env, day, "券商表格")
+
+    with pytest.raises(RuntimeError, match="禁止叠加导入"):
+        bridge._assert_trade_source_compatible(day, "tzzb")
+    bridge._assert_trade_source_compatible(day, "csv")
+
+
+def test_csv_upload_rejects_existing_tzzb_rows(env):
+    day = datetime.now(bridge.CST).date().isoformat()
+    _write_ledger_source(env, day, "投资账本MCP（接口无成交时间字段）")
+
+    bridge._assert_trade_source_compatible(day, "tzzb")
+    with pytest.raises(RuntimeError, match="禁止再叠加券商表格"):
+        bridge._assert_trade_source_compatible(day, "csv")
+
+
+def test_new_trades_reject_existing_no_trade_confirmation(env):
+    day = datetime.now(bridge.CST).date().isoformat()
+    bridge.CONFIRM_PATH.write_text(
+        json.dumps({day: {"no_trades": True}}), encoding="utf-8"
+    )
+
+    with pytest.raises(RuntimeError, match="与新成交冲突"):
+        bridge._assert_trade_source_compatible(day, "tzzb")

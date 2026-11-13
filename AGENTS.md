@@ -131,6 +131,11 @@ uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 �
   `agent-gw` 的 Python 执行。默认值是生产机 `E:\KimiData\daimon-share\daimon\runtime\python\.venv\Scripts\python.exe`；
   其他机器必须显式设置该环境变量，不能依赖默认 Windows 路径。插件输出路径统一在
   `artifacts/cache/kimiwork/`，解析直接消费 `files[].content`。
+- **投资账本成交补数**（v0.521）：飞书「有交易」→ `datasource/tzzb_trades.py` 纯 Python
+  直连 MCP，OAuth 访问令牌过期自动刷新，live 零 LLM；`data/trades/tzzb_oauth.local.json`
+  含本地令牌且 gitignored，严禁提交。`lastSyncTime` 必须覆盖目标日 15:00 收盘；接口无
+  成交时间保持空值，费用按原值；同日不得混用券商表格与投资账本，入库仍只走
+  `incremental_ledger.py`（多重集合幂等），标准 CSV 落 `artifacts/cache/tzzb/`。
   有快照时 `CUSTOS_DATA_SNAPSHOT=<dir>` 进**快照模式**（v0.453，TODO #116）：paths 单点
   改道 TDX_ROOT/DATA 读挖掘段镜像；判定窗台账/批次门拒写、live 五入口拒跑（exit 2/6）、
   加载器读到禁带日期报错（判定段/holdout 物理不在快照内，详见

@@ -102,7 +102,11 @@ def norm(df: pd.DataFrame) -> pd.DataFrame:
         "%Y-%m-%d"
     )
     df["成交时间"] = (
-        df["成交时间"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+        df["成交时间"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.replace(r"\.0$", "", regex=True)
     )
     df["代码"] = df["代码"].map(clean_code)
     for f in NUMERIC:

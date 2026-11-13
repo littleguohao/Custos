@@ -156,6 +156,16 @@ def test_missing_records_send_targeted_reminder(
     assert expected_text in sent[0]
 
 
+@pytest.mark.parametrize("missing", [["trades"], ["amv", "trades"]])
+def test_trade_reminder_offers_investment_ledger_refresh(missing: list[str]):
+    text = reminder._message(DAY, missing)
+
+    assert "回「有交易」" in text
+    assert "投资账本" in text
+    assert "15:00" in text
+    assert "成交表文件" in text
+
+
 def test_complete_message_cannot_be_generated():
     with pytest.raises(ValueError, match="记录齐全"):
         reminder._message(DAY, [])

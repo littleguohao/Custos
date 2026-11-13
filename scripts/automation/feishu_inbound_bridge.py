@@ -6,6 +6,9 @@
 2. 严格格式确定性登记（**归属日 = 消息发送日的 CST 日期，不是运行日**——桥只在
    15:15–17:00 运行，晚间回复次日才被接收，按运行日会把昨日值写成次日 confirmed）：
    - 「无交易」类确认 → data/trades/position_confirmations.json[消息日]；
+   - 「有交易」→ `tzzb_trades.py` 以本地 OAuth 读取投资账本（PC 同步须覆盖当日
+     15:00 收盘），标准 CSV 落 artifacts/cache/tzzb/，再走 incremental_ledger 唯一入口；
+     同价同量多笔按多重集合处理，重复刷新只补新增；
    - 0AMV 数值（文本含 amv 后取数字，或整条消息就是数字）→ 官方唯一写入口
      amv_state.append_observation（uv run 子进程，cwd=仓库根）；**极值守卫**：
      |值| > EXTREME_AMV_PCT（±15%）一律不自动登记，回执转人工 --confirm-extreme
@@ -22,6 +25,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import math
 import os
@@ -63,6 +67,8 @@ HTTP_TIMEOUT = 15
 EXTREME_AMV_PCT = 15.0
 
 NO_TRADE_RE = re.compile(r"(无|没|未|没有)\s*(交易|成交|操作|买卖)|无交易动作")
+# 「没有交易」同时命中无交易与有交易；run 中必须让无交易优先，不得触发投资账本。
+HAS_TRADE_RE = re.compile(r"(?<!没)(?<!无)(?<!未)有\s*(交易|成交|操作|买卖)")
 AMV_VALUE_RE = re.compile(
     r"0?\s*amv\s*[:：=]?\s*([+-]?\d+(?:\.\d+)?)\s*%?", re.IGNORECASE
 )
@@ -208,6 +214,10 @@ def _maybe_import_trades(path: Path, day: str) -> str:
     df = df.loc[trade_dates.eq(day)].copy()
     if df.empty:
         return f"成交表 {path.name} 已保存，但未找到 {day} 的成交记录，未入库"
+    try:
+        _assert_trade_source_compatible(day, "csv")
+    except (OSError, RuntimeError, ValueError) as exc:
+        return f"成交表 {path.name} 未入库：{exc}"
     for c in TEMPLATE_COLS:
         if c not in df.columns:
             df[c] = ""
@@ -391,20 +401,126 @@ def _register_amv(day: str, value: float) -> str:
     return f"{day} 0AMV={value}% 已登记"
 
 
+def _stdout_json(result: subprocess.CompletedProcess, label: str) -> dict:
+    for line in reversed((result.stdout or "").strip().splitlines()):
+        try:
+            data = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(data, dict):
+            return data
+    raise RuntimeError(f"{label}输出缺少 JSON 对象: {(result.stdout or '')[-300:]}")
+
+
+def _assert_trade_source_compatible(day: str, incoming_source: str) -> None:
+    """同日不得混用券商表格与投资账本，且不得推翻既有无交易确认。"""
+    if CONFIRM_PATH.exists():
+        confirmations = json.loads(CONFIRM_PATH.read_text(encoding="utf-8"))
+        current = confirmations.get(day)
+        if isinstance(current, dict) and current.get("no_trades") is True:
+            raise RuntimeError(f"{day} 已有无交易确认，与新成交冲突，请人工核对")
+
+    ledger_path = REPO / "data" / "trades" / "master_trade_ledger.csv"
+    if not ledger_path.exists():
+        return
+    with ledger_path.open(encoding="utf-8-sig", newline="") as fh:
+        rows = [r for r in csv.DictReader(fh) if r.get("成交日期") == day]
+    if not rows:
+        return
+    tzzb_flags = [str(row.get("备注") or "").startswith("投资账本MCP") for row in rows]
+    if incoming_source == "tzzb" and not all(tzzb_flags):
+        raise RuntimeError(
+            f"{day} 台账已有 {len(rows)} 条非投资账本记录，禁止叠加导入；请人工核对来源"
+        )
+    if incoming_source == "csv" and any(tzzb_flags):
+        raise RuntimeError(
+            f"{day} 台账已有投资账本记录，禁止再叠加券商表格；请人工核对来源"
+        )
+
+
+def _refresh_tzzb_trades(day: str) -> str:
+    """飞书「有交易」→ 投资账本标准 CSV → incremental_ledger 唯一入库口。"""
+    _assert_trade_source_compatible(day, "tzzb")
+    csv_path = REPO / "artifacts" / "cache" / "tzzb" / f"{day}_trades.csv"
+    fetched = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--no-sync",
+            "python",
+            "src/custos/datasource/tzzb_trades.py",
+            "--date",
+            day,
+            "--out",
+            str(csv_path),
+        ],
+        cwd=str(REPO),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=180,
+        check=False,
+    )
+    if fetched.returncode != 0:
+        raise RuntimeError(
+            f"投资账本取数失败: {(fetched.stderr or fetched.stdout).strip()[-500:]}"
+        )
+    summary = _stdout_json(fetched, "投资账本取数")
+    row_count = summary.get("row_count")
+    if type(row_count) is not int or row_count <= 0:
+        raise RuntimeError("投资账本返回 0 笔成交，与「有交易」回复矛盾")
+
+    imported = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--no-sync",
+            "python",
+            "src/custos/core/trades/incremental_ledger.py",
+            "--input",
+            str(csv_path),
+            "--date",
+            day,
+        ],
+        cwd=str(REPO),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=180,
+        check=False,
+    )
+    if imported.returncode != 0:
+        raise RuntimeError(
+            f"投资账本成交入库失败: {(imported.stderr or imported.stdout).strip()[-500:]}"
+        )
+    audit = _stdout_json(imported, "投资账本入库")
+    appended = audit.get("appended_rows")
+    if type(appended) is not int or appended < 0:
+        raise RuntimeError("投资账本入库审计缺少 appended_rows")
+    return (
+        f"{day} 投资账本成交 {row_count} 条已核对，新增入账 {appended} 条"
+        f"（PC同步 {summary.get('last_sync') or '未知'}；重复刷新幂等）"
+    )
+
+
 def _classify(text: str) -> tuple[str, float | None]:
-    """→ ('no_trade'|'amv'|'both'|'unknown', amv值)。"""
+    """→ no_trade/amv/both/has_trade/trade_amv/unknown + amv 值。"""
     no_trade = bool(NO_TRADE_RE.search(text))
+    has_trade = bool(HAS_TRADE_RE.search(text)) and not no_trade
     amv: float | None = None
     m = AMV_VALUE_RE.search(text)
     if m:
         amv = float(m.group(1))
     elif PURE_NUMBER_RE.match(text):  # 整条就一个数字：补数窗口里按 0AMV 理解
         amv = float(NUMBER_RE.search(text).group(0))  # type: ignore[union-attr]
-    kind = (
-        "both"
-        if (no_trade and amv is not None)
-        else ("no_trade" if no_trade else ("amv" if amv is not None else "unknown"))
-    )
+    if no_trade:
+        kind = "both" if amv is not None else "no_trade"
+    elif has_trade:
+        kind = "trade_amv" if amv is not None else "has_trade"
+    else:
+        kind = "amv" if amv is not None else "unknown"
     return kind, amv
 
 
@@ -435,7 +551,20 @@ def run(ctx) -> dict:
         kind, amv = _classify(m["text"])
         if kind in ("no_trade", "both"):
             actions.append(_register_no_trade(msg_day, f"飞书确认（{m['text'][:60]}）"))
-        if kind in ("amv", "both") and amv is not None:
+        if kind in ("has_trade", "trade_amv"):
+            try:
+                actions.append(_refresh_tzzb_trades(msg_day))
+            except (
+                OSError,
+                RuntimeError,
+                ValueError,
+                subprocess.SubprocessError,
+            ) as exc:
+                notes.append(
+                    f"投资账本刷新失败（未写台账）：{str(exc)[:300]}；"
+                    "请确认 PC 已同步当日收盘后，再回复「有交易」"
+                )
+        if kind in ("amv", "both", "trade_amv") and amv is not None:
             if abs(amv) > EXTREME_AMV_PCT:
                 notes.append(
                     f"0AMV {amv}% 超 ±{EXTREME_AMV_PCT:g}% 极值（疑似看错行/小数点错位），"
@@ -461,7 +590,8 @@ def run(ctx) -> dict:
         if notes:
             lines.append(
                 "未识别内容不会自动写台账，请核对格式；"
-                "支持：「无交易」/「0AMV 数值」/ 直接回数字 / 发成交表文件（csv/xlsx）"
+                "支持：「无交易」/「有交易」（读投资账本）/「0AMV 数值」/ "
+                "直接回数字 / 发成交表文件（csv/xlsx）"
             )
         receipt_sent = _send_text(cred, token, "\n".join(lines))
 
