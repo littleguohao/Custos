@@ -37,7 +37,7 @@ from custos.core.factors.wave_type import (
     WAVE_MIN_BARS,
     _find_rally_segment,  # noqa: E402
 )
-from custos.core.indicators import kdj  # noqa: E402
+from custos.core.indicators import kdj, pct_change  # noqa: E402
 
 FACTOR: dict[str, Any] = {
     "id": "b1_structure",
@@ -320,6 +320,177 @@ def check_five_day_entry(df) -> dict[str, Any]:
                 if max_spike is not None
                 else None,
             },
+        },
+    }
+
+
+# --- v2 候选定义（v0.519，owner 2026-11-13 定义校准确认；只在 calib_probe 对照，不进 detect / 打分）---
+FIVE_DAY_V2_SPIKE_RATIO = 2.0  # 巨量 = 当日量 ≥ 前一天的 2 倍，且当日收阳
+NOW_V2_VOL_RATIO = (
+    1.5  # 「放量」统一口径：当日量 ≥ 前 5 日均量 1.5 倍（放量大阴 / 放量破位共用）
+)
+NOW_V2_MAX_GAIN_PCT = 50.0  # 上涨段累计涨幅 > 50% ⇒ 一波流
+NOW_V2_ONE_WAVE_STATUS = (
+    "revoked"  # 一波流的结局（待 owner 定：revoked / insufficient）
+)
+NOW_V2_MIN_GAIN_PCT = 0.0  # 「明显上涨段」下限：段涨幅不足 ⇒ insufficient（无可评价的上涨段；待 owner 定）
+
+
+def check_five_day_entry_v2(df) -> dict[str, Any]:
+    """五日战法 v2 候选（owner 2026-11-13）：①收盘 > 5 日均价 ②最近 3 天每天「放量上涨」
+    （收盘 > 前一天且量 > 前一天）③近 7 天内有一天量 ≥ 前一天 2 倍且当天收阳。"""
+    close, opn, vol = (
+        df[k].astype(float).to_numpy() for k in ("close", "open", "volume")
+    )
+    n = len(df)
+    if n < 21:
+        return {"hit": False, "available": False, "conditions": {}}
+    ma5 = float(close[-5:].mean())
+    c1 = bool(close[-1] > ma5)
+    c2 = all(close[k] > close[k - 1] and vol[k] > vol[k - 1] for k in range(n - 3, n))
+    spikes = [
+        t
+        for t in range(max(1, n - FIVE_DAY_SPIKE_WINDOW), n)
+        if vol[t - 1] > 0
+        and vol[t] >= FIVE_DAY_V2_SPIKE_RATIO * vol[t - 1]
+        and close[t] > opn[t]
+    ]
+    c3 = bool(spikes)
+    return {
+        "hit": bool(c1 and c2 and c3),
+        "available": True,
+        "conditions": {
+            "close_above_ma5": {
+                "hit": c1,
+                "close": round(float(close[-1]), 4),
+                "ma5": round(ma5, 4),
+            },
+            "three_day_up_with_volume": {"hit": bool(c2)},
+            "bullish_spike_within_7d": {
+                "hit": c3,
+                "spike_offsets": [t - (n - 1) for t in spikes],
+            },
+        },
+    }
+
+
+def _v2_vol_up(vol, t: int) -> bool:
+    base = vol[max(0, t - 5) : t]
+    return bool(
+        len(base) and base.mean() > 0 and vol[t] >= NOW_V2_VOL_RATIO * base.mean()
+    )
+
+
+def _v2_big_bear_zone(close, opn, vol, center: int, lo: int, hi: int) -> bool:
+    for t in range(
+        max(lo, center - NOW_TOP_ZONE, 1), min(hi, center + NOW_TOP_ZONE + 1)
+    ):
+        drop = (close[t] / close[t - 1] - 1) * 100
+        if close[t] < opn[t] and drop <= NOW_BEAR_DROP_PCT and _v2_vol_up(vol, t):
+            return True
+    return False
+
+
+def check_non_one_wave_v2(df) -> dict[str, Any]:
+    """非一波流 v2 候选（owner 2026-11-13）。相对 v1 的改动：
+
+    - 上涨段沿用 v1 识别；v1 找不到段（价格已跌到窗口最低，「无完整上涨段」）时回退为窗口最高价日与其之前的
+      最低价日——v1 在这种情形下放量破位反而判不出来；
+    - 「放量」统一为当日量 ≥ 前 5 日均量 1.5 倍：放量大阴（阴线、跌 ≥3%）与放量破位（收盘跌破启动低点收盘）共用；
+    - 次高点（上涨段内阶段高点之前最高的局部高点，±3 日窗口内的最高）前后 3 日的放量大阴也撤销；
+    - 上涨段累计涨幅（阶段高点最高价 / 启动低点最低价 − 1）> 50% ⇒ 一波流，撤销。
+    温和放量（单日量 < 段均量 2 倍）与回调缩量（< 0.7 倍）沿用 v1。"""
+    from custos.core.factors.wave_type import WAVE_LOOKBACK  # noqa: PLC0415
+
+    close, opn, high, low, vol = (
+        df[k].astype(float).to_numpy()
+        for k in ("close", "open", "high", "low", "volume")
+    )
+    n = len(df)
+    start = max(0, n - WAVE_LOOKBACK)
+    if n < WAVE_MIN_BARS:
+        return {"status": "insufficient", "available": False, "reason": "K 线不足"}
+    seg = _find_rally_segment(df)
+    if seg is not None and seg[2] < n - 2:
+        _, i_low, i_high, _ = seg  # 沿用 v1 段识别
+    else:
+        # v1 找不到段（价格已跌到窗口最低）：取窗口最高价日为阶段高点、其前最低价日为启动低点
+        i_high = start + int(high[start:].argmax())
+        if i_high <= start or i_high >= n - 2:
+            return {
+                "status": "insufficient",
+                "available": False,
+                "reason": "阶段高点后无回调段",
+            }
+        i_low = start + int(low[start:i_high].argmin())
+    up_vol = vol[i_low : i_high + 1]
+    up_mean = float(up_vol.mean()) if len(up_vol) else 0.0
+    gain = pct_change(
+        float(high[i_high]), float(low[i_low]), digits=2
+    )  # 段涨幅（判定用 2 位，同 TODO #56）
+    if gain is None or gain < NOW_V2_MIN_GAIN_PCT:
+        return {
+            "status": "insufficient",
+            "available": True,
+            "reason": f"无明显上涨段（段涨幅 {gain}% < {NOW_V2_MIN_GAIN_PCT:g}%）",
+            "rally": {
+                "i_low": i_low - (n - 1),
+                "i_high": i_high - (n - 1),
+                "gain_pct": None if gain is None else round(gain, 2),
+            },
+            "revoke_reasons": [],
+        }
+    one_wave = gain is not None and gain > NOW_V2_MAX_GAIN_PCT
+    max_burst = float(up_vol.max() / up_mean) if up_mean else None
+    mild = max_burst is not None and max_burst < NOW_MILD_VOL_BURST
+    top_bear = _v2_big_bear_zone(close, opn, vol, i_high, i_low + 1, n)
+    second = None
+    for t in range(i_low + 1, i_high - NOW_TOP_ZONE):
+        w = high[max(i_low, t - 3) : t + 4]
+        if high[t] >= w.max() and (second is None or high[t] > high[second]):
+            second = t
+    second_bear = second is not None and _v2_big_bear_zone(
+        close, opn, vol, second, i_low + 1, i_high
+    )
+    pull = vol[i_high + 1 :]
+    pull_ratio = float(pull.mean() / up_mean) if len(pull) and up_mean else None
+    shrink = pull_ratio is not None and pull_ratio < NOW_PULLBACK_VOL_RATIO
+    brk = any(
+        close[t] < close[i_low] and _v2_vol_up(vol, t) for t in range(i_high + 1, n)
+    )
+    if top_bear or second_bear or brk:
+        status = "revoked"
+    elif one_wave:
+        status = NOW_V2_ONE_WAVE_STATUS
+    elif mild and shrink:
+        status = "confirmed"
+    else:
+        status = "insufficient"
+    return {
+        "status": status,
+        "available": True,
+        "rally": {
+            "i_low": i_low - (n - 1),
+            "i_high": i_high - (n - 1),
+            "gain_pct": None if gain is None else round(gain, 2),
+        },
+        "revoke_reasons": [
+            r
+            for r, on in (
+                ("one_wave_gain", one_wave),
+                ("top_big_bear", top_bear),
+                ("second_high_big_bear", second_bear),
+                ("break_with_volume", brk),
+            )
+            if on
+        ],
+        "mild_volume": {
+            "hit": bool(mild),
+            "max_vol_burst": None if max_burst is None else round(max_burst, 3),
+        },
+        "pullback_shrink": {
+            "hit": bool(shrink),
+            "pullback_vol_ratio": None if pull_ratio is None else round(pull_ratio, 3),
         },
     }
 

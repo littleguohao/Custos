@@ -58,12 +58,22 @@
     },
     "b1_structure": {
       "version": 1,
-      "source_digest": "fe43733a9751a76b979f",
+      "source_digest": "848860d9d60832fba07e",
       "history": [
         {
           "version": 1,
           "date": "2026-11-03",
           "change": "初始版本（定义校准前基线，TODO #121）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-13",
+          "refactor": "v0.519 新增 v2 候选 check_five_day_entry_v2 / check_non_one_wave_v2（不进 detect / 打分，live 输出不变）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-13",
+          "refactor": "v2 候选段涨幅改用 indicators.pct_change（live 输出不变）"
         }
       ]
     },
