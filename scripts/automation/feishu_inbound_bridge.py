@@ -402,14 +402,21 @@ def _register_amv(day: str, value: float) -> str:
 
 
 def _stdout_json(result: subprocess.CompletedProcess, label: str) -> dict:
-    for line in reversed((result.stdout or "").strip().splitlines()):
+    text = (result.stdout or "").strip()
+    try:
+        data = json.loads(text)
+    except ValueError:
+        data = None
+    if isinstance(data, dict):
+        return data
+    for line in reversed(text.splitlines()):
         try:
             data = json.loads(line)
         except ValueError:
             continue
         if isinstance(data, dict):
             return data
-    raise RuntimeError(f"{label}输出缺少 JSON 对象: {(result.stdout or '')[-300:]}")
+    raise RuntimeError(f"{label}输出缺少 JSON 对象: {text[-300:]}")
 
 
 def _assert_trade_source_compatible(day: str, incoming_source: str) -> None:

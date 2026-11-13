@@ -212,3 +212,15 @@ def test_new_trades_reject_existing_no_trade_confirmation(env):
 
     with pytest.raises(RuntimeError, match="与新成交冲突"):
         bridge._assert_trade_source_compatible(day, "tzzb")
+
+
+def test_stdout_json_accepts_pretty_printed_audit():
+    result = bridge.subprocess.CompletedProcess(
+        args=[],
+        returncode=0,
+        stdout=json.dumps(
+            {"appended_rows": 25, "transaction_ids": ["a-001"]}, indent=2
+        ),
+    )
+
+    assert bridge._stdout_json(result, "投资账本入库")["appended_rows"] == 25
