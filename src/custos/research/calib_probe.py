@@ -827,15 +827,27 @@ def _attach_steps(
 
 
 #: 标注选项（网页 UI 与 ingest 同源）
-LABEL_CHOICES = {"sample": ("对", "错", "不确定"), "review": ("Y", "N", "不确定")}
+LABEL_CHOICES = {
+    "sample": ("对", "错", "不确定"),
+    "review": ("Y", "N", "不确定"),
+    "buypoint": ("买", "不买", "等"),  # v0.517 买点练习
+}
 CSV_HEAD = ["id", "字段", "代码", "日期", "类别", "检测值", "边界翻转参数"]
 CSV_TAIL = {
     "sample": ["判定(对/错/不确定)", "备注"],
     "review": ["应命中(Y/N)", "形态理由（写形态，不写后来涨跌）"],
+    "buypoint": ["判断(买/不买/等)", "批语"],
 }
 
 
-def label_ui(rows: list[list[Any]], mode: str, store_key: str) -> str:
+def label_ui(
+    rows: list[list[Any]],
+    mode: str,
+    store_key: str,
+    *,
+    head: Optional[list[str]] = None,
+    hint: Optional[str] = None,
+) -> str:
     """网页内标注（v0.502，owner 2026-11-09）：每图下「判定按钮 + 形态理由」，浏览器本地存档
     （localStorage，可分多次标），一键导出与 labels.csv 同列的 CSV；可导入已有 labels.csv 续标。
     纯静态、无网络。``rows`` = labels.csv 的前 7 列（id 起）。"""
@@ -843,8 +855,9 @@ def label_ui(rows: list[list[Any]], mode: str, store_key: str) -> str:
         {
             "rows": rows,
             "choices": list(LABEL_CHOICES[mode]),
-            "head": CSV_HEAD + CSV_TAIL[mode],
+            "head": (head or CSV_HEAD) + CSV_TAIL[mode],
             "key": store_key,
+            "ph": "批语（看到什么、等什么条件）" if mode == "buypoint" else "形态理由",
         },
         ensure_ascii=False,
     )
@@ -860,7 +873,12 @@ def label_ui(rows: list[list[Any]], mode: str, store_key: str) -> str:
         "<label><input type='checkbox' id='onlyTodo'>只看未标</label>　"
         "<button id='exp'>导出 labels.csv</button>　"
         "导入续标 <input type='file' id='imp' accept='.csv'>　"
-        "<span style='color:#888'>（判定 = 检测器测得对不对；买点判断请写在备注开头「买点：」，作选股练习素材。理由写形态，不写后来涨跌；标注存在本浏览器，换机器请先导出）</span></div>"
+        "<span style='color:#888'>（"
+        + (
+            hint
+            or "判定 = 检测器测得对不对；买点判断请写在备注开头「买点：」，作选股练习素材。理由写形态，不写后来涨跌"
+        )
+        + "；标注存在本浏览器，换机器请先导出）</span></div>"
     )
     js = r"""
 <script>
@@ -889,7 +907,7 @@ document.querySelectorAll('div.s').forEach(d => {
     b.onclick = () => { const v = get(id); v.c = (v.c === c ? '' : c); put(id, v); refresh(); };
     box.appendChild(b);
   });
-  const inp = document.createElement('input'); inp.placeholder = '形态理由';
+  const inp = document.createElement('input'); inp.placeholder = M.ph || '形态理由';
   inp.oninput = () => { const v = get(id); v.r = inp.value; put(id, v); };
   box.appendChild(inp); d.appendChild(box);
 });
