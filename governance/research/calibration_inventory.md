@@ -94,6 +94,18 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 - 边界样本的「边界翻转参数」带方向（v0.502，如 `J_LOW_THRESHOLD×1.2`）：ingest 据此出「参数改向票」——错样本能被它修正 / 对样本会被它误伤。
 - live 的资金意图阈值可被 `SCREEN_FORMULA_REGISTRY.json` `scoring.weights` 覆盖，校准时以 registry 实际生效值为准。
 
+## 轮次记录
+
+### b1_structure（2026-11-13，mining_v1 重标 105 张 → v2 候选 `708e6ed`）
+
+- owner 判断评估（口径 A / D）：五日战法判错 15 条全部站得住（检测器过松）；repair_signals 6 条判定点反了，owner 确认后更正（`labels-3.csv`）；
+  非一波流错因分「段识别漏判 / 放量门槛过低 / 原文无阈值 / owner 新增条件」四类。口径 B（盲标复测）待做。
+- **五日战法退出 B1 打分**（owner 2026-11-13）：v2 定义对照 owner 33/33 一致，但挖掘段 J<13 抽样 1,689 根 0 命中（v1 命中 14 根且均为误判）——
+  五日战法是看**前方低位是否有爆量**的追涨买法，不是 B1 当根形态。处理：`SCREEN_FORMULA_REGISTRY.json` 的 `scoring.weights.five_day_entry` 8 → 0，
+  检测器保留（CZ 与证据列仍可用）。**随本模块 v2 升版一起生效**（一次 `--bump`，避免 V0 分缓存在第二批前多次失效）。
+- 新特征想法（owner，未立项）：「B1 之前的低位是否出现过爆量」——与 `volume_detectors.bottom_volume` / `ignition` 相近，作右尾特征候选时再预注册。
+- 待 owner 定：一波流结局（revoked / insufficient）、顶部放量大阴的比较基准、止损参考位与流动性两个口径。
+
 ## P0H 持仓大形态（v0.485 纳入，**排在 P0 之前**）
 
 注册表外、但直接驱动 live 持仓状态机（`b1_holding_state`）的检测器，`pipeline/market_timing/technical_monitor.py`，18 个参数
