@@ -23,7 +23,7 @@
 | 118 | R49 逆向画像跑数：工具已落地 v0.443（`tail_explore_study`）；与 R47/R48 同排第二批，命令见 runbook「第二批预告」；线索两窗复现 + 过 q95 者另行预注册 | P2 | 生产机 | 排在 #121 定义校准之后（owner 2026-11-04）；之后 r49_v1 + 摘要入库 | [R49](governance/research/R49_tail_reverse_profile.md) |
 | 119 | R50 ≥20% 波段逆向匹配工具 `swing_recall_study`（ZigZag 波段 + B1 L1~L4 / QN 12 门召回、精度 lift、提前量、漏斗、兑现）；排期在第二批之后最后跑 | P3 | 生产机 | 排在第二批之后（#121 校准后），用 v0.469+ 代码跑 r50_v1（`swing_recall_study --tag r50_v1`）+ 摘要入库 | [R50](governance/research/R50_swing_winner_recall.md) |
 | 120 | holdout 跟踪月报：汇总选股练习台账 / plan 影子台账 / trade_counterfactual，按月报现行规则在 2026-09-05 后的表现（大单率 / 大亏率 / 胜率 / 盈亏比 / 与回测分布对照）；纯描述、不作判据、不改规则 | P2 | 生产机 | 工具已落地 v0.455（月报附录 + 伴生 JSON，契约已登记）；生产机月度节点跑 `monthly_review` 自动生成，首月（2026-10）复核格式与读数 | owner 2026-10-26 |
-| 121 | 信号参数**定义校准**（A 类：检测器是否测对形态，不拿收益寻优；B 类效果校准待 A 全部完成再议）：P0 live 判定 70 个参数 / 9 个模块优先，逐模块抽检图 + owner 标注 + 敏感性描述；定义改动按清单登记受影响 R 重跑 | P0 | owner | MACD 平台候选已定为往回匹配三组（v0.512，owner 对图确认）；持仓 v3cand 图集已出（生产机 292 bar / 7 字段 1375 行，2026-11-14，0 错）→ owner 标 `n_structure__holdings_v3cand`，再标 mining_v1（b1_thresholds 起）→ `--mode ingest` → 先评 owner 判断正确率（口径读标注前写死，清单第 6 条）→ 再定 v(n+1) | [清单](governance/research/calibration_inventory.md) |
+| 121 | 信号参数**定义校准**（A 类：检测器是否测对形态，不拿收益寻优；B 类效果校准待 A 全部完成再议）：P0 live 判定 70 个参数 / 9 个模块优先，逐模块抽检图 + owner 标注 + 敏感性描述；定义改动按清单登记受影响 R 重跑 | P0 | owner | MACD 平台候选已定往回匹配三组（v0.512）；持仓 v3cand 图集已出（292 bar / 1375 行，2026-11-14，0 错）→ owner 标 `n_structure__holdings_v3cand`，再标 mining_v1（b1_thresholds 起）→ ingest 汇总 → 评判断正确率（口径清单第 6 条）→ 定 v(n+1) | [清单](governance/research/calibration_inventory.md) |
 
 ## 已闭环索引
 
