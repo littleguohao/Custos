@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-"""买点练习（v0.517，owner 2026-11-13）：B1 点盲判 → 复盘判断与批语。只描述，不作研究判据。
+"""买点练习（v0.523，owner 2026-11-14）：B1 点盲判 → 该题选择后展示后 20 根。只描述，不作研究判据。
 
 - ``--mode make``：从挖掘段（A 2000~2016 / B 2022~2026-09-04）的 B1 点（日线 J<13 ∧ 0AMV 做多）随机抽 N 个，
-  出 KLineChart 图集（只画到当根，不显示任何检测器结论），每图下点「买 / 不买 / 等」并写批语，导出 labels.csv。
-  只抽前向 20 日仍落在同一挖掘段内的点（复盘不读判定段 / holdout）。
-- ``--mode review``：读导出的 labels.csv，按 ``calibration_inventory.md`` 第 6 条「批语复盘口径」（含 2026-11-13
+  出 KLineChart 图集（选择前只画到当根，不显示任何检测器结论），每图下点「买 / 不买 / 等」并写批语；
+  该题选择后立即揭示随后 20 根，其他题不受影响；刷新后已选择题仍揭示。导出 labels.csv 留存，无需再跑 review。
+  只抽前向 20 日仍落在同一挖掘段内的点（出题与揭示都不读判定段 / holdout）。
+- ``--mode review``（兼容既有练习，可选）：读导出的 labels.csv，按 ``calibration_inventory.md`` 第 6 条「批语复盘口径」（含 2026-11-13
   两次修订）出 ``review.json`` / ``review.md``：
   ① 判断 × 当根买入 20 日表现与准确率（买 → 20 日收盘上涨；不买 → 不涨），附同批基准；
   ② 批语状态陈述 × 当根指标核实；
@@ -113,7 +114,30 @@ def make(args: Any) -> Path:
             round(float(fr["close"].iloc[-1]), 4),
         ]
         rows.append(row)
-        data[str(n)] = {**cp.chart_payload(fr, ""), "code": code, "marks": []}
+        # 初始只画到当根；选择后才由 kcReveal 追加同挖掘段内后 20 根。
+        # 未来段的指标由截至各未来日的完整历史算出，页面只负责隐藏 / 揭示。
+        future_full = cp.chart_payload(df.iloc[: i + rr.FWD_N + 1], "")
+        future = {
+            k: future_full[k][-rr.FWD_N :]
+            for k in (
+                "dates",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "j",
+                "dif",
+                "dea",
+                "hist",
+            )
+        }
+        data[str(n)] = {
+            **cp.chart_payload(fr, ""),
+            "code": code,
+            "marks": [],
+            "future": future,
+        }
         parts.append(
             f"<div class='s' data-id='{n}'><div class='t'>#{n}（J={row[4]}，0AMV 做多）</div>"
             "<div class='kc'></div></div>"
@@ -129,9 +153,9 @@ def make(args: Any) -> Path:
     page = (
         "<html><meta charset='utf-8'><title>买点练习</title><body style='font-family:sans-serif'>"
         f"<h1>买点练习 · {html.escape(args.tag)}（{len(rows)} 个 B1 点，挖掘段）</h1>"
-        "<p>每张图都是 B1 点（日线 J&lt;13 且 0AMV 做多），只画到当根。判断：<b>买</b> = 当根收盘买；<b>不买</b>；"
+        "<p>每张图都是 B1 点（日线 J&lt;13 且 0AMV 做多），选择前只画到当根。判断：<b>买</b> = 当根收盘买；<b>不买</b>；"
         "<b>等</b> = 现在不买，等条件出现再考虑（批语里写等什么，如「等绿柱缩短」「等底分型」「等双线回 0 轴附近」「等企稳」）。"
-        "标完点顶部「导出 labels.csv」，再跑 <code>buypoint_practice --mode review</code>。</p>"
+        "每题选择后立即展示随后 20 根；已选择题刷新后仍展示，未选择题继续盲判。顶部「导出 labels.csv」留存，无需再跑 review。</p>"
         + "".join(parts)
         + kc
         + cp.label_ui(
@@ -139,8 +163,17 @@ def make(args: Any) -> Path:
             "buypoint",
             f"buypoint:{d.name}",
             head=HEAD,
-            hint="判断 = 当根买 / 不买 / 等条件；批语写看到什么、等什么",
+            hint="选择后展示该题后 20 根；批语写看到什么、等什么",
         )
+        + r"""<style>div.s.done{opacity:1}</style><script>
+document.addEventListener('click', ev => {
+  const b = ev.target.closest('div.lbl button');
+  if (!b) return;
+  const el = b.closest('div.s');
+  if (el && get(el.dataset.id).c) kcReveal(el.dataset.id);
+});
+M.rows.forEach(r => { if (get(r[0]).c) kcReveal(String(r[0])); });
+</script>"""
         + "</body></html>"
     )
     (d / "gallery.html").write_text(page, encoding="utf-8")

@@ -11,6 +11,11 @@ from custos.core.factors import weekly_j
 from custos.research import calib_probe as cp
 
 
+def test_weekly_j_excluded_from_definition_calibration():
+    """owner 2026-11-14：周 J<13 是纯数值比较，不再做人工定义校准。"""
+    assert "weekly_j_low" not in cp.MODULES["b1_thresholds"]["fields"]
+
+
 def _df(seed=0, n=700, start="2014-01-02"):
     r = np.random.RandomState(seed)
     d = pd.bdate_range(start, periods=n)

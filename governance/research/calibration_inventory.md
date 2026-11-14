@@ -8,9 +8,9 @@
 
 ## 现状
 
-- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 229 个模块级数值参数：**P0 live 判定 70 个**（进技术分 / 进池门 / 封顶，9 个模块）、
+- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 74 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
   **P1 live 展示 92 个**（1800 证据标注，不进判定）、P2 研究 67 个。
-- **定义校准：0 / 229**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
+- **定义校准：0 / 233**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
 - **清单未覆盖**（需在逐因子校准时一并核）：①函数体内联常量（KDJ 9/3/3、BBI 周期、20 日相对强度窗口等）；
   ②打分权重与分档（`DEFAULT_TECH_WEIGHTS`、`tech_strong/mid` 60/30、资金意图 `ci_*` 与 `CAP_STRONG/MID`——属打分，R35 终局 A 已收口，
   不在 A 类范围，只在因子定义改动时同步核对）；③出场规则（`EXIT_RULES.json`，R10/R44/R47 测过效果）与 0AMV 状态机（R4），另议。
@@ -43,6 +43,7 @@
    **修订（2026-11-13，owner 指正，重算前写入）**：「离 0 轴远 / 回 0 轴附近」原口径按收盘价 1% 是**错的**（owner 指的是 MACD 副图里双线相对 0 轴的远近，与价格无关）。改为：以当根（触发判定时以该日）往前 120 根（含）内 max(|DIF|, |DEA|) 为摆幅 A；离 0 轴远 = |DIF| > 0.2A；回 0 轴附近 = |DIF| ≤ 0.2A 且 |DEA| ≤ 0.2A。N=120、k=20% 由 coder 试用，owner 看结果再定。
    **语义澄清（owner 2026-11-13）**：等待条件 = 「现在不买；窗口内条件出现再考虑，不出现就不买」⇒ 未触发样本按「放弃」计，评价看放弃是否躲开了亏损（当根买 20 日 ≤0 记为放弃正确）。
    **工具化（v0.517）**：以上口径由 `research/remark_rules.py`（单一来源）+ `buypoint_practice --mode review` 执行；买点练习出题用 `--mode make`（只抽挖掘段、前向 20 日不出段）。备注仍只写形态、不写后来涨跌（第 1 条）。
+   **交互修订（v0.523，owner 2026-11-14）**：新练习每题选择「买 / 不买 / 等」后立即在该图展示同挖掘段内后 20 根，其他题仍盲态；刷新后已选择题保持揭示。导出 labels.csv 留存，**不再要求跑 review**；`--mode review` 仅为既有练习保留兼容。
 
 **命令（生产机）**：
 
@@ -95,6 +96,11 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 - live 的资金意图阈值可被 `SCREEN_FORMULA_REGISTRY.json` `scoring.weights` 覆盖，校准时以 registry 实际生效值为准。
 
 ## 轮次记录
+
+### b1_thresholds（2026-11-14）
+
+- **周 J 退出 A 类定义校准（owner 拍板）**：定义固定为周线 KDJ（9,3,3）的 `J < 13`，纯数值比较，不需人工判断；`calib_probe` 的 b1_thresholds 只再抽日 J、反转 K、极致缩量三项。live 判定不变。
+- `b1_thresholds__mining_v1` 里 36 条周 J 标注只留作历史，不进 owner 判断正确率、参数改向票或 v2 讨论，不重标、不盲标；无需为周 J 增补周线图。
 
 ### b1_structure（2026-11-13，mining_v1 重标 105 张 → v2 候选 `708e6ed`）
 
@@ -171,7 +177,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `technical_monitor` | `TREND_MIN_BARS` | 60 | 趋势判定最少 K 线数 | - | 未校准 |
 | `technical_monitor` | `QFQ_LOAD_BARS` | 100000 | - | - | 未校准 |
 
-### P0（70 个参数）
+### P0（74 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -190,6 +196,10 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `b1_structure` | `REPAIR_CHANGE_PCT` | 2.0 | 待回测参数：止跌涨跌幅区间±% | candidate | 未校准 |
 | `b1_structure` | `FIVE_DAY_SPIKE_RATIO` | 1.45 | 五日战法：近7日巨量倍数（CZ §十六）。原文"前一交易日均量"存歧义，按前一交易日单日量实现（vol[t]/vol[t-1]），待策略 owner 确认 | candidate | 未校准 |
 | `b1_structure` | `FIVE_DAY_SPIKE_WINDOW` | 7 | 五日战法：巨量观察窗口（CZ §十六） | candidate | 未校准 |
+| `b1_structure` | `FIVE_DAY_V2_SPIKE_RATIO` | 2.0 | v2 候选：当日量 ≥ 前一天 2 倍且收阳；只在 calib_probe 对照，不进 live | candidate | 未校准 |
+| `b1_structure` | `NOW_V2_VOL_RATIO` | 1.5 | v2 候选：放量统一为当日量 ≥ 前 5 日均量 1.5 倍；只在 calib_probe 对照，不进 live | candidate | 未校准 |
+| `b1_structure` | `NOW_V2_MAX_GAIN_PCT` | 50.0 | v2 候选：上涨段累计涨幅 >50% 判一波流；只在 calib_probe 对照，不进 live | candidate | 未校准 |
+| `b1_structure` | `NOW_V2_MIN_GAIN_PCT` | 0.0 | v2 候选：明显上涨段下限，不足则 insufficient；只在 calib_probe 对照，不进 live | candidate | 未校准 |
 | `b1_structure` | `LIQUIDITY_WIN` | 20 | 待回测：近N日均成交额窗口 | candidate | 未校准 |
 | `b1_structure` | `STOP_LOOKBACK` | 10 | 建议止损位：近10日最低价 | candidate | 未校准 |
 | `capital_intent` | `CAP_STRONG` | 5 | - | candidate | 未校准 |

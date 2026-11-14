@@ -128,6 +128,53 @@ def test_label_ui_buypoint_columns():
     assert '"买", "不买", "等"' in ui and "判断(买/不买/等)" in ui and "批语" in ui
 
 
+def test_make_hides_then_reveals_twenty_bars(tmp_path, monkeypatch):
+    """v0.523：初始图到当根；选择后只追加同段后 20 根，无需单独 review。"""
+    import csv
+    import json
+
+    from custos.research import backtest_factors as bt
+    from custos.research import universe
+
+    df = _df(400, 9, "2022-01-03")
+    regime = {d: "做多" for d in df["date"]}
+    monkeypatch.setattr(bt, "load_amv_regime", lambda since: regime)
+    monkeypatch.setattr(universe, "default_codes", lambda: ["600001"])
+    monkeypatch.setattr(bp, "_load", lambda code, seg: df)
+    args = bp._build_parser().parse_args(
+        [
+            "--mode",
+            "make",
+            "--n",
+            "1",
+            "--segments",
+            "mining_b",
+            "--tag",
+            "test",
+            "--out-dir",
+            str(tmp_path),
+        ]
+    )
+    bp.make(args)
+    with (tmp_path / "labels.csv").open(encoding="utf-8-sig", newline="") as fh:
+        label = next(csv.DictReader(fh))
+    page = (tmp_path / "gallery.html").read_text(encoding="utf-8")
+    start = page.index("const KC = ") + len("const KC = ")
+    chart = json.loads(page[start : page.index(";\nconst UP", start)])["1"]
+    assert chart["dates"][-1] == label["日期"]
+    assert len(chart["future"]["dates"]) == rr.FWD_N == 20
+    i = df["date"].tolist().index(label["日期"])
+    assert chart["future"]["dates"] == df["date"].iloc[i + 1 : i + 21].tolist()
+    assert all(
+        len(chart["future"][key]) == 20
+        for key in ("open", "high", "low", "close", "volume", "j", "dif", "dea", "hist")
+    )
+    assert "每题选择后立即展示随后 20 根" in page and "无需再跑 review" in page
+    assert "if (el && get(el.dataset.id).c) kcReveal(el.dataset.id)" in page
+    assert "M.rows.forEach(r => { if (get(r[0]).c) kcReveal(String(r[0])); });" in page
+    assert "el._kc.resetData();" in page
+
+
 def test_review_empty_guard(tmp_path):
     (tmp_path / "labels.csv").write_text(
         "\ufeff" + ",".join(bp.HEAD + [bp.JUDGE, bp.NOTE]) + "\n", encoding="utf-8"

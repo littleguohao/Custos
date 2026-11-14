@@ -72,11 +72,12 @@ MODULES: dict[str, dict[str, Any]] = {
     },
     "b1_thresholds": {
         "defmod": "custos.core.b1_thresholds",
+        # owner 2026-11-14：周 J 固定为纯数值比较 weekly_j < 13，退出 A 类人工校准；
+        # 不进抽样、owner 正确率或参数改向票。live 判定不变。
         "fields": [
             "patterns.j_low",
             "patterns.reversal_k_candidate",
             "patterns.volume_contraction",
-            "weekly_j_low",
         ],
     },
     "entry_patterns": {
@@ -1467,6 +1468,26 @@ klinecharts.registerIndicator({
       styles: ({ data }) => ({ color: data.current && data.current.h >= 0 ? UP : DN, style: 'fill' }) }],
   calc: l => l.map(d => ({ dif: nz(d.dif), dea: nz(d.dea), h: nz(d.hist) }))
 });
+function kcBars(p) {
+  return p.dates.map((d, i) => ({ timestamp: Date.parse(d + 'T15:00:00+08:00'), open: p.open[i], high: p.high[i],
+    low: p.low[i], close: p.close[i], volume: p.volume[i], j: p.j[i], dif: p.dif[i], dea: p.dea[i], hist: p.hist[i] }));
+}
+function kcReveal(id) {
+  const el = document.querySelector("div.s[data-id='" + id + "']"), p = KC[id];
+  if (!el || !p || !p.future || el._kcFutureShown) return;
+  el._kcFutureShown = true;
+  if (el._kc) {
+    el._kcBars = el._kcBars.concat(kcBars(p.future));
+    el._kc.setDataLoader({ getBars: ({ callback }) => callback(el._kcBars, false) });
+    el._kc.resetData();
+  }
+  const title = el.querySelector('.t');
+  if (title && !title.querySelector('.kc-future-note')) {
+    const note = document.createElement('span');
+    note.className = 'kc-future-note'; note.textContent = '　（已展示后 20 根）'; note.style.color = '#c56a00';
+    title.appendChild(note);
+  }
+}
 function kcDraw(el) {
   const p = KC[el.dataset.id], box = el.querySelector('.kc');
   if (!p || !box || box.dataset.done) return;
@@ -1477,8 +1498,9 @@ function kcDraw(el) {
     indicator: { lines: [{ color: '#E5A50A' }, { color: '#888888', style: 'dashed', dashedValue: [4, 4] }, { color: '#4C8BF5' }] } } });
   ch.setSymbol({ ticker: p.code || 'x', pricePrecision: 2, volumePrecision: 0 });
   ch.setPeriod({ span: 1, type: 'day' });
-  const bars = p.dates.map((d, i) => ({ timestamp: Date.parse(d + 'T15:00:00+08:00'), open: p.open[i], high: p.high[i],
-    low: p.low[i], close: p.close[i], volume: p.volume[i], j: p.j[i], dif: p.dif[i], dea: p.dea[i], hist: p.hist[i] }));
+  let bars = kcBars(p);
+  if (el._kcFutureShown) bars = bars.concat(kcBars(p.future));
+  el._kcBars = bars;
   ch.setDataLoader({ getBars: ({ callback }) => callback(bars, false) });
   ch.createIndicator({ name: 'CVOL', paneId: 'p_vol' });
   ch.createIndicator({ name: 'CJ', paneId: 'p_j' });
@@ -1493,7 +1515,7 @@ function kcDraw(el) {
     if (m.label) ch.createOverlay({ name: 'simpleTag', lock: true, points: [{ timestamp: ts(m.date), value: m.price }], extendData: m.label + ' ' + m.price,
       styles: { line: { color: col }, text: { backgroundColor: col, borderColor: col } } });
   });
-  const last = bars[bars.length - 1];
+  const last = bars[p.dates.length - 1];
   ch.createOverlay({ name: 'simpleAnnotation', points: [{ timestamp: last.timestamp, value: last.high }], extendData: '当根' });
   el._kc = ch;
 }
