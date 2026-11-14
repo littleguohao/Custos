@@ -1515,8 +1515,16 @@ function kcDraw(el) {
     if (m.label) ch.createOverlay({ name: 'simpleTag', lock: true, points: [{ timestamp: ts(m.date), value: m.price }], extendData: m.label + ' ' + m.price,
       styles: { line: { color: col }, text: { backgroundColor: col, borderColor: col } } });
   });
-  const last = bars[p.dates.length - 1];
-  ch.createOverlay({ name: 'simpleAnnotation', points: [{ timestamp: last.timestamp, value: last.high }], extendData: '当根' });
+  const asOf = bars[p.dates.length - 1];
+  if (p.future) {
+    const low = Math.min(...p.low, ...p.future.low), high = Math.max(...p.high, ...p.future.high);
+    ch.createOverlay({ name: 'segment', lock: true,
+      points: [{ timestamp: asOf.timestamp, value: low }, { timestamp: asOf.timestamp, value: high }],
+      styles: { line: { color: '#4C8BF5', size: 1.5, style: 'dashed' } } });
+  }
+  ch.createOverlay({ name: 'simpleAnnotation', points: [{ timestamp: asOf.timestamp, value: asOf.high }],
+    extendData: p.future ? '买点' : '当根',
+    styles: { line: { color: '#4C8BF5' }, text: { backgroundColor: '#4C8BF5', borderColor: '#4C8BF5' } } });
   el._kc = ch;
 }
 const kcObs = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { kcDraw(e.target); kcObs.unobserve(e.target); } }),

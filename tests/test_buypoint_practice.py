@@ -173,6 +173,9 @@ def test_make_hides_then_reveals_twenty_bars(tmp_path, monkeypatch):
     assert "if (el && get(el.dataset.id).c) kcReveal(el.dataset.id)" in page
     assert "M.rows.forEach(r => { if (get(r[0]).c) kcReveal(String(r[0])); });" in page
     assert "el._kc.resetData();" in page
+    assert "const asOf = bars[p.dates.length - 1]" in page
+    assert "extendData: p.future ? '买点' : '当根'" in page
+    assert "points: [{ timestamp: asOf.timestamp, value: low }" in page
 
 
 def test_review_empty_guard(tmp_path):
