@@ -115,8 +115,8 @@ base bucket ＝ 技术结构 × 资金意图（均为个股维度）：
   - **流动性**（`enrich.check_liquidity`）：近 20 日均成交额(亿元)。低于 `LIQUIDITY_FLOOR_YI` 打
     `low_liquidity`；是否封顶 C 由 `scoring.cap_rules.liquidity_floor` 控制(默认关，仅 flag)。
   - **资金流向**（`enrich.load_fund_flow`/`fund_flow_of`，读 `collect_fund_flow` 的
-    `{date}_fund_flow_rank.json`）：个股在主力净流入榜且净流入、或所属主题板块净流入 → 计入
-    `capital_intent`(资金意图轴，正交于量价)。文件缺失干净降级。
+    `{date}_fund_flow_rank.json`）：个股在主力净流入榜且净流入为正 → 计入
+    `capital_intent`(资金意图轴，正交于量价)；板块净流入自 v0.80 起仅展示、不再计分。文件缺失干净降级。
     **多日累计**：`fund_flow.cumulative_days`(默认1)>1 时累加最近N个每日快照的主力净流入(单日噪声大、多日更稳)。
   - **财务维度（脚手架，默认关）**：`src/custos/pipeline/screening/financials.py` 用 mootdx Affair 财务表做
     CZ §四抄底三条件代理。列名关键词自动映射(`auto_colmap`)+ `registry.financials.columns` 按字段覆盖，
@@ -127,9 +127,9 @@ base bucket ＝ 技术结构 × 资金意图（均为个股维度）：
     `financials.enabled=false` 默认关，只证据层落盘、不驱动分层。
 - **因子 lift 验证**（`backtest_factors.py --factor-field <名>`）：把任意数值字段(如 `c_liquidity`)按分位
   分组看前向胜率/收益，验证是否有 lift。**流动性可历史回测**；**资金流无历史存档(只有每日快照)，只能前向验证**。
-- 资金意图 = `capital_intent_strength`（放量点火 +3、知行多头且沿短线上行 +2、
-  20日相对强度强 +2、龙头量能 +2、底部巨量 +2、量能持续=主线确认 +2、点火 +1、
-  反转K +1；≥5 强 / ≥2 中 / 否则 弱）。仅正向计"资金在进"，派发/顶背离由风控 cap 否决。
+- 资金意图 = `capital_intent_strength`（B1点火 +3；知行多头且沿短线上行、20日相对强度强、
+  龙头量能、底部巨量、量能持续=主线确认、回调缩量、个股主力净流入在榜且为正各 +2；放量点火、反转K各 +1；
+  ≥5 强 / ≥2 中 / 否则弱）。仅正向计"资金在进"，派发/顶背离由风控 cap 否决；实际权重以 registry 的 ci_* 为准。
 
 **板块降为提示**（不封顶、不进总分）：
 

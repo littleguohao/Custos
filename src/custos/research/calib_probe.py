@@ -80,10 +80,8 @@ MODULES: dict[str, dict[str, Any]] = {
             "patterns.volume_contraction",
         ],
     },
-    "entry_patterns": {
-        "defmod": "custos.core.factors.entry_patterns",
-        "fields": ["patterns.bbi_above", "patterns.relative_strength_strong"],
-    },
+    # owner 2026-11-14：BBI 与 20 日相对上证强度均为确定性数值比较，
+    # 退出 A 类人工校准；不再提供 entry_patterns 抽检入口。live 判定不变。
     "b1_structure": {
         "defmod": "custos.core.factors.b1_structure",
         "fields": [
@@ -124,7 +122,9 @@ MODULES: dict[str, dict[str, Any]] = {
     },
     "distribution": {
         "defmod": "custos.core.factors.distribution",
-        "fields": ["distribution.risk_level", "distribution_confirm.revoked"],
+        # revoked 是①/②的撤销名单；空名单=无撤销或不适用，不是普通 miss，
+        # 不再进入 hit/miss/boundary 人工抽检。只校准实际风险等级。
+        "fields": ["distribution.risk_level"],
     },
     "wave_type": {
         "defmod": "custos.core.factors.wave_type",
@@ -1020,10 +1020,10 @@ FIELD_DEF: dict[str, str] = {
     "macd_technics.top_divergence.hit": "MACD 顶背离：价格创新高而 MACD 没有创新高",
     "macd_technics.three_peaks.hit": "MACD 三峰形态是否出现",
     "macd_technics.overextended.hit": "MACD 是否过度伸展（偏离过大）",
-    "distribution.risk_level": "主力出货五方式（B1 §七.3）的风险等级（顶部派发迹象有多强）",
-    "distribution_confirm.revoked": "出货确认是否被撤销（后续走势否定了派发判断）",
+    "distribution.risk_level": "主力出货风险等级（B1 §七.3）：none=无命中；watch=至少 1 腿但未达 high；high=命中①/②任一或同时 ≥2 腿",
+    "distribution_confirm.revoked": "①/②出货信号的撤销名单；空名单只表示无撤销或不适用，不是普通漏判",
     "wave.wave_type": "拉升波三分类（B1 §四.0）：冲刺波 sprint / 拉升波 rally / 建仓波 buildup，冲突时取保守",
-    "@capital_intent.level": "资金意图等级（主力资金进出的综合判断）",
+    "@capital_intent.level": "资金意图 = 10 项正向量价/资金流证据按 registry 的 ci_* 权重加分：≥5 强、≥2 中、否则弱；不是单看主力净流入",
 }
 
 _CLASS_ASK = {

@@ -16,6 +16,16 @@ def test_weekly_j_excluded_from_definition_calibration():
     assert "weekly_j_low" not in cp.MODULES["b1_thresholds"]["fields"]
 
 
+def test_numeric_fields_and_revoked_list_excluded_from_calibration():
+    """BBI / 相对强度是纯计算；revoked 空名单不是普通 miss。"""
+    assert "entry_patterns" not in cp.MODULES
+    assert cp.MODULES["distribution"]["fields"] == ["distribution.risk_level"]
+    prompt = cp.ask_html("distribution.risk_level", "hit", "watch")
+    assert "none=无命中" in prompt and "high=命中①/②任一或同时 ≥2 腿" in prompt
+    assert "不是普通漏判" in cp.FIELD_DEF["distribution_confirm.revoked"]
+    assert "10 项" in cp.FIELD_DEF["@capital_intent.level"]
+
+
 def _df(seed=0, n=700, start="2014-01-02"):
     r = np.random.RandomState(seed)
     d = pd.bdate_range(start, periods=n)

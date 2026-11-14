@@ -102,6 +102,13 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 - **周 J 退出 A 类定义校准（owner 拍板）**：定义固定为周线 KDJ（9,3,3）的 `J < 13`，纯数值比较，不需人工判断；`calib_probe` 的 b1_thresholds 只再抽日 J、反转 K、极致缩量三项。live 判定不变。
 - `b1_thresholds__mining_v1` 里 36 条周 J 标注只留作历史，不进 owner 判断正确率、参数改向票或 v2 讨论，不重标、不盲标；无需为周 J 增补周线图。
 
+### entry_patterns / distribution（2026-11-14）
+
+- **BBI 与相对强度退出 A 类人工校准（owner 拍板）**：BBI=(MA3+MA6+MA12+MA24)/4，当根收盘 >= BBI 即命中；相对强度 = 个股近 20 日涨幅 − 上证近 20 日涨幅，>=+3pp 命中。两者均纯计算，live 不变；`calib_probe` 删除 entry_patterns 抽检入口，旧图集只留档。
+- 相对上证强度是 2026-07-23 选股打分链的工程规则；B1 有「明显强于大盘 / 所属主题」的定性思想，但没有「20 日 / 上证 / +3pp」这组明文参数。阈值有效性若需验证，另走效果研究，不做看图定义确认。
+- **出货撤销名单退出普通 hit/miss 抽检**：`distribution_confirm.revoked` 是①/②的撤销名单，空名单 = 无撤销或不适用，不是漏判；mining_v1 的 12 条「-」不再要求标注。distribution 只抽 `risk_level`，提示补齐 none/watch/high 含义。
+- 出货显示复算（描述性）：48 条显示值与重算 0 错位；36 条 risk_level 样本中 18 个 watch，其中 17 条来自③阶梯放量下跌、1 条来自⑤绿肥红瘦。该构成供后续逐腿定义讨论，不在本轮直接改 live。
+
 ### b1_structure（2026-11-13，mining_v1 重标 105 张 → v2 候选 `708e6ed`）
 
 - owner 判断评估（口径 A / D）：五日战法判错 15 条全部站得住（检测器过松）；repair_signals 6 条判定点反了，owner 确认后更正（`labels-3.csv`）；
@@ -221,7 +228,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `distribution` | `DIST_WINDMILL_RANGE_PCT` | 7.0 | 待回测：宽幅震荡 K=振幅（高−低）/前收 ≥ 此值% | active；R2 | 未校准 |
 | `distribution` | `DIST_WINDMILL_TOP_FRAC` | 0.93 | - | active；R2 | 未校准 |
 | `distribution` | `DIST_WINDMILL_VOL_RATIO` | 1.5 | 待回测：天量=信号 K 量 ≥ 前20日量**中位数**×此值（v0.62 起中位数，见 :351 附近注释——偶发天量不把基准顶飞） | active；R2 | 未校准 |
-| `entry_patterns` | `RS_STRONG_PP` | 3.0 | 20日相对强度 >= +3pp | candidate | 未校准 |
+| `entry_patterns` | `RS_STRONG_PP` | 3.0 | 个股20日涨幅 − 上证20日涨幅 >= +3pp；纯数值比较 | candidate | 无需 A 类（owner 2026-11-14） |
 | `ignition` | `ZX_CROSS_RECENT` | 10 | 待回测：知行金叉"近N日"窗口 | candidate | 未校准 |
 | `ignition` | `IGNITION_WINDOW` | 10 | 待回测：放量点火扫描窗口（日） | candidate | 未校准 |
 | `ignition` | `IGNITION_VOL_RATIO` | 1.5 | 待回测：点火量比（当日量/前5日均量） | candidate | 未校准 |
