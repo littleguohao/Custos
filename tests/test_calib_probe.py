@@ -26,6 +26,49 @@ def test_numeric_fields_and_revoked_list_excluded_from_calibration():
     assert "10 项" in cp.FIELD_DEF["@capital_intent.level"]
 
 
+def test_simple_numeric_fields_and_their_sensitivity_params_removed():
+    """owner 2026-11-15：只保留复合形态；纯数值字段及其敏感性参数退出。"""
+    expected = {
+        "trend_box": ["trend.state"],
+        "b1_thresholds": ["patterns.reversal_k_candidate"],
+        "b1_structure": [
+            "non_one_wave.status",
+            "repair_signals.signals",
+            "five_day_entry.hit",
+        ],
+        "volume_detectors": [
+            "volume_sustain.status",
+            "three_lows.hit",
+            "bottom_volume.hit",
+        ],
+        "macd_technics": [
+            "macd_technics.bottom_divergence.hit",
+            "macd_technics.top_divergence.hit",
+            "macd_technics.three_peaks.hit",
+        ],
+    }
+    for module, fields in expected.items():
+        assert cp.MODULES[module]["fields"] == fields
+    assert not set(cp.param_names("trend_box")) & {
+        "BOX_UPPER_Q",
+        "BOX_LOWER_Q",
+        "BOX_SHORT",
+        "BOX_LONG",
+    }
+    assert not set(cp.param_names("b1_structure")) & {
+        "STOP_LOOKBACK",
+        "LIQUIDITY_WIN",
+    }
+    assert not set(cp.param_names("volume_detectors")) & {
+        "LEADER_VOL_BASE_DAYS",
+        "LEADER_VOL_RATIO",
+    }
+    assert not set(cp.param_names("macd_technics")) & {
+        "MACD_OVEREXT_PCTL",
+        "MACD_OVEREXT_WIN",
+    }
+
+
 def _df(seed=0, n=700, start="2014-01-02"):
     r = np.random.RandomState(seed)
     d = pd.bdate_range(start, periods=n)
@@ -192,10 +235,10 @@ def test_review_rows_and_diff(tmp_path):
     a = _args("review", since=since, until=until, pool="all")
     rep = cp.run_study(a, bars=bars, index_df=_df(9))
     assert rep["n_bars"] == 41 and rep["factor_version"] == 1
-    rows = rep["samples"]["patterns.j_low"]
+    rows = rep["samples"]["patterns.reversal_k_candidate"]
     assert {r["class"] for r in rows} <= {"hit", "near_miss"}
     assert sum(r["class"] == "hit" for r in rows) == sum(
-        bool(v["patterns.j_low"]) for v in rep["values"]
+        bool(v["patterns.reversal_k_candidate"]) for v in rep["values"]
     )
     d = cp.write_outputs(dict(rep), tmp_path)
     assert (
@@ -207,14 +250,14 @@ def test_review_rows_and_diff(tmp_path):
     old = __import__("json").loads((d / "summary.json").read_text(encoding="utf-8"))
     new = __import__("copy").deepcopy(old)
     new["factor_version"] = 2
-    flip = next(v for v in new["values"] if v["patterns.j_low"])
-    flip["patterns.j_low"] = False
+    flip = next(v for v in new["values"] if not v["patterns.reversal_k_candidate"])
+    flip["patterns.reversal_k_candidate"] = True
     diff = cp.diff_reports(old, new)
-    assert diff["fields"]["patterns.j_low"]["removed"] == [
+    assert diff["fields"]["patterns.reversal_k_candidate"]["added"] == [
         (flip["key"][0].split("|")[0], flip["date"])
     ]
     md = cp._diff_md(diff, "b1_thresholds")
-    assert "v1 → v2" in md and "消失 1" in md
+    assert "v1 → v2" in md and "新增 1" in md
 
 
 # ── P0H 持仓大形态（v0.485） ──────────────────────────────────────────

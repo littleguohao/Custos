@@ -109,6 +109,13 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 - **出货撤销名单退出普通 hit/miss 抽检**：`distribution_confirm.revoked` 是①/②的撤销名单，空名单 = 无撤销或不适用，不是漏判；mining_v1 的 12 条「-」不再要求标注。distribution 只抽 `risk_level`，提示补齐 none/watch/high 含义。
 - 出货显示复算（描述性）：48 条显示值与重算 0 错位；36 条 risk_level 样本中 18 个 watch，其中 17 条来自③阶梯放量下跌、1 条来自⑤绿肥红瘦。该构成供后续逐腿定义讨论，不在本轮直接改 live。
 
+### 纯数值字段统一退出（2026-11-15，owner 拍板）
+
+- 退出 9 项：日 J、极致缩量、止损参考价、流动性均值、龙头量能、MACD 区间、MACD 过度伸展、20 日箱体位置、60 日箱体位置。它们只需数值比较或滚动统计，不需人工判断形态。
+- 敏感性同步收口：BOX_*、STOP_LOOKBACK、LIQUIDITY_WIN、LEADER_VOL_*、MACD_OVEREXT_* 不再进入 calib_probe 参数扫描；日 J / 极致缩量的阈值仍随反转 K 复合形态保留。
+- 保留：反转 K、修复信号、非一波流、量能持续、三低、底部巨量、点火、MACD 背离、三打白骨精、趋势状态、N 结构、出货、波段及资金意图复合评分。live 判定与打分均不变。
+- 受影响旧图集只留档并标注退出项，不重标、不盲标、不进 owner 正确率或参数改向票。
+
 ### b1_structure（2026-11-13，mining_v1 重标 105 张 → v2 候选 `708e6ed`）
 
 - owner 判断评估（口径 A / D）：五日战法判错 15 条全部站得住（检测器过松）；repair_signals 6 条判定点反了，owner 确认后更正（`labels-3.csv`）；
@@ -169,10 +176,10 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `technical_monitor` | `N_PIVOT_RIGHT` | 3 | 收盘分型右侧确认根数 | - | 未校准 |
 | `technical_monitor` | `N_LOOKBACK` | 90 | N 结构分型搜索近端窗口（根） | - | 未校准 |
 | `technical_monitor` | `N_STALE_BREACH_BARS` | 10 | 跌破关键位超过 N 根视为陈旧结构（不再触发新鲜 P0） | - | 未校准 |
-| `technical_monitor` | `BOX_UPPER_Q` | 0.85 | 箱体上沿 = 窗口最高价分位 | - | 未校准 |
-| `technical_monitor` | `BOX_LOWER_Q` | 0.15 | 箱体下沿 = 窗口最低价分位 | - | 未校准 |
-| `technical_monitor` | `BOX_SHORT` | 20 | 短箱体窗口（持仓「跌破 20 日箱体」） | - | 未校准 |
-| `technical_monitor` | `BOX_LONG` | 60 | 长箱体窗口 | - | 未校准 |
+| `technical_monitor` | `BOX_UPPER_Q` | 0.85 | 箱体上沿 = 窗口最高价分位；纯数值比较 | - | 无需 A 类（owner 2026-11-15） |
+| `technical_monitor` | `BOX_LOWER_Q` | 0.15 | 箱体下沿 = 窗口最低价分位；纯数值比较 | - | 无需 A 类（owner 2026-11-15） |
+| `technical_monitor` | `BOX_SHORT` | 20 | 短箱体窗口；纯数值比较 | - | 无需 A 类（owner 2026-11-15） |
+| `technical_monitor` | `BOX_LONG` | 60 | 长箱体窗口；纯数值比较 | - | 无需 A 类（owner 2026-11-15） |
 | `technical_monitor` | `TREND_MA_FAST` | 25 | 趋势快线 | - | 未校准 |
 | `technical_monitor` | `TREND_MA_SLOW` | 60 | 趋势慢线 | - | 未校准 |
 | `technical_monitor` | `TREND_MA_LONG1` | 144 | 展示：长期均线 1 | - | 未校准 |
@@ -207,8 +214,8 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `b1_structure` | `NOW_V2_VOL_RATIO` | 1.5 | v2 候选：放量统一为当日量 ≥ 前 5 日均量 1.5 倍；只在 calib_probe 对照，不进 live | candidate | 未校准 |
 | `b1_structure` | `NOW_V2_MAX_GAIN_PCT` | 50.0 | v2 候选：上涨段累计涨幅 >50% 判一波流；只在 calib_probe 对照，不进 live | candidate | 未校准 |
 | `b1_structure` | `NOW_V2_MIN_GAIN_PCT` | 0.0 | v2 候选：明显上涨段下限，不足则 insufficient；只在 calib_probe 对照，不进 live | candidate | 未校准 |
-| `b1_structure` | `LIQUIDITY_WIN` | 20 | 待回测：近N日均成交额窗口 | candidate | 未校准 |
-| `b1_structure` | `STOP_LOOKBACK` | 10 | 建议止损位：近10日最低价 | candidate | 未校准 |
+| `b1_structure` | `LIQUIDITY_WIN` | 20 | 近 20 日日均成交额；滚动均值，只作展示 | candidate | 无需 A 类（owner 2026-11-15） |
+| `b1_structure` | `STOP_LOOKBACK` | 10 | 止损参考位：近 10 日最低价；滚动极值，只作展示 | candidate | 无需 A 类（owner 2026-11-15） |
 | `capital_intent` | `CAP_STRONG` | 5 | - | candidate | 未校准 |
 | `capital_intent` | `CAP_MID` | 2 | - | candidate | 未校准 |
 | `distribution` | `DIST_RECENT` | 5 | 待回测：出货形态观察最近N根 | active；R2 | 未校准 |
@@ -238,14 +245,14 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `ignition` | `PULLBACK_VOL_RATIO` | 0.85 | 待回测：回调段/上涨段均量上限 | candidate | 未校准 |
 | `macd_technics` | `MACD_SWING_FRACTAL` | 2 | 摆动高/低点分型：左右各 N 根确认 | candidate | 未校准 |
 | `macd_technics` | `MACD_DIV_LOOKBACK` | 60 | 背离观察窗口（日） | candidate | 未校准 |
-| `macd_technics` | `MACD_OVEREXT_PCTL` | 0.9 | 开口/空间拐离：/DIF/ 近 120 日分位上限 | candidate | 未校准 |
-| `macd_technics` | `MACD_OVEREXT_WIN` | 120 | 拐离分位窗口（日） | candidate | 未校准 |
+| `macd_technics` | `MACD_OVEREXT_PCTL` | 0.9 | 开口/空间拐离：DIF 分位与柱体纯数值比较 | candidate | 无需 A 类（owner 2026-11-15） |
+| `macd_technics` | `MACD_OVEREXT_WIN` | 120 | 拐离分位窗口；纯数值比较 | candidate | 无需 A 类（owner 2026-11-15） |
 | `volume_detectors` | `VOLUME_SUSTAIN_WINDOW` | 13 | 量能持续性窗口（CZ §14.6：7-13日） | candidate | 未校准 |
 | `volume_detectors` | `VOLUME_SUSTAIN_MIN_POST_DAYS` | 7 | 待回测参数：峰值日后确认主线最少观察日数 | candidate | 未校准 |
 | `volume_detectors` | `VOLUME_SUSTAIN_RATIO` | 0.55 | 峰值55%（CZ §14.6） | candidate | 未校准 |
 | `volume_detectors` | `VOLUME_SUSTAIN_RETREAT_DAYS` | 3 | 连续N日<峰值55%判撤退（CZ §14.6） | candidate | 未校准 |
-| `volume_detectors` | `LEADER_VOL_BASE_DAYS` | 20 | 龙头量能基准窗口（CZ §九） | candidate | 未校准 |
-| `volume_detectors` | `LEADER_VOL_RATIO` | 1.7 | 地量1.7倍（CZ §九） | candidate | 未校准 |
+| `volume_detectors` | `LEADER_VOL_BASE_DAYS` | 20 | 龙头量能：连续 3 根与滚动最低量比较 | candidate | 无需 A 类（owner 2026-11-15） |
+| `volume_detectors` | `LEADER_VOL_RATIO` | 1.7 | 龙头量能倍数；纯数值比较 | candidate | 无需 A 类（owner 2026-11-15） |
 | `volume_detectors` | `THREE_LOWS_DRAWDOWN_PCT` | 40.0 | 待回测参数：三低之低价格（自250日高点回撤%） | candidate | 未校准 |
 | `volume_detectors` | `BOTTOM_VOL_RATIO` | 2.0 | 待回测参数：底部巨量（≥250日均量×2，CZ §14.6） | candidate | 未校准 |
 | `volume_detectors` | `BOTTOM_NO_NEW_LOW_DAYS` | 20 | 待回测参数：不再创新低观察窗口 | candidate | 未校准 |

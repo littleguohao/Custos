@@ -58,12 +58,9 @@ MODULES: dict[str, dict[str, Any]] = {
     "trend_box": {
         "defmod": "custos.pipeline.market_timing.technical_monitor",
         "eval": "technical_monitor",
-        "fields": ["trend.state", "box_20d.position", "box_60d.position"],
+        # owner 2026-11-15：20/60 日箱体位置只是收盘与滚动高低分位的比较，退出校准。
+        "fields": ["trend.state"],
         "params": [
-            "BOX_UPPER_Q",
-            "BOX_LOWER_Q",
-            "BOX_SHORT",
-            "BOX_LONG",
             "TREND_MA_FAST",
             "TREND_MA_SLOW",
             "TREND_FAST_SLOPE_BARS",
@@ -72,24 +69,30 @@ MODULES: dict[str, dict[str, Any]] = {
     },
     "b1_thresholds": {
         "defmod": "custos.core.b1_thresholds",
-        # owner 2026-11-14：周 J 固定为纯数值比较 weekly_j < 13，退出 A 类人工校准；
-        # 不进抽样、owner 正确率或参数改向票。live 判定不变。
-        "fields": [
-            "patterns.j_low",
-            "patterns.reversal_k_candidate",
-            "patterns.volume_contraction",
-        ],
+        # 周 J、日 J、极致缩量均为纯数值比较，退出 A 类人工校准；反转 K 是复合形态，保留。
+        "fields": ["patterns.reversal_k_candidate"],
     },
     # owner 2026-11-14：BBI 与 20 日相对上证强度均为确定性数值比较，
     # 退出 A 类人工校准；不再提供 entry_patterns 抽检入口。live 判定不变。
     "b1_structure": {
         "defmod": "custos.core.factors.b1_structure",
+        # 止损参考价（滚动最低）与流动性（滚动均值）退出；其余为复合形态。
         "fields": [
             "non_one_wave.status",
             "repair_signals.signals",
             "five_day_entry.hit",
-            "stop_loss_ref.price",
-            "liquidity.avg_amount_yi",
+        ],
+        "params": [
+            "NOW_MILD_VOL_BURST",
+            "NOW_BEAR_DROP_PCT",
+            "NOW_BEAR_VOL_RATIO",
+            "NOW_PULLBACK_VOL_RATIO",
+            "NOW_TOP_ZONE",
+            "REPAIR_J_PREV_MAX",
+            "REPAIR_VOL_SHRINK",
+            "REPAIR_CHANGE_PCT",
+            "FIVE_DAY_SPIKE_RATIO",
+            "FIVE_DAY_SPIKE_WINDOW",
         ],
     },
     "b1_structure_v2": {  # v0.520 候选对照（owner 2026-11-13 校准确认后的非一波流 v2）
@@ -99,11 +102,21 @@ MODULES: dict[str, dict[str, Any]] = {
     },
     "volume_detectors": {
         "defmod": "custos.core.factors.volume_detectors",
+        # 龙头量能只是连续 3 根与滚动最低量比较，退出；其余保留时间序列 / 多条件形态。
         "fields": [
             "volume_sustain.status",
-            "leader_volume.hit",
             "three_lows.hit",
             "bottom_volume.hit",
+        ],
+        "params": [
+            "VOLUME_SUSTAIN_WINDOW",
+            "VOLUME_SUSTAIN_MIN_POST_DAYS",
+            "VOLUME_SUSTAIN_RATIO",
+            "VOLUME_SUSTAIN_RETREAT_DAYS",
+            "THREE_LOWS_DRAWDOWN_PCT",
+            "BOTTOM_VOL_RATIO",
+            "BOTTOM_NO_NEW_LOW_DAYS",
+            "CZ_MIN_BARS",
         ],
     },
     "ignition": {
@@ -112,13 +125,13 @@ MODULES: dict[str, dict[str, Any]] = {
     },
     "macd_technics": {
         "defmod": "custos.core.factors.macd_technics",
+        # zone / overextended 只看 MACD 数值、分位和柱体比较，退出；背离与三峰形态保留。
         "fields": [
-            "macd_technics.zone",
             "macd_technics.bottom_divergence.hit",
             "macd_technics.top_divergence.hit",
             "macd_technics.three_peaks.hit",
-            "macd_technics.overextended.hit",
         ],
+        "params": ["MACD_SWING_FRACTAL", "MACD_DIV_LOOKBACK"],
     },
     "distribution": {
         "defmod": "custos.core.factors.distribution",
