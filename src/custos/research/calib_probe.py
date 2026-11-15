@@ -125,13 +125,20 @@ MODULES: dict[str, dict[str, Any]] = {
     },
     "macd_technics": {
         "defmod": "custos.core.factors.macd_technics",
-        # zone / overextended 只看 MACD 数值、分位和柱体比较，退出；背离与三峰形态保留。
+        # owner 2026-11-15：zone / overextended 恢复抽检，供 owner 逐项复核。
         "fields": [
+            "macd_technics.zone",
             "macd_technics.bottom_divergence.hit",
             "macd_technics.top_divergence.hit",
             "macd_technics.three_peaks.hit",
+            "macd_technics.overextended.hit",
         ],
-        "params": ["MACD_SWING_FRACTAL", "MACD_DIV_LOOKBACK"],
+        "params": [
+            "MACD_SWING_FRACTAL",
+            "MACD_DIV_LOOKBACK",
+            "MACD_OVEREXT_PCTL",
+            "MACD_OVEREXT_WIN",
+        ],
     },
     "distribution": {
         "defmod": "custos.core.factors.distribution",
@@ -1028,11 +1035,11 @@ FIELD_DEF: dict[str, str] = {
     "ignition.hit": "放量点火：前段缩量之后，出现放量收阳的启动 K 线",
     "pullback_shrink.hit": "回调缩量企稳：自窗口高点回撤，回调段缩量，收盘守住多空线",
     "b1_ignition.hit": "B1 点火：B1 低位之后出现放量启动 K 线",
-    "macd_technics.zone": "MACD 所处区域（DIF / DEA 在 0 轴上方、下方或附近）",
+    "macd_technics.zone": "MACD 区间：0=双线非水上；1=水上红柱扩张（h0≥h1）；2=水上红柱收缩；3=水上柱体≤0",
     "macd_technics.bottom_divergence.hit": "MACD 底背离：价格创新低而 MACD 没有创新低",
     "macd_technics.top_divergence.hit": "MACD 顶背离：价格创新高而 MACD 没有创新高",
     "macd_technics.three_peaks.hit": "MACD 三峰形态是否出现",
-    "macd_technics.overextended.hit": "MACD 是否过度伸展（偏离过大）",
+    "macd_technics.overextended.hit": "MACD 过度伸展：|DIF| 近 120 根分位 ≥90%，且当根柱体与 DIF 同号（至少 20 根）",
     "distribution.risk_level": "主力出货风险等级（B1 §七.3）：none=无命中；watch=至少 1 腿但未达 high；high=命中①/②任一或同时 ≥2 腿",
     "distribution_confirm.revoked": "①/②出货信号的撤销名单；空名单只表示无撤销或不适用，不是普通漏判",
     "wave.wave_type": "拉升波三分类（B1 §四.0）：冲刺波 sprint / 拉升波 rally / 建仓波 buildup，冲突时取保守",

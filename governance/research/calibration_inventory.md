@@ -116,6 +116,11 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 - 保留：反转 K、修复信号、非一波流、量能持续、三低、底部巨量、点火、MACD 背离、三打白骨精、趋势状态、N 结构、出货、波段及资金意图复合评分。live 判定与打分均不变。
 - 受影响旧图集只留档并标注退出项，不重标、不盲标、不进 owner 正确率或参数改向票。
 
+### MACD 两项恢复（2026-11-15，owner 复核后拍板）
+
+- 恢复 `macd_technics.zone`、`macd_technics.overextended.hit` 及 `MACD_OVEREXT_PCTL/WIN` 敏感性扫描，供 owner 逐图核对；其余 7 个纯数值退出项不变，live 不变。
+- `macd_technics__mining_v1` 图集恢复可标注，提示改为具体口径：zone 0/1/2/3 的水上与柱体状态、|DIF| 近 120 根分位 ≥90% 且柱体与 DIF 同号。
+
 ### b1_structure（2026-11-13，mining_v1 重标 105 张 → v2 候选 `708e6ed`）
 
 - owner 判断评估（口径 A / D）：五日战法判错 15 条全部站得住（检测器过松）；repair_signals 6 条判定点反了，owner 确认后更正（`labels-3.csv`）；
@@ -245,8 +250,8 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `ignition` | `PULLBACK_VOL_RATIO` | 0.85 | 待回测：回调段/上涨段均量上限 | candidate | 未校准 |
 | `macd_technics` | `MACD_SWING_FRACTAL` | 2 | 摆动高/低点分型：左右各 N 根确认 | candidate | 未校准 |
 | `macd_technics` | `MACD_DIV_LOOKBACK` | 60 | 背离观察窗口（日） | candidate | 未校准 |
-| `macd_technics` | `MACD_OVEREXT_PCTL` | 0.9 | 开口/空间拐离：DIF 分位与柱体纯数值比较 | candidate | 无需 A 类（owner 2026-11-15） |
-| `macd_technics` | `MACD_OVEREXT_WIN` | 120 | 拐离分位窗口；纯数值比较 | candidate | 无需 A 类（owner 2026-11-15） |
+| `macd_technics` | `MACD_OVEREXT_PCTL` | 0.9 | 开口/空间拐离：DIF 分位与柱体比较；已恢复抽检 | candidate | 进行中（owner 2026-11-15 恢复） |
+| `macd_technics` | `MACD_OVEREXT_WIN` | 120 | 拐离分位窗口；已恢复抽检 | candidate | 进行中（owner 2026-11-15 恢复） |
 | `volume_detectors` | `VOLUME_SUSTAIN_WINDOW` | 13 | 量能持续性窗口（CZ §14.6：7-13日） | candidate | 未校准 |
 | `volume_detectors` | `VOLUME_SUSTAIN_MIN_POST_DAYS` | 7 | 待回测参数：峰值日后确认主线最少观察日数 | candidate | 未校准 |
 | `volume_detectors` | `VOLUME_SUSTAIN_RATIO` | 0.55 | 峰值55%（CZ §14.6） | candidate | 未校准 |

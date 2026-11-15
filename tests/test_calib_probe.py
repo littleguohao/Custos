@@ -42,9 +42,11 @@ def test_simple_numeric_fields_and_their_sensitivity_params_removed():
             "bottom_volume.hit",
         ],
         "macd_technics": [
+            "macd_technics.zone",
             "macd_technics.bottom_divergence.hit",
             "macd_technics.top_divergence.hit",
             "macd_technics.three_peaks.hit",
+            "macd_technics.overextended.hit",
         ],
     }
     for module, fields in expected.items():
@@ -63,10 +65,9 @@ def test_simple_numeric_fields_and_their_sensitivity_params_removed():
         "LEADER_VOL_BASE_DAYS",
         "LEADER_VOL_RATIO",
     }
-    assert not set(cp.param_names("macd_technics")) & {
-        "MACD_OVEREXT_PCTL",
-        "MACD_OVEREXT_WIN",
-    }
+    assert {"MACD_OVEREXT_PCTL", "MACD_OVEREXT_WIN"} <= set(
+        cp.param_names("macd_technics")
+    )
 
 
 def _df(seed=0, n=700, start="2014-01-02"):
