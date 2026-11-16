@@ -22,7 +22,13 @@
 | 118 | R49 逆向画像跑数：工具已落地 v0.443（`tail_explore_study`）；与 R47/R48 同排第二批，命令见 runbook「第二批预告」；线索两窗复现 + 过 q95 者另行预注册 | P2 | 生产机 | 排在 #121 定义校准之后（owner 2026-11-04）；之后 r49_v1 + 摘要入库 | [R49](governance/research/R49_tail_reverse_profile.md) |
 | 119 | R50 ≥20% 波段逆向匹配工具 `swing_recall_study`（ZigZag 波段 + B1 L1~L4 / QN 12 门召回、精度 lift、提前量、漏斗、兑现）；排期在第二批之后最后跑 | P3 | 生产机 | 排在第二批之后（#121 校准后），用 v0.469+ 代码跑 r50_v1（`swing_recall_study --tag r50_v1`）+ 摘要入库 | [R50](governance/research/R50_swing_winner_recall.md) |
 | 120 | holdout 跟踪月报：汇总选股练习台账 / plan 影子台账 / trade_counterfactual，按月报现行规则在 2026-09-05 后的表现（大单率 / 大亏率 / 胜率 / 盈亏比 / 与回测分布对照）；纯描述、不作判据、不改规则 | P2 | 生产机 | 工具已落地 v0.455（月报附录 + 伴生 JSON，契约已登记）；生产机月度节点跑 `monthly_review` 自动生成，首月（2026-10）复核格式与读数 | owner 2026-10-26 |
-| 121 | 信号参数**定义校准**（A 类：检测器是否测对形态，不拿收益寻优；B 类效果校准待 A 全部完成再议）：P0 74 个参数 / 9 个模块优先，逐模块抽检图 + owner 标注 + 敏感性描述；定义改动按清单登记受影响 R 重跑 | P0 | owner | MACD 平台候选已定往回匹配三组（v0.512）；持仓 v3cand 图集已出（292 bar / 1375 行，2026-11-14，0 错）→ owner 标 `n_structure__holdings_v3cand`，再标 mining_v1（b1_thresholds 起）→ ingest 汇总 → 评判断正确率（口径清单第 6 条）→ 定 v(n+1) | [清单](governance/research/calibration_inventory.md) |
+| 121 | 信号参数**定义校准**（A 类：检测器是否测对形态，不拿收益寻优；B 类效果校准待 A 全部完成再议）：P0 74 个参数 / 9 个模块优先，逐模块抽检图 + owner 标注 + 敏感性描述；定义改动按清单登记受影响 R 重跑 | P0 | owner | ① 标 `b1_structure_v2__mining_v2cand`（36 张）→ 与 #124 一起升版；② 生产机标持仓 `n_structure__holdings_v3cand`；③ 其余 mining_v1 按 #123 顺序标 → ingest → 评 owner 判断正确率（清单第 6 条）→ 定 v(n+1) | [清单](governance/research/calibration_inventory.md) |
+| 123 | 定义校准扩展批（A 类，owner 2026-11-16）：①macd_technics（最需对齐，mining_v1 已有 120 张）②阴阳量 + 红肥绿瘦合并为一个定义（窗口 / 底部判定 / 实体与量的比较口径待 owner 定）后校准、拟进打分 ③底部异动 SG 与异动后 B1 SB 定义重叠，校准后定合并 ④s_shape、perfect_b1_fit 重新校准 | P1 | coder | 先出 ② 的合并定义草案给 owner 定，再出 ②③④ 抽检图集；①直接标现有图集 | owner 2026-11-16 |
+| 124 | B1 打分 / 分层收口（live 语义变更，一次升版）：五日战法权重 8→0；去掉 20 日相对强度（+15）与资金意图轴，改用 B1 原生 QSX>DKX；去掉 sector_phase；与 b1_structure v2 同次 `--bump`，登记受影响 R、提醒 V0 分缓存失效 | P0 | coder | 先出设计稿：资金意图轴去掉后 A~D 分层怎么定（QSX>DKX 作第二轴？）+ 新旧分层在挖掘段的差异清单，owner 定后实现 | owner 2026-11-13 / 11-16 |
+| 125 | 板块热度（owner 2026-11-16）：板块统一用通达信「细分行业」；取最近半个月（约 10 个交易日）最活跃的细分行业，候选表标热门板块；只作标注、不进判定（进判定须另立研究） | P2 | coder | 先定「最活跃」口径（成交额占比变化 / 涨幅排名 / 资金流）给 owner 看，再接 1800 候选表 | owner 2026-11-16 |
+| 126 | 择时简化（owner 2026-11-16）：market_timing_scorer 七模块评分改为只按 0AMV 分两档——做多 = 进攻、空头 = 防守，各给一个仓位区间；chief_decision 的市场状态 / 建议仓位随之改 | P1 | owner | owner 定两档仓位区间数值后 coder 实现（live 语义变更） | owner 2026-11-16 |
+| 127 | 研究标注逐项去留：RD（RSI 深水）R21/R27 跨窗成立、已作门内提醒；RS 否决；RV 主窗证伪；R★ 低频线索；QG 计数零筛选力（R23）；SB / PB 无加值（R27）；B2 与 R7 口径张力 | P2 | owner | owner 逐项定保留 / 合并 / 去掉，coder 改 signal_labels | owner 2026-11-16；R21 / R23 / R27 |
+| 128 | 五日战法作持仓离场规则（收盘守 5 日线 7.5% 内持有，跌破减半）与现行 BBI 跌破 2 根止盈对照 | P3 | 挂起 | 第二批（R47 等出场研究）之后再议，届时预注册 | owner 2026-11-16 |
 
 ## 已闭环索引
 
