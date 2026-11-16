@@ -312,6 +312,109 @@ def bull_bear_volume(df, window: int = 10) -> dict[str, Any]:
         return {"available": False, "error": f"{type(exc).__name__}:{str(exc)[:80]}"}
 
 
+# ---- 红肥绿瘦 v2 候选（阴阳量 + 红肥绿瘦合并；owner 2026-11-16 定；只在 calib_probe 对照，未接 live）----
+RG2_WINDOW = 30  # 观察窗 N=30 根
+RG2_VOL_K = 1.0  # 阳线总量 > 阴线总量 × k
+RG2_BURST = 3.0  # 爆量 = 单根量 ≥ 窗口均量 × 此值；爆量根不参与三项比较，单独标注
+RG2_STAGE_LOOKBACK = 120  # 阶段高点回看根数
+RG2_BOTTOM_DD_PCT = 30.0  # 阶段底部 = 收盘距近 120 根最高价回撤 ≥ 此值（待校准）
+RG2_TOP_NEAR_PCT = 5.0  # 阶段顶部 = 收盘距近 120 根最高价 ≤ 此值
+
+
+def _rg2_stage(close, high, t: int) -> str:
+    lo = max(0, t - RG2_STAGE_LOOKBACK + 1)
+    hh = float(high[lo : t + 1].max())
+    if hh <= 0:
+        return "mid"
+    dd = (1 - close[t] / hh) * 100
+    if dd >= RG2_BOTTOM_DD_PCT:
+        return "bottom"
+    if dd <= RG2_TOP_NEAR_PCT:
+        return "top"
+    return "mid"
+
+
+def detect_red_green_v2(df, code: str = "") -> dict[str, Any]:
+    """红肥绿瘦 v2（候选）：近 30 根剔除爆量根后，阳线「总量 > 阴线总量 ∧ 平均实体更大 ∧ 根数更多」⇒ 阳占优；
+    三项全反 ⇒ 阴占优。**阶段底部**（距近 120 根最高回撤 ≥30%）的阳占优 = 红肥绿瘦（好）；
+    **阶段顶部**（距最高 ≤5%）的阴占优 = 绿肥红瘦（坏）；其余 = 中性（``dominance`` 仍如实报）。
+    爆量根（量 ≥ 窗口均量 3 倍）按出现时的阶段标注：底部爆量阴线 = 好、顶部爆量阴线 = 坏、
+    底部爆量阳线 / 单根爆量阳线 = 标注。绝不 raise。"""
+    try:
+        close, high, _low, vol = _ohlcv_arrays(df)
+        open_ = df["open"].astype(float).to_numpy()
+        n = len(df)
+        if n < RG2_WINDOW + 1:
+            return {
+                "available": False,
+                "status": "neutral",
+                "reason": f"少于{RG2_WINDOW + 1}根K线（{n}）",
+            }
+        seg = range(n - RG2_WINDOW, n)
+        vmean = float(vol[n - RG2_WINDOW :].mean())
+        burst = [t for t in seg if vmean > 0 and vol[t] >= RG2_BURST * vmean]
+        rest = [t for t in seg if t not in burst]
+        bulls = [t for t in rest if close[t] > open_[t]]
+        bears = [t for t in rest if close[t] < open_[t]]
+        body = lambda t: abs(close[t] / open_[t] - 1) * 100 if open_[t] else 0.0  # noqa: E731
+        bv, sv = float(sum(vol[t] for t in bulls)), float(sum(vol[t] for t in bears))
+        bb = sum(body(t) for t in bulls) / len(bulls) if bulls else 0.0
+        sb = sum(body(t) for t in bears) / len(bears) if bears else 0.0
+        if bulls and bv > sv * RG2_VOL_K and bb > sb and len(bulls) > len(bears):
+            dominance = "bull"
+        elif bears and sv > bv * RG2_VOL_K and sb > bb and len(bears) > len(bulls):
+            dominance = "bear"
+        else:
+            dominance = "even"
+        stage = _rg2_stage(close, high, n - 1)
+        status = (
+            "red_fat"
+            if dominance == "bull" and stage == "bottom"
+            else ("green_fat" if dominance == "bear" and stage == "top" else "neutral")
+        )
+        tags = []
+        for t in burst:
+            st, up = _rg2_stage(close, high, t), close[t] >= open_[t]
+            tags.append(
+                {
+                    "bars_ago": n - 1 - t,
+                    "kind": ("底部爆量阳线" if up else "底部爆量阴线")
+                    if st == "bottom"
+                    else (
+                        ("顶部爆量阳线" if up else "顶部爆量阴线")
+                        if st == "top"
+                        else ("单根爆量阳线" if up else "单根爆量阴线")
+                    ),
+                    "tone": "good"
+                    if (st == "bottom" and not up)
+                    else ("bad" if (st == "top" and not up) else "note"),
+                    "vol_ratio": round(float(vol[t] / vmean), 2),
+                }
+            )
+        return {
+            "available": True,
+            "status": status,
+            "dominance": dominance,
+            "stage": stage,
+            "bursts": tags,
+            "detail": {
+                "bull_n": len(bulls),
+                "bear_n": len(bears),
+                "bull_vol": round(bv, 0),
+                "bear_vol": round(sv, 0),
+                "bull_body": round(bb, 3),
+                "bear_body": round(sb, 3),
+                "excluded_burst": len(burst),
+            },
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "available": False,
+            "status": "neutral",
+            "error": f"{type(exc).__name__}:{str(exc)[:80]}",
+        }
+
+
 def detect(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
     """规范入口（v0.218…B2，TODO #67）：两项底部形态检测的打包门面。
 

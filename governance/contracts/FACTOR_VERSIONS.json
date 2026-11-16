@@ -111,12 +111,17 @@
     },
     "bottom_patterns": {
       "version": 1,
-      "source_digest": "d996f400e890dd95cb08",
+      "source_digest": "30011df91c0a4bd4d05e",
       "history": [
         {
           "version": 1,
           "date": "2026-11-03",
           "change": "初始版本（定义校准前基线，TODO #121）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-16",
+          "refactor": "新增 detect_red_green_v2 候选（未接 live）"
         }
       ]
     },

@@ -106,6 +106,11 @@ MODULES: dict[str, dict[str, Any]] = {
         "eval": "signal",
         "fields": ["signal.surge_then_b1"],
     },
+    "red_green_v2": {  # 阴阳量 + 红肥绿瘦合并定义候选（owner 2026-11-16）
+        "defmod": "custos.core.factors.bottom_patterns",
+        "eval": "red_green_v2",
+        "fields": ["red_green_v2.status"],
+    },
     "b1_structure_v2": {  # v0.520 候选对照（owner 2026-11-13 校准确认后的非一波流 v2）
         "defmod": "custos.core.factors.b1_structure",
         "eval": "b1_structure_v2",
@@ -372,6 +377,12 @@ def evaluate(
                 for k in keys
             }
         }
+        return {f: field_value(an, f) for f in fields}
+    if spec is not None and spec["eval"] == "red_green_v2":
+        from custos.core.factors import bottom_patterns as bp  # noqa: PLC0415
+
+        with patched(defmod, overrides):
+            an = {"red_green_v2": bp.detect_red_green_v2(df.reset_index(drop=True))}
         return {f: field_value(an, f) for f in fields}
     if spec is not None and spec["eval"] == "b1_structure_v2":
         from custos.core.factors import b1_structure as bs  # noqa: PLC0415
@@ -1053,6 +1064,7 @@ FIELD_DEF: dict[str, str] = {
     "patterns.relative_strength_strong": "近 20 日涨幅是否明显强于上证指数（相对强势）",
     "signal.rsi_deep_oversold": "研究标注 RD（RSI 深水区）：RSI14 < 25（rsi_state.DEEP_OVERSOLD），R21 / R27 跨窗成立的唯一 RSI 标注",
     "signal.surge_then_b1": "研究标注 SB（异动后的 B1）：近 60 根内出现过底部异动（巨量点火：量 ≥ 前 20 日均量 3 倍且涨幅 ≥5%，量随价升），且当根在 B1 区间（J<13）",
+    "red_green_v2.status": "红肥绿瘦 v2 候选（阴阳量 + 红肥绿瘦合并，owner 2026-11-16）：近 30 根剔除爆量根（量 ≥ 窗口均量 3 倍）后，阳线总量 > 阴线总量、阳线平均实体更大、阳线根数更多 = 阳占优；三项全反 = 阴占优。阶段底部（收盘距近 120 根最高回撤 ≥30%）+ 阳占优 = red_fat（红肥绿瘦）；阶段顶部（距最高 ≤5%）+ 阴占优 = green_fat（绿肥红瘦）；其余 neutral",
     "non_one_wave_v2.status": "非一波流 v2 候选（owner 2026-11-13）：同 v1 三条件，另 ①放量统一为 ≥前 5 日均量 1.5 倍 ②顶部 / 次高点前后 3 日的放量大阴（阴线跌 ≥3%，量 ≥前 5 日均量 1.5 倍且大于区内最大阳线量）撤销 ③收盘跌破启动低点且放量 = 放量破位，撤销 ④上涨段涨幅 >50% = 一波流，不能判确认（证据不足）",
     "non_one_wave.status": "非一波流（B1 §四），看最近一段上涨 + 回调：①上涨段温和放量（单日量 < 段均量 2 倍）②阶段高点前后 3 日无放量大阴（跌 >3% 且量 > 前 5 日均量 1.5 倍）③回调段缩量（均量 < 上涨段 0.7 倍）。confirmed = 三条全满足；revoked = 出现顶部放量大阴或回调放量破位；insufficient = 其余或没有完整上涨 + 回调段",
     "repair_signals.signals": "B1 修复信号（B1 §四.2）：J 拐头向上（昨日 J≤20 今日上拐）、缩量止跌（量比≤0.7 且涨跌幅在 ±2% 内）是否出现",
