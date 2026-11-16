@@ -78,7 +78,7 @@ FIVE_DAY_SPIKE_WINDOW = 7  # 五日战法：巨量观察窗口（CZ §十六）
 # 方向A(2026-07-23)：全市场回测证实突破式打分非短周期 alpha，转接正交维度。
 LIQUIDITY_WIN = 20  # 待回测：近N日均成交额窗口
 
-STOP_LOOKBACK = 10  # 建议止损位：近10日最低价
+STOP_LOOKBACK = 10  # 近10日最低价。🔄 v0.528 起 live 不再使用（owner 2026-11-16），只留研究侧 R41 as-of 重算
 
 
 def _now_top_zone_scan(close, vol, i_high: int, n: int):

@@ -97,7 +97,7 @@ BBI 破位、0AMV 空头区间反弹减仓最高优先等）——它们是**持
 口径见 [`../b1/01_swing_rules.md`](01_swing_rules.md)。
 
 **持仓计划持久化**（v0.82）：买入导入时把止损/止盈计划落盘 `data/trades/position_plans.json`
-（止损价取 ≤ 买入日最近 stock_pool 的 `stop_loss_ref`，兜底 entry×0.93），14:45/17:00 报告
+（止损价 = entry×0.93，买入价固定 −7%；🔄 原「取 ≤ 买入日最近 stock_pool 的 `stop_loss_ref`（近 10 日最低价）」v0.528 起已失效，在持遗留计划下次同步时迁移），14:45/17:00 报告
 影子双跑对照（v0.83）；是否并入正式判定的判据已改写（TODO #60：实现一致性 + K=20 独立事件），现状见上「二、做多区间 · 仓位」。
 
 ### 持仓状态机信号（`pipeline/holdings/b1_holding_state.py`，live 每日判定）

@@ -673,10 +673,10 @@ def apply_risk_downgrades(amv_state, base_bucket, cand, rules, sector_score_avai
 def _cap_stop_loss_and_bear(
     risk_flags: list, bucket: str, cand: dict, amv_state
 ) -> str:
-    """止损位缺失 → 封顶 B；0AMV 空头 → 封顶 B（均无 rules 开关的硬否决）。"""
-    if not (cand.get("stop_loss_ref") or {}).get("price"):
-        risk_flags.append("no_stop_loss_ref")
-        bucket = cap_bucket(bucket, "B")
+    """0AMV 空头 → 封顶 B（无 rules 开关的硬否决）。
+
+    v0.528（owner 2026-11-16）：「止损位缺失 → 封顶 B」随 stop_loss_ref（近 10 日最低价）退出 live 一并删除——
+    live 止损是买入价固定 −7%，恒可定义。"""
     if amv_state == "空头":
         bucket = cap_bucket(bucket, "B")
     return bucket
@@ -989,7 +989,6 @@ def score_candidate(
         # 但本字典是显式白名单、此前不透传 ⇒ 实盘该列恒为「-」（旧观察区
         # watchlist_outside_gate 由 enrich 侧显式带 change_pct，无此问题）。
         "change_pct": cand.get("change_pct"),
-        "stop_loss_ref": cand.get("stop_loss_ref"),
         "is_holding": bool(cand.get("is_holding")),
         # 证据层透传段（顺序＝历史落盘字段顺序）：B1/CZ → 信号标注 → 指标/正交因子
         **_b1cz_passthrough(cand),

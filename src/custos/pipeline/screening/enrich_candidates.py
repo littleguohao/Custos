@@ -85,8 +85,6 @@ from custos.core.factors.volume_detectors import (  # noqa: E402
     check_volume_sustain,
 )
 from custos.core.factors.b1_structure import (  # noqa: E402
-    STOP_LOOKBACK,
-    _stop_ref,
     check_five_day_entry,
     check_liquidity,
     check_non_one_wave,
@@ -637,7 +635,6 @@ def _base_scalars(df, index_df) -> dict[str, Any]:
     change_pct = pct_change(float(last["close"]), prev_close, digits=2)
     amplitude_pct = amplitude_pct_of(last["high"], last["low"], prev_close)
     stock_ret20, index_ret20, rs_20d = _rs_20d_stats(df, index_df)
-    stop_ref = _stop_ref(df)
 
     daily_j = j.get("j") if j.get("available") else None
     j_low, vol_contraction, reversal_k = reversal_flags(
@@ -659,7 +656,6 @@ def _base_scalars(df, index_df) -> dict[str, Any]:
         "index_ret20": index_ret20,
         "rs_20d": rs_20d,
         "rs_strong": relative_strength_strong(rs_20d),
-        "stop_ref": stop_ref,
     }
 
 
@@ -762,7 +758,6 @@ def _assemble_metrics(
     stock_ret20 = base["stock_ret20"]
     index_ret20 = base["index_ret20"]
     rs_20d = base["rs_20d"]
-    stop_ref = base["stop_ref"]
     zx = ev["zx"]
     pullback_shrink = ev["pullback_shrink"]
     macd_technics = ev["macd_technics"]
@@ -781,9 +776,6 @@ def _assemble_metrics(
         "stock_ret_20d_pct": round(stock_ret20, 2) if stock_ret20 is not None else None,
         "index_ret_20d_pct": round(index_ret20, 2) if index_ret20 is not None else None,
         "relative_strength_20d_pp": round(rs_20d, 2) if rs_20d is not None else None,
-        "stop_loss_ref": {"price": stop_ref, "basis": f"近{STOP_LOOKBACK}日最低价"}
-        if stop_ref
-        else None,
         "patterns": {
             "bbi_above": bbi_above(bbi),
             "j_low": bool(base["j_low"]),

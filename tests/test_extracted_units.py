@@ -50,10 +50,10 @@ class TestScoreCandidateUnits:
         flags, bucket, _wt, _dist = self._apply({"stop_loss_ref": {"price": 9.0}})
         assert bucket == "A" and flags == []
 
-    def test_missing_stop_loss_flags(self):
-        """⚠️ 没有止损参考价必须留痕 —— 买入计划缺止损位不得放行。"""
+    def test_missing_stop_loss_no_flag_v0528(self):
+        """v0.528：近 10 日最低价退出 live ⇒ 缺 stop_loss_ref 不再留标记（止损恒为买入价 −7%）。"""
         flags, _b, _w, _d = self._apply({})
-        assert any("stop" in f or "止损" in f for f in flags), flags
+        assert not any("stop" in f or "止损" in f for f in flags), flags
 
     def test_bear_regime_downgrades(self):
         _f, bucket, _w, _d = self._apply({"stop_loss_ref": {"price": 9.0}}, amv="空头")

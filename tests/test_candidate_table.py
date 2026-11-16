@@ -329,7 +329,7 @@ def _rows(md):
     out = {}
     for ln in sec.splitlines():
         cells = [c.strip() for c in ln.split("|")[1:-1]]
-        if len(cells) == 12 and cells[0][:1].isdigit():
+        if len(cells) == 11 and cells[0][:1].isdigit():  # v0.528 去「建议止损位」列
             out[cells[0]] = cells
     return out
 
@@ -444,4 +444,5 @@ def test_legend_covers_every_header_column():
         ln for ln in md.splitlines() if ln.startswith("| 代码 | 名称 | 技术分")
     )
     cols = [c.strip() for c in header.split("|")[1:-1]]
-    assert set(cols) - {"代码", "名称", "建议止损位"} <= keys
+    assert "建议止损位" not in cols  # v0.528：近 10 日最低价退出 live
+    assert set(cols) - {"代码", "名称"} <= keys

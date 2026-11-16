@@ -53,7 +53,7 @@ def _tmp(tmp_path, monkeypatch):
 
 class TestNewPosition:
     def test_candidate_stop_from_latest_pool(self, _tmp):
-        """新建仓：止损价取 ≤ 买入日最近一份 stock_pool 的 stop_loss_ref。"""
+        """新建仓：v0.528 起止损恒为买入价 −7%（池里的 stop_loss_ref 不再采用）。"""
         (_tmp.pool / "2026-08-18_stock_pool.json").write_text(
             json.dumps(
                 {
@@ -70,12 +70,10 @@ class TestNewPosition:
         )
         plans = pp.sync_plans(_trades([_buy()]), [], [_pos()])
         plan = plans["positions"]["000001"]
-        assert plan["source"] == "candidate:2026-08-18"
-        assert plan["stop"] == {
-            "rule_id": "stock_pool_stop_ref",
-            "price": 9.5,
-            "basis": "破10日最低价",
-        }
+        # v0.528（owner 2026-11-16）：池里有 stop_loss_ref 也不再采用，止损恒为买入价 −7%
+        assert plan["source"] == "default"
+        assert plan["stop"]["rule_id"] == "loss_reduction"
+        assert plan["stop"]["price"] == pytest.approx(9.3)
         assert plan["entry_date"] == "2026-08-19"
         assert plan["entry_price"] == 10.0
         # enabled 止盈方案快照（exit_rules 默认 scale_out_two_bull 在跑）
@@ -182,8 +180,8 @@ class TestShareCreditAndCorrupt:
         )
         plans = pp.sync_plans(_trades([_buy()]), [], [_pos()])
         plan = plans["positions"]["000001"]
-        assert plan["source"] == "candidate:2026-08-17"
-        assert plan["stop"]["price"] == 9.5
+        assert plan["source"] == "default"  # v0.528：不再读池
+        assert plan["stop"]["price"] == pytest.approx(9.3)
 
     def test_pool_list_top_level_only_falls_back_to_default(self, _tmp):
         """只有坏形状池文件：(data or {}).get 的 AttributeError 不炸，走 default 兜底。"""
@@ -264,3 +262,26 @@ def test_hk_position_gets_no_plan(tmp_path, monkeypatch):
     after = [{"代码": "002158", "名称": "医渡科技", "单位成本": 6.09, "market": "HK"}]
     plans = pp.sync_plans(trades, [], after)
     assert "002158" not in plans["positions"]
+
+
+def test_legacy_pool_stop_migrated_to_fixed_7pct_v0528(tmp_path, monkeypatch):
+    """v0.528：在持计划里遗留的 stock_pool_stop_ref 下次 sync 时迁为买入价 −7%，原值留 legacy_stop。"""
+    path = tmp_path / "plans.json"
+    legacy = {
+        "entry_date": "2026-08-19",
+        "entry_price": 10.0,
+        "source": "candidate:2026-08-18",
+        "stop": {
+            "rule_id": "stock_pool_stop_ref",
+            "price": 9.5,
+            "basis": "近10日最低价",
+        },
+    }
+    pp.save_plans({"positions": {"000001": legacy}, "archive": {}}, path)
+    empty = pd.DataFrame(columns=["成交日期", "代码", "交易类别"])
+    plans = pp.sync_plans(empty, [_pos()], [_pos()], path=path, pool_dir=tmp_path)
+    plan = plans["positions"]["000001"]
+    assert plan["stop"]["rule_id"] == "loss_reduction" and plan["stop"][
+        "price"
+    ] == pytest.approx(9.3)
+    assert plan["source"] == "default" and plan["legacy_stop"]["price"] == 9.5

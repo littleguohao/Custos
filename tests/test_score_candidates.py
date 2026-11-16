@@ -118,12 +118,14 @@ def test_bear_market_caps_pool_at_b_and_observe():
     assert scored["resonance"]["market_permission"] == "观察"
 
 
-def test_no_stop_loss_ref_cannot_enter_a():
-    scored = sc.score_candidate(
+def test_missing_stop_loss_ref_no_longer_caps_v0528():
+    """v0.528（owner 2026-11-16）：近 10 日最低价退出 live，缺 stop_loss_ref 不再封顶 B、不再打标记。"""
+    a = sc.score_candidate(
         _mk(TECH_STRONG, capital="strong", stop_price=None), SECTOR_STRONG, "做多"
     )
-    assert scored["bucket"] == "B"
-    assert "no_stop_loss_ref" in scored["risk_flags"]
+    b = sc.score_candidate(_mk(TECH_STRONG, capital="strong"), SECTOR_STRONG, "做多")
+    assert a["bucket"] == b["bucket"]
+    assert "no_stop_loss_ref" not in a["risk_flags"] and "stop_loss_ref" not in a
 
 
 def test_contract_required_fields():

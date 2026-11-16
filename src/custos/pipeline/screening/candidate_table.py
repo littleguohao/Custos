@@ -501,9 +501,9 @@ def _unified_table(lines, candidates, is_bear, watch, watch_capped, watch_all):
         lines.append("")
         return
     lines.append(
-        "| 代码 | 名称 | 技术分 | 资金意图 | 状态 | 触发 | 证据标记 | 研究标注 | 风险 | 板块 | 基本面 | 建议止损位 |"
+        "| 代码 | 名称 | 技术分 | 资金意图 | 状态 | 触发 | 证据标记 | 研究标注 | 风险 | 板块 | 基本面 |"
     )
-    lines.append("|---|---|---:|---|---|---|---|---|---|---|---|---:|")
+    lines.append("|---|---|---:|---|---|---|---|---|---|---|---|")
     for c in rows:
         sector = c.get("industry") or c.get("sector", "未知")
         state = (c.get("sector_heat_filter") or {}).get("sector_state")
@@ -517,8 +517,7 @@ def _unified_table(lines, candidates, is_bear, watch, watch_capped, watch_all):
             f" | {_signal_cell(c)}"
             f" | {'、'.join(c.get('risk_flags') or []) or '-'}"
             f" | {sector}{f'（{state}）' if state else ''}"
-            f" | {_fq_disp(c)}"
-            f" | {_fmt((c.get('stop_loss_ref') or {}).get('price'))} |"
+            f" | {_fq_disp(c)} |"
         )
     lines.append("")
 

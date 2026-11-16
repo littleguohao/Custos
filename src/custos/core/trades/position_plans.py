@@ -27,10 +27,9 @@
 
 ## 止损价来源（source）
 
-- ``candidate:{date}``：≤ 买入日的最近一份 ``data/stock_pool/{date}_stock_pool.json``
-  里该代码的 ``stop_loss_ref.price``（选股口径随买入流转，basis 一并带上）。
-- ``default``：候选记录找不到时兜底 —— ``entry_price × (1 + loss_reduction.pnl_pct)``
-  （Phase A 收敛的 −7% 减仓口径），basis 注明是兜底。
+- ``default``：``entry_price × (1 + loss_reduction.pnl_pct)``（买入价固定 −7%）。
+- 🔄 ``candidate:{date}``（取选股池 ``stop_loss_ref`` = 近 10 日最低价）**已失效**（v0.528，owner 2026-11-16：
+  近 10 日最低价退出 live，live 止损以买入价固定 7% 为准）；遗留计划在下次 sync 时迁为 default，原值留 ``legacy_stop``。
 
 ## 同步规则（sync_plans，由 incremental_ledger 两处写入点调用）
 
@@ -107,42 +106,25 @@ def _take_profit_snapshot(rules: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _find_candidate_stop(
-    code: str, entry_date: str, pool_dir: Path
-) -> tuple[float, str, str] | None:
-    """≤ entry_date 的最近一份 stock_pool 里该代码的 stop_loss_ref。
-
-    买入通常发生在候选表出炉次日（1800 选股、次日下单），故只回看 ≤ 买入日的
-    池文件；找不到（当日未入选/字段缺失/价格非有限值）返回 None 走兜底。
-    """
-    if not pool_dir.exists():
-        return None
-    dated = []
-    for p in pool_dir.glob("*_stock_pool.json"):
-        day = p.name[:10]
-        if len(day) == 10 and day <= entry_date:
-            dated.append((day, p))
-    for day, p in sorted(dated, reverse=True):
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue  # 单份池文件损坏不阻塞：继续找更早的
-        if not isinstance(data, dict):
-            continue  # 顶层非 dict（坏形状，如 list）：按损坏处理，继续找更早的
-        for cand in data.get("candidates") or []:
-            if clean_code(cand.get("code")) != code:
-                continue
-            ref = cand.get("stop_loss_ref") or {}
-            price = finite(ref.get("price"))
-            if price > 0:
-                return price, str(ref.get("basis") or ""), day
-    return None
-
-
 def _default_stop(entry_price: float, rules: dict[str, Any]) -> tuple[float, str]:
     """兜底止损：entry × (1 + loss_reduction.pnl_pct)（Phase A 收敛的 −7% 口径）。"""
     pct = float(rules["stop_rules"]["loss_reduction"]["params"]["pnl_pct"])
     return entry_price * (1.0 + pct), f"兜底：entry×(1+loss_reduction {pct:+.2%})"
+
+
+def _migrate_legacy_stops(positions: dict[str, Any], rules: dict[str, Any]) -> None:
+    """v0.528：在持计划里遗留的 ``stock_pool_stop_ref``（近 10 日最低价）止损改为买入价 −7%。
+
+    原止损留在 ``legacy_stop`` 便于追溯；只改未清仓的 positions，archive 只增不改。"""
+    for plan in positions.values():
+        stop = plan.get("stop") or {}
+        if stop.get("rule_id") != "stock_pool_stop_ref":
+            continue
+        price, basis = _default_stop(finite(plan.get("entry_price")), rules)
+        plan["legacy_stop"] = {**stop, "source": plan.get("source")}
+        plan["stop"] = {"rule_id": "loss_reduction", "price": price, "basis": basis}
+        plan["source"] = "default"
+        plan["migrated_at"] = cn_now().isoformat(timespec="seconds")
 
 
 def load_plans(path: Path | None = None) -> dict[str, Any]:
@@ -174,15 +156,12 @@ def _new_plan(
     rules: dict[str, Any],
     pool_dir: Path,
 ) -> dict[str, Any]:
-    found = _find_candidate_stop(code, entry_date, pool_dir)
-    if found is not None:
-        price, basis, pool_day = found
-        stop = {"rule_id": "stock_pool_stop_ref", "price": price, "basis": basis}
-        source = f"candidate:{pool_day}"
-    else:
-        price, basis = _default_stop(entry_price, rules)
-        stop = {"rule_id": "loss_reduction", "price": price, "basis": basis}
-        source = "default"
+    # v0.528（owner 2026-11-16）：止损统一买入价固定 −7%（loss_reduction），不再取选股池的
+    # stop_loss_ref（近 10 日最低价，已退出 live）。``pool_dir`` 形参保留（调用方签名不变）。
+    _ = pool_dir
+    price, basis = _default_stop(entry_price, rules)
+    stop = {"rule_id": "loss_reduction", "price": price, "basis": basis}
+    source = "default"
     return {
         "entry_date": entry_date,
         "entry_price": entry_price,
@@ -258,6 +237,7 @@ def sync_plans(
             plan["averaged"] = True
             plan["updated_at"] = cn_now().isoformat(timespec="seconds")
 
+    _migrate_legacy_stops(positions, rules)
     for code in before - set(after_by):
         plan = positions.pop(code, None)
         if plan is not None:

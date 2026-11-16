@@ -436,7 +436,7 @@ class TestLabelsNeverAlterSelection:
                 # v0.51：主表加 ADX25/S反转 两列 ⇒ 标注列 raw index 17→19
                 # v0.56：再加 W底/红肥绿瘦 两列 ⇒ 19→21
                 # v0.478 单表：| 代码 | 名称 | 技术分 | 资金意图 | 状态 | 触发 | 证据标记 | 研究标注 | ... ⇒ raw 8
-                if len(cells) == 14:
+                if len(cells) == 13:  # v0.528 去「建议止损位」列 14→13
                     del cells[8]  # 抹掉研究标注列
                     line = "|".join(cells)
             out.append(line)
@@ -467,7 +467,10 @@ class TestLabelsNeverAlterSelection:
             out = {}
             for ln in txt.split("\n"):
                 cells = [c.strip() for c in ln.split("|")[1:-1]]
-                if len(cells) == 12 and cells[0] in ("600000", "000001"):
+                if len(cells) == 11 and cells[0] in (
+                    "600000",
+                    "000001",
+                ):  # v0.528 去止损列
                     out[cells[0]] = cells[4]
             return out
 
