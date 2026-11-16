@@ -710,15 +710,16 @@ def _cap_wave_rules(risk_flags: list, bucket: str, cand: dict, rules: dict):
 
 
 def _cap_distribution(risk_flags: list, bucket: str, dist: dict, rules: dict) -> str:
-    """B1 §七.3：主力出货五方式命中 → 顶部派发规避（high 封 D / 其余封顶 C）。"""
+    """B1 §七.3：主力出货五方式命中 → high 封 D（否决）；watch 只标记（v0.530）。"""
     if dist.get("available") and dist.get("hits"):
         if rules["distribution_cap"]:
             if dist.get("risk_level") == "high":
                 risk_flags.append("distribution_high")
                 bucket = "D"
             else:
+                # v0.530（owner 2026-11-16）：watch 级只标记、不封顶（不构成 B1 风控否决）；
+                # 技术分 distribution_watch −10 照旧，只影响排序
                 risk_flags.append("distribution_watch")
-                bucket = cap_bucket(bucket, "C")
         else:
             risk_flags.append("distribution_detected_cap_disabled")
     return bucket
@@ -1027,7 +1028,7 @@ def _b1_status(
 ) -> str:
     """v0.529（owner 2026-11-16）：可买 = 0AMV 做多 ∧ J<13 ∧ QSX>DKX ∧ 无风控否决；
     观察价位 = 同上但 QSX≤DKX；待0AMV做多 = 0AMV 非做多、其余都满足；受限 = B1 点但被风控否决。
-    风控否决 = 做多口径下从 A 起算被任何封顶规则压下（冲刺波 / 出货 / MACD 三打白骨精 / 非一波流撤销等；顶背离只减分不否决）。"""
+    风控否决 = 做多口径下从 A 起算被任何封顶规则压下（冲刺波 / 出货 high / MACD 三打白骨精 / 非一波流撤销等；顶背离、出货 watch 只留痕不否决）。"""
     if not b1_point:
         return "-"
     _f, capped, _w, _d = apply_risk_downgrades(

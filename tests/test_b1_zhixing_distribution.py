@@ -237,7 +237,8 @@ def test_distribution_cap_high_forces_d():
     assert s["bucket"] == "D" and "distribution_high" in s["risk_flags"]
 
 
-def test_distribution_cap_watch_caps_c():
+def test_distribution_watch_flag_only_v0530():
+    """v0.530（owner 2026-11-16）：出货 watch 只标记、不封顶、不构成受限。"""
     s = sc.score_candidate(
         _scand(
             distribution={
@@ -249,7 +250,8 @@ def test_distribution_cap_watch_caps_c():
         SECTOR,
         "做多",
     )
-    assert s["bucket"] == "C" and "distribution_watch" in s["risk_flags"]
+    assert "distribution_watch" in s["risk_flags"] and s["bucket"] != "C"
+    assert s["b1_status"] != "受限"
 
 
 def test_distribution_cap_disabled_keeps_a():
