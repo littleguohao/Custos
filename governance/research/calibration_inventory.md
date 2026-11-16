@@ -296,7 +296,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `wave_type` | `WAVE_START_CANDLE_VOL` | 1.5 | 待回测参数：启动段放量倍数 | active；R2 | 未校准 |
 | `wave_type` | `WAVE_SECOND_START_GAIN` | 15.0 | 待回测参数：二次启动（前一段摆动幅度%下限） | active；R2 | 未校准 |
 
-### P1（92 个参数）
+### P1（98 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -336,6 +336,12 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `bottom_patterns` | `WBOT_VOL_WIN` | 5 | 待回测：第二底之后几根内出现放量（含当日） | untested；R2 | 未校准 |
 | `bottom_patterns` | `RF_WINDOW` | 10 | 待回测：底部区间窗口（镜像 DIST_TOP_WINDOW） | untested；R2 | 未校准 |
 | `bottom_patterns` | `RF_BOTTOM_FRAC` | 1.02 | 待回测：底部=窗口最低 ≤ 近60根最低×此值（镜像 near_top 0.98） | untested；R2 | 未校准 |
+| `bottom_patterns` | `RG2_WINDOW` | 30 | 观察窗 N=30 根 | untested；R2 | 候选（v0.532，owner 2026-11-16 定稿，抽检图集 `red_green_v2__mining_v1`） |
+| `bottom_patterns` | `RG2_VOL_K` | 1.0 | 阳线总量 > 阴线总量 × k | untested；R2 | 候选（v0.532，owner 2026-11-16 定稿，抽检图集 `red_green_v2__mining_v1`） |
+| `bottom_patterns` | `RG2_BURST` | 3.0 | 爆量 = 单根量 ≥ 窗口均量 × 此值；爆量根不参与三项比较，单独标注 | untested；R2 | 候选（v0.532，owner 2026-11-16 定稿，抽检图集 `red_green_v2__mining_v1`） |
+| `bottom_patterns` | `RG2_STAGE_LOOKBACK` | 120 | 阶段高点回看根数 | untested；R2 | 候选（v0.532，owner 2026-11-16 定稿，抽检图集 `red_green_v2__mining_v1`） |
+| `bottom_patterns` | `RG2_BOTTOM_DD_PCT` | 30.0 | 阶段底部 = 收盘距近 120 根最高价回撤 ≥ 此值（待校准） | untested；R2 | 候选（v0.532，owner 2026-11-16 定稿，抽检图集 `red_green_v2__mining_v1`） |
+| `bottom_patterns` | `RG2_TOP_NEAR_PCT` | 5.0 | 阶段顶部 = 收盘距近 120 根最高价 ≤ 此值 | untested；R2 | 候选（v0.532，owner 2026-11-16 定稿，抽检图集 `red_green_v2__mining_v1`） |
 | `fundamentals` | `DIXI_NET_PROFIT_YOY` | 100.0 | 待回测：业绩预增代理阈值（净利同比%） | untested | 未校准 |
 | `fundamentals` | `REPORT_MAX_AGE_DAYS` | 270 | - | untested | 未校准 |
 | `perfect_b1_fit` | `FIT_J_DEEP` | 0.0 | J<0 → 2 分 | candidate；R2 | 未校准 |
