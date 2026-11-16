@@ -47,6 +47,9 @@ SIGNAL_META: dict[str, tuple[str, str, int]] = {
     "breakout_pullback_b1": ("突破回踩型B1", "PB", +1),
     "distribution_risk": ("主力出货形态", "⚠出货", -1),
 }
+#: live 候选表只保留的研究标注（v0.529，owner 2026-11-16，TODO #127）：RD（R21 / R27 跨窗成立）与
+#: SB（异动后的 B1，同时走 #123 定义校准）。其余键的定义与检测器保留，研究侧 ``keys=None`` 仍可全算。
+LIVE_SIGNALS: tuple[str, ...] = ("rsi_deep_oversold", "surge_then_b1")
 POSITIVE = [k for k, v in SIGNAL_META.items() if v[2] > 0]
 NEGATIVE = [k for k, v in SIGNAL_META.items() if v[2] < 0]
 
@@ -246,6 +249,7 @@ def compute_signals(
     daily_j: Optional[float] = None,
     distribution: Optional[dict] = None,
     platform_pullback: Optional[dict] = None,
+    keys: Optional[tuple[str, ...]] = None,
 ) -> dict[str, Any]:
     """算出全部标注（三态）。**尽量复用调用方已算好的结果**，绝不 raise。
 
@@ -254,13 +258,18 @@ def compute_signals(
     不注入时本模块自己算——但那会白付若干次 kdj。
     """
     out: dict[str, Any] = {}
-
-    _signal_distribution_risk(out, distribution)
-    _signal_rsi(out, df)
-    _signal_surge(out, df, code)
-    _signal_breakout_pullback_b1(out, df, code, platform_pullback, daily_j)
-    _signal_qsx_resonance_v2(out, df)
-
+    want = set(keys) if keys is not None else set(SIGNAL_META)
+    if "distribution_risk" in want:
+        _signal_distribution_risk(out, distribution)
+    if want & {"rsi_strong", "rsi_deep_oversold", "rsi_ideal_b1", "rsi_bull_div"}:
+        _signal_rsi(out, df)
+    if want & {"b2", "bottom_surge", "surge_then_b1"}:
+        _signal_surge(out, df, code)
+    if "breakout_pullback_b1" in want:
+        _signal_breakout_pullback_b1(out, df, code, platform_pullback, daily_j)
+    if "qsx_resonance_v2" in want:
+        _signal_qsx_resonance_v2(out, df)
+    out = {k: v for k, v in out.items() if k in want}  # 同块顺带算出的非目标键不落盘
     return {**out, "summary": summarize_signals(out)}
 
 
@@ -270,10 +279,11 @@ def summarize_signals(signals: dict[str, Any]) -> dict[str, Any]:
     分母用可评估数而非总数：新股因数据不足只能评估 4 项、命中 3 项，应显示 3/4 而不是
     3/9（正向标注全集）—— 后者会把"数据不足"误读成"质量差"。
     """
+    present = [k for k in SIGNAL_META if k in signals]  # v0.529：只汇总本次计算的键
     pos_hit = [k for k in POSITIVE if signals.get(k, {}).get("state") == HIT]
     pos_eval = [k for k in POSITIVE if signals.get(k, {}).get("state") in (HIT, MISS)]
     neg_hit = [k for k in NEGATIVE if signals.get(k, {}).get("state") == HIT]
-    na = [k for k in SIGNAL_META if signals.get(k, {}).get("state") == NA]
+    na = [k for k in present if signals.get(k, {}).get("state") == NA]
     return {
         "positive_hits": pos_hit,
         "positive_hit_count": len(pos_hit),

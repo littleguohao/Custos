@@ -53,6 +53,9 @@ def _pool(amv_state="做多", status="ok"):
             "code": code,
             "name": f"股{code}",
             "bucket": bucket,
+            "b1_status": ("可买" if bucket == "A" else "观察价位")
+            if bull
+            else "待0AMV做多",
             "next_step": "buy_review" if bucket == "A" else "observe_price",
             "fundamental_quality": {"tier": "优"},
             "resonance_4leg": {
@@ -224,7 +227,7 @@ class TestGateNeverAltersSelection:
         # v0.50（#37 阶段 A）：可买定义改为「A + 市场/基本面/技术三面共振」，
         # 板块相位降为情境标注列（不再计入可买定义）。
         assert (
-            "- **可买（现行规则：技术×资金双强 + 市场/基本面/技术三面共振）**：600000 股600000"
+            "- **可买（0AMV 做多 + J<13 + QSX>DKX + 无风控否决）**：600000 股600000"
             in text
         )
 

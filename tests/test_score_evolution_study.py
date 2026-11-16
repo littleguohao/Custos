@@ -1309,6 +1309,15 @@ import pandas as pd  # noqa: E402
 ADDON_EXPR = "ROC(CLOSE,5)"
 
 
+@pytest.fixture(autouse=True)
+def _pin_rs_weight_for_lattice_mechanics(monkeypatch):
+    """v0.529 live 权重把 relative_strength_strong 15→0；本文件格子机制用例的夹具按 B=缩量 15 + 强RS 15 = 30
+    构造「等倍率选 B、加权后翻 A」——测的是格子机制，不是 live 权重，故钉回 15。"""
+    from custos.pipeline.screening import score_candidates as _sc
+
+    monkeypatch.setitem(_sc.DEFAULT_TECH_WEIGHTS, "relative_strength_strong", 15)
+
+
 def _v0l_collected_addon_mining():
     """等权下 B(30)>A(24) 被选（top_n=1）；加腿值 A=0.9/B=0.1——λ=6 仍 B、λ=24 翻 A。"""
     items = _v0l_collected_mining()

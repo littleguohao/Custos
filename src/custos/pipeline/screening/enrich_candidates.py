@@ -713,6 +713,7 @@ def _evidence_states(df, code: str, df_long, base: dict[str, Any]) -> dict[str, 
         daily_j=daily_j,
         distribution=distribution,
         platform_pullback=_plat,
+        keys=signal_labels.LIVE_SIGNALS,  # v0.529（TODO #127）：live 只留 RD / SB
     )
 
     # --- 证据层新列（v0.51，#37 阶段 B，owner 批准；严格证据层：不进技术分/
@@ -991,7 +992,8 @@ def _load_enrich_context(
     ctx["fin_enabled"] = fin_enabled
     ctx["fin_df"] = fin_df
     ctx["fin_colmap"] = fin_colmap
-    ctx["sp_resolve"] = _load_sector_phase_resolver(sector_phase_cfg)
+    # v0.529（owner 2026-11-16，TODO #124）：板块相位去掉——不再加载、不再落 cand["sector_phase"]
+    ctx["sp_resolve"] = None
     # 每股官方细分行业（881xxx，展示层「板块」列；取不到全"未知"）
     ctx["stock_industry"] = build_stock_industry_map()
     return ctx

@@ -18,8 +18,21 @@ def _cand(
     cap="中",
     stop=10.0,
     risk_flags=None,
+    status=None,
 ):
+    # v0.529：状态列改读 score_candidates 的 b1_status；夹具按旧语义映射，保持各用例原意
+    if status is None:
+        if tier == "优" and aligned >= 2:
+            if bucket in ("A", "B"):
+                status = (
+                    ("可买" if bucket == "A" else "观察价位") if bull else "待0AMV做多"
+                )
+            else:
+                status = "受限"
+        else:
+            status = "-"
     return {
+        "b1_status": status,
         "code": code,
         "name": name,
         "sector": sector,
@@ -165,7 +178,7 @@ def test_daily_signal_summary_section():
     sec = md.split("## ⭐ 今日信号一览")[1].split("\n## ")[0]
     # v0.50（#37 阶段 A）：可买 = A + 市场/基本面/技术三面共振（板块相位移出，
     # 降为「4面共振」情境标注列）。
-    buy_line = next(l for l in sec.splitlines() if "- **可买（现行规则" in l)
+    buy_line = next(l for l in sec.splitlines() if "- **可买（" in l)
     obs_line = next(l for l in sec.splitlines() if "观察价位" in l)
     wait_line = next(l for l in sec.splitlines() if "待0AMV做多" in l)
     assert "600000" in buy_line and "600007" not in buy_line
@@ -232,7 +245,7 @@ def test_rd_action_zone_light_on_buy_and_observe():
         ],
     }
     lines = _overview_lines(ct.render_table(pool, "2026-09-14"))
-    buy_line = next(l for l in lines if "- **可买（现行规则" in l)
+    buy_line = next(l for l in lines if "- **可买（" in l)
     obs_line = next(l for l in lines if "观察价位" in l)
     assert "600000 甲 ⚡RD" in buy_line
     assert "600007 己 ⚡RD" in obs_line
@@ -329,7 +342,7 @@ def _rows(md):
     out = {}
     for ln in sec.splitlines():
         cells = [c.strip() for c in ln.split("|")[1:-1]]
-        if len(cells) == 11 and cells[0][:1].isdigit():  # v0.528 去「建议止损位」列
+        if len(cells) == 10 and cells[0][:1].isdigit():  # v0.529 再去「资金意图」列
             out[cells[0]] = cells
     return out
 
@@ -384,23 +397,20 @@ def test_status_column_keeps_invariants():
         ],
     }
     r = _rows(ct.render_table(pool, "2026-11-03"))
-    assert r["600000"][4] == "🐂可买"
-    assert r["600007"][4] == "🐂观察价位"
-    assert r["600008"][4] == "待0AMV做多"
-    assert r["600003"][4] == "🔍受限·非可买" and "distribution_high" in r["600003"][8]
-    assert r["300001"][4] == "-"
+    assert r["600000"][3] == "🐂可买"
+    assert r["600007"][3] == "🐂观察价位"
+    assert r["600008"][3] == "待0AMV做多"
+    assert r["600003"][3] == "🔍受限·非可买" and "distribution_high" in r["600003"][7]
+    assert r["300001"][3] == "-"
     assert list(r)[:2] == ["600000", "600007"]  # 技术分降序
 
 
-def test_bear_outpost_status():
-    outpost = _cand("600100", "哨", "半导体", "D", "优", 3, False)
-    outpost["resonance_4leg"]["sector"] = False
-    bull = {"status": "ok", "amv_state": "做多", "candidates": [copy.deepcopy(outpost)]}
-    bear = {"status": "ok", "amv_state": "空头", "candidates": [outpost]}
-    assert (
-        _rows(ct.render_table(bear, "2026-11-03"))["600100"][4] == "📡空头前哨·非可买"
-    )
-    assert _rows(ct.render_table(bull, "2026-11-03"))["600100"][4] == "-"
+def test_bear_waits_for_amv_v0529():
+    """v0.529：空头前哨撤销——空头期满足 B1 条件的候选统一显示「待0AMV做多」（b1_status 由打分侧给出）。"""
+    c = _cand("600100", "哨", "半导体", "B", "优", 3, False, status="待0AMV做多")
+    bear = {"status": "ok", "amv_state": "空头", "candidates": [c]}
+    assert _rows(ct.render_table(bear, "2026-11-03"))["600100"][3] == "待0AMV做多"
+    assert "空头前哨" not in ct.render_table(bear, "2026-11-03")
 
 
 def test_evidence_and_trigger_cells():
@@ -417,9 +427,9 @@ def test_evidence_and_trigger_cells():
     )
     c2 = _cand("000002", "乙", "AI", "D", "差", 1, False)
     r = _rows(ct.render_table({"status": "ok", "candidates": [c, c2]}, "2026-11-03"))
-    assert "ADX25" in r["600000"][6] and "S反转66.5" in r["600000"][6]
-    assert "平台回踩✓@10.25" in r["600000"][6] and r["000002"][6] == "-"
-    assert r["600000"][5] == "KDJ_J_LOW · 低J · 五日"
+    assert "ADX25" in r["600000"][5] and "S反转66.5" in r["600000"][5]
+    assert "平台回踩✓@10.25" in r["600000"][5] and r["000002"][5] == "-"
+    assert r["600000"][4] == "KDJ_J_LOW · 低J · 五日"
 
 
 def test_industry_preferred_over_theme_sector():
@@ -427,7 +437,7 @@ def test_industry_preferred_over_theme_sector():
     c["industry"] = "全国性银行"
     c2 = _cand("000977", "浪潮信息", "AI算力/服务器/液冷", "A", "优", 4, True)
     r = _rows(ct.render_table({"status": "ok", "candidates": [c, c2]}, "2026-11-03"))
-    assert r["601939"][9] == "全国性银行" and r["000977"][9] == "AI算力/服务器/液冷"
+    assert r["601939"][8] == "全国性银行" and r["000977"][8] == "AI算力/服务器/液冷"
 
 
 def test_legend_covers_every_header_column():
@@ -446,3 +456,16 @@ def test_legend_covers_every_header_column():
     cols = [c.strip() for c in header.split("|")[1:-1]]
     assert "建议止损位" not in cols  # v0.528：近 10 日最低价退出 live
     assert set(cols) - {"代码", "名称"} <= keys
+
+
+def test_hot_sub_industry_marks_board_column_v0529():
+    c = _cand("601939", "建设银行", "x", "A", "优", 4, True)
+    c["industry"] = "全国性银行"
+    hot = {
+        "window": 10,
+        "top_n": 10,
+        "hot": [{"industry": "全国性银行", "hits": 4, "days": [], "last_rank": 2}],
+    }
+    md = ct.render_table({"status": "ok", "candidates": [c]}, "2026-11-03", hot=hot)
+    assert "## 🔥 近 10 个交易日热门细分行业" in md and "| 全国性银行 | 4 | 2 |" in md
+    assert _rows(md)["601939"][8] == "🔥4 全国性银行"

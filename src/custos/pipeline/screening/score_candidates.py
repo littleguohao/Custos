@@ -147,9 +147,9 @@ DEFAULT_TECH_WEIGHTS: dict[str, Any] = {
     "reversal_k_candidate": 4,
     "j_low": 24,  # v0.63 owner 定向回调：20→33→24
     "volume_contraction": 15,
-    "relative_strength_strong": 15,
+    "relative_strength_strong": 0,  # v0.529（owner 2026-11-16，#124）：非 B1 规则，15→0
     # B1/CZ 对齐加分
-    "five_day_entry": 8,
+    "five_day_entry": 0,  # v0.529（owner 2026-11-16）：五日战法是持股规则不是 B1 形态，8→0
     "leader_volume": 6,
     "bottom_volume": 10,
     "repair_signals_each": 4,  # v0.61：每项 3→4
@@ -851,10 +851,10 @@ def four_leg_resonance(cand, permission, tech_level):
     """
     # v0.227（TODO #76③）：品质档判定改走 ctx 规范入口 detect()（同判定同输入）
     fq = fundamentals_mod.detect(ctx={"fin": cand.get("financials")})
-    sp_fav = bool((cand.get("sector_phase") or {}).get("favorable"))
+    # v0.529（owner 2026-11-16）：板块相位（sector_phase）去掉 ⇒ 板块腿撤出，三腿计数（只作展示）
+    sp_fav = False
     legs = {
         "market": permission == "允许",
-        "sector": sp_fav,
         "fundamental": fq.get("tier") in ("优", "中"),
         "technical": tech_level == "强",
     }
@@ -862,7 +862,7 @@ def four_leg_resonance(cand, permission, tech_level):
     resonance_4leg = {
         **legs,
         "aligned": aligned,
-        "label": {4: "四面共振", 3: "三面共振", 2: "两面", 1: "单面", 0: "无"}[aligned],
+        "label": {3: "三面共振", 2: "两面", 1: "单面", 0: "无"}[aligned],
         "bull_candidate": bool(
             # v0.50：板块腿（sp_fav）移出——可买 = 市场允许 + 基本面优 + 技术强
             legs["market"] and fq.get("tier") == "优" and legs["technical"]
@@ -905,13 +905,18 @@ def score_candidate(
         sector_entry, sector_score_max
     )
 
-    # 分层由个股（技术结构 × 资金意图）定夺；板块不封顶（降为提示，只进 score/共振/trade_style）
-    base_bucket = RESONANCE_MATRIX[(tech_level, capital_level)]
+    # v0.529（owner 2026-11-16，TODO #124）：分层改由 **B1 规则**定夺，不再查「技术 × 资金意图」矩阵。
+    # base = A（J<13 ∧ QSX>DKX）/ B（J<13 ∧ QSX≤DKX）/ D（非 B1 点）；风控封顶照旧只降不升。
     res_level = resonance_level(tech_level, heat)
     permission = market_permission(amv_state)
+    b1_point, qsx_gt_dkx = _b1_rule_legs(cand)
+    base_bucket = ("A" if qsx_gt_dkx else "B") if b1_point else "D"
 
     risk_flags, bucket, wave_type, dist = apply_risk_downgrades(
         amv_state, base_bucket, cand, rules, sector_score_available
+    )
+    b1_status = _b1_status(
+        cand, rules, sector_score_available, amv_state, b1_point, qsx_gt_dkx
     )
 
     # 总分 = 技术分（v0.50 #37 阶段 A，owner 拍板：板块分 0.4 权重与共振 ±5
@@ -996,7 +1001,43 @@ def score_candidate(
         **_indicator_passthrough(cand),
         "fundamental_quality": fq,
         "resonance_4leg": resonance_4leg,
+        "b1_status": b1_status,
+        "qsx_gt_dkx": qsx_gt_dkx,
     }
+
+
+#: v0.529 B1 规则状态（候选表「状态」列单一来源）
+B1_STATUSES = ("可买", "观察价位", "待0AMV做多", "受限", "-")
+
+
+def _b1_rule_legs(cand: dict) -> tuple[bool, bool]:
+    """(B1 点 = 日 J<13, QSX>DKX)。QSX>DKX 取知行状态 ``zhixing.qsx_gt_dks``（DKX 即知行多空线 DKS）。"""
+    b1_point = bool((cand.get("patterns") or {}).get("j_low"))
+    zx = cand.get("zhixing") or {}
+    return b1_point, bool(zx.get("available") and zx.get("qsx_gt_dks"))
+
+
+def _b1_status(
+    cand: dict,
+    rules: dict,
+    sector_score_available: bool,
+    amv_state: str,
+    b1_point: bool,
+    qsx_gt_dkx: bool,
+) -> str:
+    """v0.529（owner 2026-11-16）：可买 = 0AMV 做多 ∧ J<13 ∧ QSX>DKX ∧ 无风控否决；
+    观察价位 = 同上但 QSX≤DKX；待0AMV做多 = 0AMV 非做多、其余都满足；受限 = B1 点但被风控否决。
+    风控否决 = 做多口径下从 A 起算被任何封顶规则压下（冲刺波 / 出货 / MACD 三打白骨精 / 非一波流撤销等；顶背离只减分不否决）。"""
+    if not b1_point:
+        return "-"
+    _f, capped, _w, _d = apply_risk_downgrades(
+        "做多", "A", cand, rules, sector_score_available
+    )
+    if capped != "A":
+        return "受限"
+    if normalize_regime(amv_state) != "做多":
+        return "待0AMV做多"
+    return "可买" if qsx_gt_dkx else "观察价位"
 
 
 def _sector_score_parts(

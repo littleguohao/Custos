@@ -390,6 +390,7 @@ class TestResearchProductionSplit:
             "manual_pools",
             "signal_labels",
             "financials",
+            "hot_sectors",  # v0.529 热门细分行业（1800 候选表标注）
         }, got
 
 

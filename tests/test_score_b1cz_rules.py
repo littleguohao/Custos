@@ -21,6 +21,10 @@ def _cand(**extra):
         "daily_j": 10.0,
         "stop_loss_ref": {"price": 10.0, "basis": "近10日最低价"},
         "is_holding": False,
+        "zhixing": {
+            "available": True,
+            "qsx_gt_dks": True,
+        },  # v0.529：B1 规则 A = J<13 ∧ QSX>DKX
         # 资金意图默认强（量能持续主线只加资金意图分、不加技术分）→ base bucket = 强×强 = A
         "volume_sustain": {"status": "mainline_confirmed"},
     }
@@ -51,9 +55,8 @@ def test_volume_sustain_retreat_no_longer_caps():
     )
     assert "main_force_retreat" not in scored["risk_flags"]
     assert "main_force_retreat_cap_disabled" in scored["risk_flags"]
-    # v0.61 后 base patterns 技术分 72（强）× 资金 retreat 后 3 分（中）-> 矩阵自然落 B
-    # （v0.58 时 base 59 是中×中=C；矩阵自然落，不是封顶压的）
-    assert scored["bucket"] == "B"
+    # v0.529：分层改 B1 规则（J<13 ∧ QSX>DKX ⇒ A），量能撤退不影响
+    assert scored["bucket"] == "A"
 
 
 def test_non_one_wave_revoked_caps_at_c():
@@ -97,13 +100,16 @@ def test_bonus_factor_contrib_recorded():
     assert contrib["j_low"] == 24 and contrib["volume_contraction"] == 15
     assert contrib["reversal_k_candidate"] == 4
     assert "reversal_k_replaces" not in contrib
-    assert contrib["five_day_entry"] == 8
+    assert (
+        "five_day_entry" not in contrib or contrib["five_day_entry"] == 0
+    )  # v0.529：8→0
     assert contrib["leader_volume"] == 6
     assert contrib["bottom_volume"] == 10  # v0.58：6→10
     assert contrib["repair_signals"] == 8  # 每项+4，上限+8（v0.61：3/6 -> 4/8）
     assert contrib["non_one_wave_confirmed"] == 5
-    # bbi5 + 反转K4 + j_low24 + 缩量15 + 强RS15 + 8+6+10+8+5 = 100 恰好（v0.63）
-    assert scored["score_detail"]["technical_score"] == 100
+    # v0.529：强RS 15→0、五日战法 8→0；夹具补 zhixing（QSX>DKX）带来 zhixing_bull +9
+    # ⇒ bbi5 + 反转K4 + j_low24 + 缩量15 + 6+10+8+5 + 9 = 86
+    assert scored["score_detail"]["technical_score"] == 86
 
 
 def test_v058_new_score_items():

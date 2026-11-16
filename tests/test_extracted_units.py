@@ -259,7 +259,7 @@ class TestRenderTableUnits:
         from custos.pipeline.screening import candidate_table as ct
 
         lines = []
-        ct._signal_overview(lines, is_bear=True, watch=[])
+        ct._signal_overview(lines, is_bear=True, candidates=[])
         text = "\n".join(lines)
         assert "## ⭐" in text
         assert "空头" in text or "禁" in text or "不" in text

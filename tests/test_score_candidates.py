@@ -11,7 +11,9 @@ from custos.pipeline.screening import score_candidates as sc
 import sys
 
 
-def _mk(patterns=None, capital="weak", stop_price=10.0, code="600000", **extra):
+def _mk(
+    patterns=None, capital="weak", stop_price=10.0, code="600000", qsx=True, **extra
+):
     """构造候选：patterns 定技术结构，capital∈{strong,mid,weak} 定资金意图。
 
     capital=strong: b1_ignition + 量能持续主线 → 资金意图 强(≥5)
@@ -35,6 +37,8 @@ def _mk(patterns=None, capital="weak", stop_price=10.0, code="600000", **extra):
         if stop_price
         else None,
         "is_holding": False,
+        # v0.529：分层由 B1 规则定（J<13 ∧ QSX>DKX），默认 QSX>DKX 成立
+        "zhixing": {"available": True, "qsx_gt_dks": bool(qsx)},
     }
     if capital == "strong":
         cand["b1_ignition"] = {"hit": True}  # 资金意图 +3, 技术 +8
@@ -70,24 +74,36 @@ SECTOR_MID = {"state": "震荡", "score": 50, "sector": "半导体/芯片/存储
 SECTOR_WEAK = {"state": "退潮", "score": 30, "sector": "半导体/芯片/存储/封测"}
 
 
-# 个股共振矩阵：(技术结构, 资金意图) → bucket（与板块无关）
+# v0.529（owner 2026-11-16，TODO #124）：分层由 B1 规则定，与技术分强弱 / 资金意图无关
+# (patterns, QSX>DKX, 资金意图) → (bucket, b1_status)
 GRID = [
-    (TECH_STRONG, "strong", "A"),
-    (TECH_STRONG, "mid", "B"),
-    (TECH_STRONG, "weak", "C"),
-    (TECH_MID, "strong", "B"),
-    (TECH_MID, "mid", "C"),
-    (TECH_MID, "weak", "D"),
-    (TECH_WEAK, "strong", "C"),
-    (TECH_WEAK, "mid", "D"),
-    (TECH_WEAK, "weak", "D"),
+    (TECH_STRONG, True, "strong", "A", "可买"),
+    (TECH_STRONG, True, "weak", "A", "可买"),  # 资金意图不再影响
+    (TECH_MID, True, "weak", "A", "可买"),  # 技术分强弱不再影响
+    (TECH_MID, False, "strong", "B", "观察价位"),
+    (TECH_WEAK, True, "strong", "D", "-"),  # 非 B1 点（J≥13）
 ]
 
 
-@pytest.mark.parametrize("patterns,capital,expected", GRID)
-def test_individual_grid(patterns, capital, expected):
-    scored = sc.score_candidate(_mk(patterns, capital=capital), SECTOR_STRONG, "做多")
-    assert scored["bucket"] == expected
+@pytest.mark.parametrize("patterns,qsx,capital,bucket,status", GRID)
+def test_b1_rule_grid_v0529(patterns, qsx, capital, bucket, status):
+    scored = sc.score_candidate(
+        _mk(patterns, capital=capital, qsx=qsx), SECTOR_STRONG, "做多"
+    )
+    assert (scored["bucket"], scored["b1_status"]) == (bucket, status)
+
+
+def test_b1_status_bear_and_veto_v0529():
+    bear = sc.score_candidate(_mk(TECH_MID), SECTOR_STRONG, "空头")
+    assert bear["b1_status"] == "待0AMV做多" and bear["bucket"] == "B"
+    sprint = sc.score_candidate(
+        _mk(TECH_MID, wave={"wave_type": "sprint"}), SECTOR_STRONG, "做多"
+    )
+    assert sprint["b1_status"] == "受限" and sprint["bucket"] != "A"
+    sprint_bear = sc.score_candidate(
+        _mk(TECH_MID, wave={"wave_type": "sprint"}), SECTOR_STRONG, "空头"
+    )
+    assert sprint_bear["b1_status"] == "受限"
 
 
 def test_sector_does_not_cap_bucket_only_sets_trade_style():
@@ -209,15 +225,17 @@ def test_score_all_bucket_counts_and_sort():
     enriched = {
         "status": "ok",
         "candidates": [
-            _mk(TECH_MID, capital="mid", code="000001"),  # (中,中) → C
-            _mk(TECH_STRONG, capital="strong", code="600000"),  # (强,强) → A
+            _mk(
+                TECH_MID, capital="mid", code="000001", qsx=False
+            ),  # J<13 ∧ QSX≤DKX → B
+            _mk(TECH_STRONG, capital="strong", code="600000"),  # J<13 ∧ QSX>DKX → A
         ],
     }
     states = [{**SECTOR_STRONG, "theme_id": "semiconductor_chip_memory_packaging"}]
     result = sc.score_all(
         "2026-07-21", enriched=enriched, sector_states=states, amv_state="做多"
     )
-    assert result["bucket_counts"] == {"A": 1, "B": 0, "C": 1, "D": 0}
+    assert result["bucket_counts"] == {"A": 1, "B": 1, "C": 0, "D": 0}
     assert result["candidates"][0]["bucket"] == "A"  # 按 bucket 优先排序
 
 
@@ -315,9 +333,10 @@ def test_resonance_four_leg():
     )
     e = sc.score_candidate(cand, SECTOR_STRONG, "做多")
     r = e["resonance_4leg"]
-    assert r["market"] and r["sector"] and r["fundamental"] and r["technical"]
+    # v0.529：板块相位腿撤出 ⇒ 三腿
+    assert "sector" not in r and r["market"] and r["fundamental"] and r["technical"]
     assert (
-        r["aligned"] == 4 and r["label"] == "四面共振" and r["bull_candidate"] is True
+        r["aligned"] == 3 and r["label"] == "三面共振" and r["bull_candidate"] is True
     )
     assert e["fundamental_quality"]["tier"] == "优"
     # 空头 → market 腿灭 → 非四面共振、非牛股候选(hint 不改分层由既有测试覆盖)

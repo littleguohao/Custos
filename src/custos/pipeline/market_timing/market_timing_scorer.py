@@ -365,6 +365,18 @@ def status_from_score(score: float) -> tuple[str, str, str, str]:
     return "冰点", "0%-20%", "禁止追涨", "强风控"
 
 
+#: v0.529（owner 2026-11-16，TODO #126）：市场状态与总仓位上限**只按 0AMV 两档**——
+#: 做多 = 进攻（≤80%），其余（空头 / 中性 / 未知）= 防守（≤30%）。七模块评分仍算、只作参考展示。
+AMV_ATTACK = ("进攻", "0%-80%", "允许", "普通")
+AMV_DEFENSE = ("防守", "0%-30%", "原则上不新开", "提高")
+
+
+def status_from_amv(d: dict) -> tuple[str, str, str, str]:
+    amv = d.get("amv_0", {})
+    effective = normalize_regime(amv.get("effective_state") or amv.get("amv_zone"))
+    return AMV_ATTACK if effective == "做多" else AMV_DEFENSE
+
+
 def _score_payload(
     d: dict,
     module_scores: list[tuple[str, int, float, str]],
@@ -377,7 +389,7 @@ def _score_payload(
     （blocked/degraded 段）原样保留，chief JSON 值不变。
     """
     total = round(sum(x[2] for x in module_scores), 2)
-    status, position, open_perm, risk = status_from_score(total)
+    status, position, open_perm, risk = status_from_amv(d)  # v0.529：只按 0AMV 两档
     q = quality_gate or {}
     q_status = (q.get("market_quality") or {}).get("status")
     if q_status == "blocked":

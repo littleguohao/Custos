@@ -146,11 +146,12 @@ def test_macd_positive_scores():
     assert c["macd_bottom_divergence"] == 8  # v0.60：5→8（owner）
 
 
-def test_macd_top_divergence_caps_c():
+def test_macd_top_divergence_flags_only_v0529():
+    """v0.61 起顶背离只减分不封顶；v0.529 分层改 B1 规则后同样不构成风控否决（只留痕）。"""
     s = sc.score_candidate(
         _cand_macd(zone=1, top_divergence={"hit": True}), SECTOR, "做多"
     )
-    assert s["bucket"] == "C" and "macd_top_divergence" in s["risk_flags"]
+    assert "macd_top_divergence" in s["risk_flags"] and s["b1_status"] != "受限"
 
 
 def test_macd_three_peaks_caps_c_and_disabled_keeps_flag():

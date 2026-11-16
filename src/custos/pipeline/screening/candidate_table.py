@@ -154,7 +154,9 @@ def _signal_labels_section(candidates: list[dict]) -> list[str]:
     ]
     # v0.185（owner）：行序按跨窗盈亏比降序（无读数的垫底），不再是 SIGNAL_META 序。
     rows = []
-    for key, meta in sl.SIGNAL_META.items():
+    for key, meta in (
+        (k, sl.SIGNAL_META[k]) for k in sl.LIVE_SIGNALS
+    ):  # v0.529：只列 live 保留项
         # SG（底部异动）不单列（2026-08-14 owner 反馈两行名单每次完全相同）：
         # SB = SG ∧ 当日 J<13，而本池已过 J<13 硬门槛 ⇒ 池内 SG 与 SB 恒重合，
         # 单列只是噪声。两者算法**不同**（见 b2_surge_factor），重合是本池结构使然。
@@ -259,23 +261,6 @@ def _gate_advisory_section(date: str, gate: Optional[dict] = None) -> list[str]:
     )
 
 
-def _bull_legs(watch: list[dict], bucket: str) -> list[dict]:
-    """watch 中三面共振（bull_candidate）且分层为 bucket 的候选。"""
-    return [
-        c
-        for c in watch
-        if (c.get("resonance_4leg") or {}).get("bull_candidate")
-        and c.get("bucket") == bucket
-    ]
-
-
-def _awaiting_bull(watch: list[dict]) -> list[dict]:
-    """watch 中基本面+技术已共振、但尚未 bull_candidate 的候选。"""
-    return [
-        c for c in watch if not (c.get("resonance_4leg") or {}).get("bull_candidate")
-    ]
-
-
 def _names_or_none(cands: list[dict]) -> str:
     """「代码 名称」顿号串联，空列表显示「无」。"""
     return "、".join(_sig_nm(c) for c in cands) or "无"
@@ -302,38 +287,42 @@ def _action_names_or_none(cands: list[dict]) -> str:
     )
 
 
-def _signal_overview(lines, is_bear, watch):
-    """⭐ 今日信号一览：按四面共振把候选分成可买 / 观察价位 / 待 0AMV 做多。
+def _by_status(candidates: list[dict], status: str) -> list[dict]:
+    """b1_status == status 的候选，按技术分降序（同分按代码）。"""
+    return sorted(
+        (c for c in candidates if c.get("b1_status") == status),
+        key=lambda c: (
+            -((c.get("score_detail") or {}).get("technical_score") or 0),
+            str(c.get("code")),
+        ),
+    )
 
-    2026-08-07 从 `render_table`（原 211 行）抽出。
-    ⚠️ 空头 regime 下会先打一条禁买提示 —— 共振度**不能**在空头里放宽权限。
+
+def _signal_overview(lines, is_bear, candidates):
+    """⭐ 今日信号一览（v0.529，owner 2026-11-16，TODO #124）：按 B1 规则状态 ``b1_status`` 分组。
+
+    可买 = 0AMV 做多 ∧ J<13 ∧ QSX>DKX ∧ 无风控否决；观察价位 = 同上但 QSX≤DKX；
+    待0AMV做多 = 0AMV 非做多、其余都满足。⚠️ 空头 regime 先打禁买提示。
     """
-    _buy = _bull_legs(watch, "A")
-    _obs = _bull_legs(watch, "B")
-    _wait = _awaiting_bull(watch)
+    _buy = _by_status(candidates, "可买")
+    _obs = _by_status(candidates, "观察价位")
+    _wait = _by_status(candidates, "待0AMV做多")
     lines.append("## ⭐ 今日信号一览")
     lines.append("")
     if is_bear:
         lines.append(
-            "> **0AMV 空头：今日无可买信号（纪律：空头不买）**。"
-            "📡 前哨/🔍 受限区为研究观察对象，待 0AMV 转多后看升级。"
+            "> **0AMV 空头：今日无可买信号（纪律：空头不买）**。待 0AMV 转多后看升级。"
         )
         lines.append("")
-    # v0.50（#37 阶段 A）：板块相位（sector_phase.favorable）移出「可买」定义——
-    # 可买 = A + 市场/基本面/技术三面共振；「四面共振」降为情境标注列（4面共振列）。
-    # v0.229（TODO #64，owner 拍板=门内提醒）：可买/观察价位两档名单内 RD 证据
-    # 命中的候选亮 ⚡RD（仅提示）；待0AMV做多档是等待区不是行动区，不亮灯。
     lines.append(
-        f"- **可买（现行规则：技术×资金双强 + 市场/基本面/技术三面共振）**：{_action_names_or_none(_buy)}"
+        f"- **可买（0AMV 做多 + J<13 + QSX>DKX + 无风控否决）**：{_action_names_or_none(_buy)}"
     )
-    lines.append(
-        f"- **观察价位（现行规则：次一档 + 三面共振）**：{_action_names_or_none(_obs)}"
-    )
-    lines.append(f"- **待0AMV做多（基本面+技术已共振）**：{_names_or_none(_wait)}")
+    lines.append(f"- **观察价位（同上但 QSX≤DKX）**：{_action_names_or_none(_obs)}")
+    lines.append(f"- **待0AMV做多（B1 条件已满足）**：{_names_or_none(_wait)}")
     if any(_rd_hit(c) for c in [*_buy, *_obs]):
         lines.append(
             "> ⚡RD = RSI 深水区证据命中（R21 跨窗证据：深水 RSI 四档出场压基底 "
-            "+26~+42pp）——**仅提示，不改判定**（分层/技术分/可买清单均未改写）。"
+            "+26~+42pp）——**仅提示，不改判定**。"
             "advisory：R21 跨窗显示 deep 配 12% 宽止损最优，口径与 live 现行 "
             "−7%/−10% 不同，是否联动另行拍板（本轮不启动任何止损联动）。"
         )
@@ -394,19 +383,17 @@ def _pool_row_quality(c):
     )
 
 
-def _status_of(c: dict, watch_codes: set, capped_codes: set, outpost_codes: set) -> str:
-    """单表「状态」列：与 ⭐ 一览同一套判定（现行规则，未经回测；只展示不改判定）。"""
-    code = c.get("code")
-    r4 = c.get("resonance_4leg") or {}
-    if code in watch_codes:
-        if not r4.get("bull_candidate"):
-            return "待0AMV做多"
-        return "🐂可买" if c.get("bucket") == "A" else "🐂观察价位"
-    if code in capped_codes:
-        return "🔍受限·非可买"
-    if code in outpost_codes:
-        return "📡空头前哨·非可买"
-    return "-"
+_STATUS_DISP = {
+    "可买": "🐂可买",
+    "观察价位": "🐂观察价位",
+    "待0AMV做多": "待0AMV做多",
+    "受限": "🔍受限·非可买",
+}
+
+
+def _status_of(c: dict) -> str:
+    """单表「状态」列：直接显示 score_candidates 的 B1 规则状态 ``b1_status``（v0.529）。"""
+    return _STATUS_DISP.get(str(c.get("b1_status") or ""), "-")
 
 
 def _trigger_cell(c: dict) -> str:
@@ -444,12 +431,8 @@ COLUMN_LEGEND = [
         "八段 patterns 累加分（score_candidates.technical_score）；**未校准启发式**，R6/R19/R42 证排序无效，只作参考",
     ),
     (
-        "资金意图",
-        "强/中/弱：量能持续 2、放量点火 1、反转 K 1、回调缩量 2、个股主力净流入在榜 2 累加分档；派发 / MACD 顶背离判弱（未单独回测）",
-    ),
-    (
         "状态",
-        "现行规则：🐂可买 = 内部 A 档 + 市场允许 + 基本面优 + 技术强；🐂观察价位 = 同上但 B 档；待0AMV做多 = 基本面优 + 板块与技术腿到位、市场腿未到；🔍受限 = 共振成立但被风控封顶；📡前哨 = 空头期基本面优 + 技术强（均非回测验证）",
+        "B1 规则（v0.529）：🐂可买 = 0AMV 做多 + J<13 + QSX>DKX + 无风控否决；🐂观察价位 = 同上但 QSX≤DKX；待0AMV做多 = 0AMV 非做多、其余满足；🔍受限 = B1 点但被风控否决（冲刺波 / 出货 / MACD 三打白骨精 / 非一波流撤销）",
     ),
     (
         "触发",
@@ -461,32 +444,20 @@ COLUMN_LEGEND = [
     ),
     (
         "研究标注",
-        "signal_labels 研究因子命中摘要（命中数/可评 + 缩写，⚠️=负向）；跨窗终审已否决，只作观察记录",
+        "研究标注（v0.529 只留 RD = RSI 深水区、SB = 异动后的 B1）：命中数/可评 + 缩写；只作观察记录，不进判定",
     ),
     ("风险", "risk_flags：风控降档 / 封顶原因（顶背离、出货、量能撤退等）"),
     (
         "板块",
-        "TDX 细分行业（缺则主题族）+ 板块状态（主升/修复/震荡/分歧/退潮，只提示不进分）",
+        "TDX 细分行业（缺则主题族）+ 板块状态（只提示不进分）；🔥N = 近 10 个交易日进细分行业当日涨幅前十 N 次",
     ),
     ("基本面", "公司品质档 优/中/差（当前快照，非 PIT；⚠三无=三无标记）"),
 ]
 
 
-def _unified_table(lines, candidates, is_bear, watch, watch_capped, watch_all):
+def _unified_table(lines, candidates, is_bear, hot_hits=None):
     """v0.478（owner 2026-11-03）：去掉 A/B/C/D 分池与 Top5，全部候选一张表（技术分降序）。
-    分层仍在 stock_pool 产物里计算（下游契约不变），报告不再按它分组；判定结果收进「状态」列。"""
-    watch_codes = {c.get("code") for c in watch}
-    capped_codes = {c.get("code") for c in watch_capped}
-    outpost_codes: set = set()
-    if is_bear:
-        all_codes = {c.get("code") for c in watch_all}
-        outpost_codes = {
-            c.get("code")
-            for c in candidates
-            if (c.get("fundamental_quality") or {}).get("tier") == "优"
-            and (c.get("resonance_4leg") or {}).get("technical")
-            and c.get("code") not in all_codes
-        }
+    v0.529：状态列 = B1 规则状态；资金意图列去掉（TODO #124）。"""
     rows = sorted(
         candidates,
         key=lambda c: (
@@ -501,17 +472,18 @@ def _unified_table(lines, candidates, is_bear, watch, watch_capped, watch_all):
         lines.append("")
         return
     lines.append(
-        "| 代码 | 名称 | 技术分 | 资金意图 | 状态 | 触发 | 证据标记 | 研究标注 | 风险 | 板块 | 基本面 |"
+        "| 代码 | 名称 | 技术分 | 状态 | 触发 | 证据标记 | 研究标注 | 风险 | 板块 | 基本面 |"
     )
-    lines.append("|---|---|---:|---|---|---|---|---|---|---|---|")
+    lines.append("|---|---|---:|---|---|---|---|---|---|---|")
     for c in rows:
         sector = c.get("industry") or c.get("sector", "未知")
+        if hot_hits and sector in hot_hits:
+            sector = f"🔥{hot_hits[sector]} {sector}"  # v0.529：近 10 日进涨幅前十次数
         state = (c.get("sector_heat_filter") or {}).get("sector_state")
         lines.append(
             f"| {c.get('code')} | {c.get('name')}"
             f" | {_fmt((c.get('score_detail') or {}).get('technical_score'))}"
-            f" | {(c.get('capital_intent') or {}).get('level', '-')}"
-            f" | {_status_of(c, watch_codes, capped_codes, outpost_codes)}"
+            f" | {_status_of(c)}"
             f" | {_trigger_cell(c)}"
             f" | {_evidence_cell(c)}"
             f" | {_signal_cell(c)}"
@@ -562,61 +534,30 @@ def _header_lines(
     ]
 
 
-def _watch_key(c: dict) -> tuple:
-    """共振观察区排序键：先按对齐腿数、再按总分，均降序。"""
-    return (
-        (c.get("resonance_4leg") or {}).get("aligned", 0),
-        (c.get("score_detail") or {}).get("total") or 0,
-    )
-
-
-def _resonant_watch(candidates: list[dict]) -> list[dict]:
-    """全景分组：基本面优 + 板块腿 + 技术腿到位的候选（供置顶信号一览 + 后续各区复用）。"""
-    return [
-        c
-        for c in candidates
-        if (c.get("fundamental_quality") or {}).get("tier") == "优"
-        and (c.get("resonance_4leg") or {}).get("sector")
-        and (c.get("resonance_4leg") or {}).get("technical")
-    ]
-
-
-def _split_watch(watch_all: list[dict]) -> tuple[list[dict], list[dict]]:
-    """全景分组按分层切成（A/B 观察区, C/D 受限区），各按 _watch_key 降序。"""
-    watch = sorted(
-        (c for c in watch_all if c.get("bucket") in ("A", "B")),
-        key=_watch_key,
-        reverse=True,
-    )
-    watch_capped = sorted(
-        (c for c in watch_all if c.get("bucket") not in ("A", "B")),
-        key=_watch_key,
-        reverse=True,
-    )
-    return watch, watch_capped
-
-
 def render_table(
     pool: dict,
     date: str,
     gate: Optional[dict] = None,
     context_lines: Optional[Callable[[str, str], list[str]]] = None,
+    hot: Optional[dict] = None,
 ) -> str:
     lines = _header_lines(pool, date, context_lines=context_lines)
     candidates = pool.get("candidates") or []
-    # 先看全景分组(供置顶信号一览 + 后续各区复用)
-    watch_all = _resonant_watch(candidates)
-    watch, watch_capped = _split_watch(watch_all)
     # 与 score_candidates 共用同一套归一,避免"报告说空头不买、A池却仍生成买入计划"的自相矛盾
     is_bear = normalize_regime(pool.get("amv_state") or "") == "空头"
     # 🚦 门控建议:独立区块,置于信号一览之前(先知道数据可不可信,再看信号)。
     # **不改任何分层/next_step** —— 18:00 是纯粹选股流程,详见 _gate_advisory_section。
     lines += _gate_advisory_section(date, gate)
     # ⭐ 置顶:今日信号一览——可买/观察价位/待0AMV做多 三档,一眼看清"今天哪些是真信号"
-    _signal_overview(lines, is_bear, watch)
+    _signal_overview(lines, is_bear, candidates)
     # v0.478（owner 2026-11-03）：去掉 A/B/C/D 分池、Top5 与 🐂/🔍/📡 三个子区，全部候选并成一张总表，
     # 判定结果收进「状态」列；信号标注一览与门内提醒保留；文末列含义。
-    _unified_table(lines, candidates, is_bear, watch, watch_capped, watch_all)
+    if hot is not None:  # v0.529（TODO #125）：热门细分行业，只作标注
+        from custos.pipeline.screening import hot_sectors  # noqa: PLC0415
+
+        lines += hot_sectors.render_lines(hot)
+    hot_hits = {h["industry"]: h["hits"] for h in (hot or {}).get("hot") or []}
+    _unified_table(lines, candidates, is_bear, hot_hits)
     lines += _signal_labels_section(candidates)
     lines += _in_gate_reminder_section(candidates)
     lines += _legend_section()
@@ -701,9 +642,14 @@ def main(argv: Optional[list] = None) -> int:
         )
         status = "missing_pool"
     else:
+        from custos.pipeline.screening import hot_sectors  # noqa: PLC0415
+
         text = render_table(
-            pool, args.date, context_lines=amv_context.context_lines
-        )  # 真正的 18:00 候选表头部（v0.515）
+            pool,
+            args.date,
+            context_lines=amv_context.context_lines,
+            hot=hot_sectors.hot_for(args.date),
+        )  # 真正的 18:00 候选表头部（v0.515）；热门细分行业（v0.529）
         status = pool.get("status", "ok")
 
     # 归到**目标交易日**的目录（candidate_table 的 --date 就是 target）：

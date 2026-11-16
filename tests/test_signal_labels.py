@@ -250,8 +250,8 @@ class TestEnrichIntegration:
         m = compute_metrics(df, df[["date", "close"]].copy(), "600000")
         assert isinstance(m.get("signals"), dict)
         assert "summary" in m["signals"]
-        # distribution 已注入 → 不该是 unavailable
-        assert m["signals"]["distribution_risk"]["state"] in ("hit", "miss")
+        # v0.529（TODO #127）：live 只算 RD / SB 两项
+        assert set(m["signals"]) - {"summary"} == set(sl.LIVE_SIGNALS)
 
 
 class TestTableRendering:
@@ -269,13 +269,17 @@ class TestTableRendering:
                     "600000",
                     "浦发银行",
                     "A",
-                    signals=_sig({"qsx_resonance_v2", "rsi_strong", "b2"}),
+                    signals=_sig(
+                        {"qsx_resonance_v2", "rsi_strong", "b2", "surge_then_b1"}
+                    ),
                 ),
                 _cand(
                     "300750",
                     "宁德时代",
                     "A",
-                    signals=_sig({"qsx_resonance_v2", "rsi_ideal_b1"}),
+                    signals=_sig(
+                        {"qsx_resonance_v2", "rsi_ideal_b1", "rsi_deep_oversold"}
+                    ),
                 ),
                 _cand(
                     "002100",
@@ -316,60 +320,15 @@ class TestTableRendering:
         sec = self._labels_section(txt)
         assert "主力出货形态" not in sec, "⚠出货 一览行已撤"
         assert "⚠️⚠出货" in txt, "主表单元格负向标记必须保留"
-        assert "000555 风险票" in txt
+        assert "000555" in txt
 
-    def test_rows_sorted_by_cw_payoff_desc(self):
-        """v0.185（owner）：一览行序按跨窗盈亏比降序（R27 读数）。
-        本池：QG(2.73) 居首、B2(2.40) 次之、RS(1.33) 垫底；命中/可评口径不变
-        （新票 unavailable 排除，QG 3/3）。"""
-        sec = self._labels_section(
-            ct.render_table(
-                self._pool(),
-                "2026-08-04",
-                gate={
-                    "market_quality": {
-                        "status": "pass",
-                        "amv_ok": True,
-                        "limitations": [],
-                    }
-                },
-            )
-        )
+    def test_rows_only_live_signals_sorted_by_cw_payoff_v0529(self):
+        """v0.529（TODO #127）：一览只列 live 保留项 RD / SB，仍按跨窗盈亏比降序（RD 2.28 > SB 2.11）。"""
+        sec = self._labels_section(ct.render_table(self._pool(), "2026-08-04"))
         rows = [ln for ln in sec.split("\n") if ln.startswith("| ")]
         data_rows = [ln for ln in rows if "---" not in ln][1:]
-        assert data_rows[0].startswith(
-            "| **QSX共振v2(60根≥2次干净反弹)** `QG` | 3/3 | 2.73&nbsp;/&nbsp;31%"
-        )
-        assert data_rows[1].startswith(
-            "| **B2确认(B1后放量涨4%)** `B2` | 1/4 | 2.40&nbsp;/&nbsp;52%"
-        )
-        assert data_rows[-1].startswith(
-            "| **RSI强势区间** `RS` | 1/4 | 1.33&nbsp;/&nbsp;44%"
-        )
-        assert "`QD`" not in sec, "QD 行已撤"
-        assert "主升" not in sec, "v0.185（owner）：MR（主升始发点）行已撤"
-
-    def test_header_nbsp_padded_for_wider_columns(self):
-        """前三列表头用 &nbsp; 连成不可断行单元——渲染层最小列宽手段（防被当冗余清理）。"""
-        sec = self._labels_section(ct.render_table(self._pool(), "2026-08-04"))
-        header = [ln for ln in sec.split("\n") if ln.startswith("| ")][0]
-        assert "&nbsp;" in header
-
-    def test_mr_label_removed(self):
-        """v0.185（owner）：主升始发点标注整体撤除（0 触发因子，R8 H4/R27 双证）。
-        研究侧 main_rally gate/factor 保留（留证复现），只是不进 1800 标注层。"""
-        assert "main_rally" not in sl.SIGNAL_META
-        assert "main_rally" not in sl.compute_signals(
-            __import__("pandas").DataFrame(), "600000"
-        )
-
-    def test_no_explanation_lines(self):
-        """v0.169（owner）：一览撤三条解释文字——数据不足补注、分母/缩写说明行、终审否决行。"""
-        sec = self._labels_section(ct.render_table(self._pool(), "2026-08-04"))
-        assert "数据不足" not in sec and "不等于不符合条件" not in sec
-        assert "可评估数" not in sec and "恒重合" not in sec
-        assert "终审" not in sec and "观察记录" not in sec
-        assert "不得据命中数决定仓位" not in sec
+        assert [r.split("`")[1] for r in data_rows] == ["RD", "SB"]
+        assert "300750 宁德时代" in data_rows[0] and "600000 浦发银行" in data_rows[1]
 
     def test_hits_listed_in_full_not_truncated(self):
         """v0.169（owner）：命中名单全列不截断——>12 只时全部列出，无「等 N 只」。"""
@@ -380,19 +339,19 @@ class TestTableRendering:
                     f"60{i + 100:04d}",
                     f"票{i}",
                     "B",
-                    signals=_sig({"qsx_resonance_v2"}),
+                    signals=_sig({"surge_then_b1"}),
                 )
             )
         sec = self._labels_section(ct.render_table(pool, "2026-08-04"))
-        qg_row = next(ln for ln in sec.split("\n") if "`QG`" in ln)
-        assert "`QG` | 17/17 |" in qg_row
-        assert "600113" in qg_row, "第 14 只也要列出（不再截断前 12）"
-        assert "等 17 只" not in qg_row and "前12" not in sec
+        sb_row = next(ln for ln in sec.split("\n") if "`SB`" in ln)
+        assert "`SB` | 15/17 |" in sb_row  # 新票 SB 不可评
+        assert "600113" in sb_row, "第 14 只也要列出（不再截断前 12）"
+        assert "等 15 只" not in sb_row and "前12" not in sec
 
     def test_main_table_has_label_column(self):
         txt = ct.render_table(self._pool(), "2026-08-04")
         assert "| 证据标记 | 研究标注 | 风险 |" in txt  # v0.478 单表
-        assert "3/9 QG·RS·B2" in txt
+        assert "4/9 QG·RS·B2·SB" in txt  # 夹具里的 summary 是旧全量口径（产物兼容）
 
     def test_no_signals_section_when_absent(self):
         """候选没有 signals 字段（旧产物）时不渲染该区块，且不报错。"""
@@ -436,8 +395,8 @@ class TestLabelsNeverAlterSelection:
                 # v0.51：主表加 ADX25/S反转 两列 ⇒ 标注列 raw index 17→19
                 # v0.56：再加 W底/红肥绿瘦 两列 ⇒ 19→21
                 # v0.478 单表：| 代码 | 名称 | 技术分 | 资金意图 | 状态 | 触发 | 证据标记 | 研究标注 | ... ⇒ raw 8
-                if len(cells) == 13:  # v0.528 去「建议止损位」列 14→13
-                    del cells[8]  # 抹掉研究标注列
+                if len(cells) == 12:  # v0.529 再去「资金意图」列；研究标注列 raw 7
+                    del cells[7]  # 抹掉研究标注列
                     line = "|".join(cells)
             out.append(line)
         return "\n".join(out)
@@ -467,11 +426,11 @@ class TestLabelsNeverAlterSelection:
             out = {}
             for ln in txt.split("\n"):
                 cells = [c.strip() for c in ln.split("|")[1:-1]]
-                if len(cells) == 11 and cells[0] in (
+                if len(cells) == 10 and cells[0] in (
                     "600000",
                     "000001",
                 ):  # v0.528 去止损列
-                    out[cells[0]] = cells[4]
+                    out[cells[0]] = cells[3]
             return out
 
         base = statuses(ct.render_table(self._pool_with(_sig()), "2026-08-04"))

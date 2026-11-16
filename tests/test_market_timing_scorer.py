@@ -292,8 +292,19 @@ class TestGateOverridesScore:
         ("主线", 15, 15.0, "满分"),
     ]  # 合计 100 ⇒ 进攻档
 
-    def _payload(self, gate=None, modules=None):
-        return ms._score_payload({"date": "2026-08-11"}, modules or self.MODULES, gate)
+    def _payload(self, gate=None, modules=None, amv="做多"):
+        # v0.529（TODO #126）：市场状态只按 0AMV 两档——做多=进攻（≤80%）/ 其余=防守（≤30%）
+        d = {"date": "2026-08-11", "amv_0": {"effective_state": amv}}
+        return ms._score_payload(d, modules or self.MODULES, gate)
+
+    def test_status_only_from_amv_v0529(self):
+        att, dfn = self._payload(amv="做多"), self._payload(amv="空头")
+        assert (att["market_state"], att["total_position_range"]) == ("进攻", "0%-80%")
+        assert (dfn["market_state"], dfn["total_position_range"]) == ("防守", "0%-30%")
+        weak = [(n, w, 0.0, "") for n, w, _s, _x in self.MODULES]
+        assert (
+            self._payload(modules=weak, amv="做多")["market_state"] == "进攻"
+        )  # 七模块分不再影响
 
     def test_no_gate_keeps_score_conclusion(self):
         p = self._payload()
@@ -344,11 +355,11 @@ class TestGateOverridesScore:
         total = sum(x[2] for x in weak)
         assert 40 <= total < 60, f"用例要落在震荡偏弱档，实际 {total}"
         p = ms._score_payload(
-            {"date": "2026-08-11"}, weak, {"market_quality": {"status": "degraded"}}
+            {"date": "2026-08-11", "amv_0": {"effective_state": "空头"}},
+            weak,
+            {"market_quality": {"status": "degraded"}},
         )
-        assert p["new_position_permission"] == "仅低吸 / 小仓核心主线", (
-            "已受限的措辞不该被改写"
-        )
+        assert p["new_position_permission"] == "原则上不新开", "已受限的措辞不该被改写"
 
     def test_market_score_is_total_over_full_weight(self):
         """market_score 是「总分/满分权重」—— chief JSON 的 market_score 逐位同源。"""
