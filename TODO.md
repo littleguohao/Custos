@@ -16,7 +16,6 @@
 | 106 | R36 已判路线复核：①R46 已撤回（owner 2026-10-21，配比路不继续）；②Phase 4 p2_sole 随机剔除臂对齐后（v0.386）重算 C4 | P3 | 生产机 | ② 重跑 r36_p4（低优先，选股侧思路重定后再看是否还需要） | R46 结论段、R36 头部审计注记 |
 | 111 | 格子进程内化（性能，最大一块）：score_evolution/strategy_grid 每格一个 backtest_factors 子进程、每格重载全宇宙（m2 实测 s3000 加载 45~53s/格）；改为进程内共享已加载 bars + 信号缓存逐格重打分（同 v0-lattice collect/score 拆分）。须金样逐位钉测、内存账重估 | P3 | 挂起 | R46 已改进程内实现、不再依赖；剩余受益者 = strategy_grid / R36 冻结读数 50 臂 / evolution_loop，等出现大规模格子跑数需求再做 | 性能排查 v0.401~0.403 |
 | 117 | 组合层新方向（单元待立，编号届时分配；R49 已用于逆向画像）：选股无区分力 + 收益靠右尾 ⇒ 铺宽还是集中（top-N / 持仓数 / 单票仓位）× 0AMV 状态化仓位（含 #86 ④盈亏比排序服务仓位）；R3「召回瓶颈未研究」的接续 | P2 | 挂起 | 第二批（R47/R48/R49）读完后起草预注册；工具准备已做（v0.460：`exposure_fn` 状态化仓位 + `scan_portfolio_grid` 网格与平分区间），能力盘点与局限见准备文档 | owner 2026-10-21 方向盘点；[R3](governance/research/R3_selection_discriminability_recall.md)；[准备文档](governance/research/portfolio_layer_prep.md) |
-| 60 | plan 信号并入 SIGNAL_ORDER 与否。判据（两条同时成立）：①实现一致性——影子台账非 default 事件 ≥5 个交易日无异常；②规则有效性——R41 已判 falsified（v0.351）路径关闭，只剩 `plan_shadow_review` 累计 K=20 个独立事件（段头计、≥5 只持仓）均值 Δret₅ ≥ 0（凑不满 K ⇒ ②不成立 ⇒ 不并轨）。default 来源永不出 plan 信号；并轨=独立提交、只改 SIGNAL_ORDER | P2 | 观察中 | 影子事件持续累计，攒满或 60 交易日到期后 owner 定夺 | [R41](governance/research/R41_position_plan_rules_replay.md)；owner 2026-10-09 判据；v0.310/0.311/0.314/0.351 |
 | 80 | LLM 转岗：从「提数值表达式」改为「读失败模式、提机制假设」（证据：表达式提案不比随机好，Phase 1 诊断是机制级洞察）；原落点 R43 已 falsified | P3 | 挂起 | 落点改为 R49 线索清单 / R50 漏斗与兑现表（owner 2026-10-26）：两者出读数后由 LLM 读 `a_only`/漏斗流失段提机制假设、不碰数值，假设须另行预注册 | owner 2026-10-14 / 2026-10-26 |
 | 114 | R47 挖掘段扫描：工具已落地 v0.434（`plan_rules_replay --scan-protect`）；第一批判定段读完后跑，命令见 runbook「第二批预告」 | P2 | 生产机 | 排在 #121 定义校准（P0 选股因子升版）之后跑（owner 2026-11-04：校准先于第二批，免重跑）；之后 r47_scan + 摘要入库 | [R47](governance/research/R47_profit_protection_breakeven_trail.md) |
 | 115 | R48 挖掘段跑数：工具已落地 v0.439（`tail_feature_study`）；与 R47 同排第二批，命令见 runbook「第二批预告」 | P2 | 生产机 | 排在 #121 定义校准之后（owner 2026-11-04）；之后 r48_v1（随 R49 `--r48-tag` 同次落）+ 摘要入库 | [R48](governance/research/R48_tail_entry_features.md) |
@@ -91,6 +90,7 @@
 | 57 | mypy 渐进类型化 | 2026-08-12 | v0.42 |
 | 58 | 高复杂度函数拆分原则 | 2026-08-22 | v0.102 |
 | 59 | scorer 双形态剩余 5 键接 `_SCORER_PRECOMPUTE` | 2026-10-21 | v0.442（逐 bar 逐位等价钉测；mcap 与黑盒 detector 按原议不接） |
+| 60 | plan 信号并入 SIGNAL_ORDER 与否 | 2026-11-16 | v0.528 起计划止损统一买入价 −7%（= default，与 live 减仓线重合），影子对照无可比对象；不并轨，owner 闭环 |
 | 61 | candidate 因子分值校准 | 2026-10-14 | v0.371（结案：维持 candidate（R42 证伪分层路径；随 #87 终局再议）） |
 | 62 | 技术分轴因子化 | 2026-08-22 | v0.102 |
 | 63 | 两处直读 TDX 安装目录文件的解析器下沉 datasource | 2026-09-14 | v0.225 |
