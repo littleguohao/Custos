@@ -95,6 +95,17 @@ MODULES: dict[str, dict[str, Any]] = {
             "FIVE_DAY_SPIKE_WINDOW",
         ],
     },
+    # v0.531（owner 2026-11-16，TODO #123③）：live 保留的两项研究标注做定义校准
+    "label_rd": {
+        "defmod": "custos.core.factors.rsi_state",
+        "eval": "signal",
+        "fields": ["signal.rsi_deep_oversold"],
+    },
+    "label_sb": {
+        "defmod": "custos.core.factors.b2_surge_factor",
+        "eval": "signal",
+        "fields": ["signal.surge_then_b1"],
+    },
     "b1_structure_v2": {  # v0.520 候选对照（owner 2026-11-13 校准确认后的非一波流 v2）
         "defmod": "custos.core.factors.b1_structure",
         "eval": "b1_structure_v2",
@@ -344,6 +355,24 @@ def evaluate(
             if any(f.startswith("n_structure_macd.") for f in fields):
                 an["n_structure_macd"] = tm.macd_platform_structure(dfl)
             return {f: field_value(an, f) for f in fields}
+    if spec is not None and spec["eval"] == "signal":
+        from custos.pipeline.screening import signal_labels as sl  # noqa: PLC0415
+
+        keys = tuple(f.split(".", 1)[1] for f in fields)
+        with patched(defmod, overrides):
+            sig = sl.compute_signals(df.reset_index(drop=True), code, keys=keys)
+        # 三态 → 命中布尔；unavailable ⇒ None（is_hit 记未命中，抽样时如实显示 None）
+        an = {
+            "signal": {
+                k: (
+                    None
+                    if (sig.get(k) or {}).get("state") == "unavailable"
+                    else (sig.get(k) or {}).get("state") == "hit"
+                )
+                for k in keys
+            }
+        }
+        return {f: field_value(an, f) for f in fields}
     if spec is not None and spec["eval"] == "b1_structure_v2":
         from custos.core.factors import b1_structure as bs  # noqa: PLC0415
 
@@ -1022,6 +1051,8 @@ FIELD_DEF: dict[str, str] = {
     "weekly_j_low": "周线 KDJ 的 J 值是否处于低位",
     "patterns.bbi_above": "收盘是否站上 BBI 多空线",
     "patterns.relative_strength_strong": "近 20 日涨幅是否明显强于上证指数（相对强势）",
+    "signal.rsi_deep_oversold": "研究标注 RD（RSI 深水区）：RSI14 < 25（rsi_state.DEEP_OVERSOLD），R21 / R27 跨窗成立的唯一 RSI 标注",
+    "signal.surge_then_b1": "研究标注 SB（异动后的 B1）：近 60 根内出现过底部异动（巨量点火：量 ≥ 前 20 日均量 3 倍且涨幅 ≥5%，量随价升），且当根在 B1 区间（J<13）",
     "non_one_wave_v2.status": "非一波流 v2 候选（owner 2026-11-13）：同 v1 三条件，另 ①放量统一为 ≥前 5 日均量 1.5 倍 ②顶部 / 次高点前后 3 日的放量大阴（阴线跌 ≥3%，量 ≥前 5 日均量 1.5 倍且大于区内最大阳线量）撤销 ③收盘跌破启动低点且放量 = 放量破位，撤销 ④上涨段涨幅 >50% = 一波流，不能判确认（证据不足）",
     "non_one_wave.status": "非一波流（B1 §四），看最近一段上涨 + 回调：①上涨段温和放量（单日量 < 段均量 2 倍）②阶段高点前后 3 日无放量大阴（跌 >3% 且量 > 前 5 日均量 1.5 倍）③回调段缩量（均量 < 上涨段 0.7 倍）。confirmed = 三条全满足；revoked = 出现顶部放量大阴或回调放量破位；insufficient = 其余或没有完整上涨 + 回调段",
     "repair_signals.signals": "B1 修复信号（B1 §四.2）：J 拐头向上（昨日 J≤20 今日上拐）、缩量止跌（量比≤0.7 且涨跌幅在 ±2% 内）是否出现",
@@ -1249,6 +1280,12 @@ def _ingest_md(o: dict[str, Any]) -> str:
 TERM_BARS = 60
 
 
+def _rsi14(df: Any) -> Any:
+    from custos.core.indicators import rsi  # noqa: PLC0415
+
+    return rsi(df["close"].astype(float), 14)
+
+
 def chart_payload(df: Any, title: str) -> dict[str, Any]:
     """终端标注用的紧凑图数据（v0.503）：末 TERM_BARS 根 OHLCV + J + MACD，只到 as-of 当根。"""
     from custos.core.indicators import j_series, macd_series  # noqa: PLC0415
@@ -1269,6 +1306,10 @@ def chart_payload(df: Any, title: str) -> dict[str, Any]:
         "dif": r(dif),
         "dea": r(dea),
         "hist": r(hist),
+        # v0.531：RSI14（indicators.rsi 单源）——RD 校准图集画 RSI 窗格
+        "rsi": [
+            None if x != x else round(float(x), 4) for x in _rsi14(df).tail(CHART_BARS)
+        ],
     }
 
 
@@ -1481,6 +1522,11 @@ klinecharts.registerIndicator({
   calc: l => l.map(d => ({ j: nz(d.j), l13: 13 }))
 });
 klinecharts.registerIndicator({
+  name: 'CRSI', shortName: 'RSI14', precision: 2,
+  figures: [{ key: 'r', title: 'RSI14: ', type: 'line' }, { key: 'l25', title: '25: ', type: 'line' }],
+  calc: l => l.map(d => ({ r: nz(d.rsi), l25: 25 }))
+});
+klinecharts.registerIndicator({
   name: 'CMACD', shortName: 'MACD', precision: 3,
   figures: [
     { key: 'dif', title: 'DIF: ', type: 'line' }, { key: 'dea', title: 'DEA: ', type: 'line' },
@@ -1490,7 +1536,8 @@ klinecharts.registerIndicator({
 });
 function kcBars(p) {
   return p.dates.map((d, i) => ({ timestamp: Date.parse(d + 'T15:00:00+08:00'), open: p.open[i], high: p.high[i],
-    low: p.low[i], close: p.close[i], volume: p.volume[i], j: p.j[i], dif: p.dif[i], dea: p.dea[i], hist: p.hist[i] }));
+    low: p.low[i], close: p.close[i], volume: p.volume[i], j: p.j[i], dif: p.dif[i], dea: p.dea[i], hist: p.hist[i],
+    rsi: p.rsi ? p.rsi[i] : null }));
 }
 function kcReveal(id) {
   const el = document.querySelector("div.s[data-id='" + id + "']"), p = KC[id];
@@ -1525,6 +1572,7 @@ function kcDraw(el) {
   ch.createIndicator({ name: 'CVOL', paneId: 'p_vol' });
   ch.createIndicator({ name: 'CJ', paneId: 'p_j' });
   ch.createIndicator({ name: 'CMACD', paneId: 'p_macd' });
+  if (p.rsi) ch.createIndicator({ name: 'CRSI', paneId: 'p_rsi' });  // v0.531：RD 校准用
   const ts = d => Date.parse(d + 'T15:00:00+08:00');
   const first = bars[0].timestamp;
   (p.marks || []).forEach(m => {
