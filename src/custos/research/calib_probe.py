@@ -106,6 +106,15 @@ MODULES: dict[str, dict[str, Any]] = {
         "eval": "signal",
         "fields": ["signal.surge_then_b1"],
     },
+    # v0.533（owner 2026-11-17，TODO #123④）：两个展示用评分的重新校准——按分档抽样，问「分档与图形是否相符」
+    "perfect_b1_fit": {
+        "defmod": "custos.core.factors.perfect_b1_fit",
+        "fields": ["@pb1_level"],
+    },
+    "s_shape": {
+        "defmod": "custos.core.factors.s_shape",
+        "fields": ["@sshape_suggest"],
+    },
     "red_green_v2": {  # 阴阳量 + 红肥绿瘦合并定义候选（owner 2026-11-16）
         "defmod": "custos.core.factors.bottom_patterns",
         "eval": "red_green_v2",
@@ -301,7 +310,18 @@ def patched(
 # ---------------------------------------------------------------------------
 
 
+PB1_HIGH, PB1_MID = 6.0, 3.0  # 完美 B1 贴合分（0-8）分档：≥6 高 / ≥3 中 / 其余低
+
+
 def field_value(cand: dict, path: str) -> Any:
+    if path == "@pb1_level":
+        sc = (cand.get("perfect_b1_fit") or {}).get("score")
+        if sc is None:
+            return None
+        return "高" if sc >= PB1_HIGH else ("中" if sc >= PB1_MID else "低")
+    if path == "@sshape_suggest":
+        ss = cand.get("s_shape") or {}
+        return ss.get("suggestion") if ss.get("available") else None
     if path.startswith("@capital_intent"):
         from custos.core.factors import capital_intent as ci  # noqa: PLC0415
 
@@ -332,6 +352,8 @@ def is_hit(v: Any) -> bool:
         "弱",
         "横盘震荡",
         "数据不足",
+        "低",  # v0.533 分档字段：低档 / 不买 视为未命中
+        "不买",
     )
 
 
@@ -1064,6 +1086,8 @@ FIELD_DEF: dict[str, str] = {
     "patterns.relative_strength_strong": "近 20 日涨幅是否明显强于上证指数（相对强势）",
     "signal.rsi_deep_oversold": "研究标注 RD（RSI 深水区）：RSI14 < 25（rsi_state.DEEP_OVERSOLD），R21 / R27 跨窗成立的唯一 RSI 标注",
     "signal.surge_then_b1": "研究标注 SB（异动后的 B1）：近 60 根内出现过底部异动（巨量点火：量 ≥ 前 20 日均量 3 倍且涨幅 ≥5%，量随价升），且当根在 B1 区间（J<13）",
+    "@pb1_level": "完美 B1 贴合分（0-8）分档：J 深度（J<0 记 2、<7 记 1.5、<13 记 1）+ 收盘贴 QSX/DKS 线（≤3% 记 2、≤6% 记 1）+ 回调缩量（回调段/上涨段均量 ≤0.5 记 2、≤0.8 记 1）+ MACD 零轴上 + DKS 上行；≥6 = 高、≥3 = 中、其余 = 低",
+    "@sshape_suggest": "S_shape 沙漏评分 S**（0-100）的建议档：压缩收敛 + 枢轴邻近 / 突破 + 量能 + 口袋支点 + 上方套牢 + 均线结构 + 催化 − 放量阴线惩罚；≥70 = 可买、60-69 = 观望、<60 = 不买",
     "red_green_v2.status": "红肥绿瘦 v2 候选（阴阳量 + 红肥绿瘦合并，owner 2026-11-16）：近 30 根剔除爆量根（量 ≥ 窗口均量 3 倍）后，阳线总量 > 阴线总量、阳线平均实体更大、阳线根数更多 = 阳占优；三项全反 = 阴占优。阶段底部（收盘距近 120 根最高回撤 ≥30%）+ 阳占优 = red_fat（红肥绿瘦）；阶段顶部（距最高 ≤5%）+ 阴占优 = green_fat（绿肥红瘦）；其余 neutral",
     "non_one_wave_v2.status": "非一波流 v2 候选（owner 2026-11-13）：同 v1 三条件，另 ①放量统一为 ≥前 5 日均量 1.5 倍 ②顶部 / 次高点前后 3 日的放量大阴（阴线跌 ≥3%，量 ≥前 5 日均量 1.5 倍且大于区内最大阳线量）撤销 ③收盘跌破启动低点且放量 = 放量破位，撤销 ④上涨段涨幅 >50% = 一波流，不能判确认（证据不足）",
     "non_one_wave.status": "非一波流（B1 §四），看最近一段上涨 + 回调：①上涨段温和放量（单日量 < 段均量 2 倍）②阶段高点前后 3 日无放量大阴（跌 >3% 且量 > 前 5 日均量 1.5 倍）③回调段缩量（均量 < 上涨段 0.7 倍）。confirmed = 三条全满足；revoked = 出现顶部放量大阴或回调放量破位；insufficient = 其余或没有完整上涨 + 回调段",

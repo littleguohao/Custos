@@ -24,6 +24,7 @@
 | 120 | holdout 跟踪月报：汇总选股练习台账 / plan 影子台账 / trade_counterfactual，按月报现行规则在 2026-09-05 后的表现（大单率 / 大亏率 / 胜率 / 盈亏比 / 与回测分布对照）；纯描述、不作判据、不改规则 | P2 | 生产机 | 工具已落地 v0.455（月报附录 + 伴生 JSON，契约已登记）；生产机月度节点跑 `monthly_review` 自动生成，首月（2026-10）复核格式与读数 | owner 2026-10-26 |
 | 121 | 信号参数**定义校准**（A 类：检测器是否测对形态，不拿收益寻优；B 类效果校准待 A 全部完成再议）：P0 74 个参数 / 9 个模块优先，逐模块抽检图 + owner 标注 + 敏感性描述；定义改动按清单登记受影响 R 重跑 | P0 | owner | ① 标 `b1_structure_v2__mining_v2cand`（36 张）→ 与 #124 一起升版；② 生产机标持仓 `n_structure__holdings_v3cand`；③ 其余 mining_v1 按 #123 顺序标 → ingest → 评 owner 判断正确率（清单第 6 条）→ 定 v(n+1) | [清单](governance/research/calibration_inventory.md) |
 | 123 | 定义校准扩展批（A 类，owner 2026-11-16）：①macd_technics（最需对齐，mining_v1 已有 120 张）②阴阳量 + 红肥绿瘦合并为一个定义（窗口 / 底部判定 / 实体与量比较口径待 owner 定）后校准、拟进打分 ③RD、SB（live 保留的两项研究标注）定义校准 ④s_shape、perfect_b1_fit 重新校准 | P1 | coder | 已出图集：RD / SB（v0.531）、红肥绿瘦 v2（v0.532，阴阳量已并入）；①macd_technics 用 mining_v1 现有 120 张；待 coder 出 ④s_shape / perfect_b1_fit 图集；owner 标完 → ingest → 评判断正确率 → 定 v(n+1) | owner 2026-11-16 |
+| 129 | R52 owner 批语入场规则（等条件再进 / 风险过滤，8 臂）：预注册草案已落，工具 `remark_entry_study` 待实现 | P2 | coder | 实现工具（复用 warm_v0_signals / remark_rules / criteria_kit）+ 零假设两连测；开发机快照冒烟后排第二批 | owner 2026-11-13；[R52](governance/research/R52_remark_entry_rules.md) |
 | 128 | 五日战法作持仓离场规则（收盘守 5 日线 7.5% 内持有，跌破减半）与现行 BBI 跌破 2 根止盈对照 | P3 | 挂起 | 第二批（R47 等出场研究）之后再议，届时预注册 | owner 2026-11-16 |
 
 ## 已闭环索引
