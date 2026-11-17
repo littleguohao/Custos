@@ -66,3 +66,24 @@ def test_non_one_wave_v2_one_wave_gain_and_fallback_segment():
 def test_v2_not_wired_into_live():
     src = inspect.getsource(bs.detect)
     assert "_v2" not in src
+
+
+def test_one_wave_v3_three_states_positive_wording():
+    """owner 2026-11-17：一波流 = 20 根左右涨 ≥50% 后下跌；明显上涨 ≥45%；结论正面表述。"""
+    fast = (
+        list(np.linspace(10, 10, 20))
+        + list(np.linspace(10, 16, 15))
+        + list(np.linspace(16, 13, 25))
+    )  # 15 根涨 60%
+    o = bs.check_one_wave_v3(_df(fast, [100] * 20 + [110] * 15 + [60] * 25))
+    assert o["status"] == "one_wave" and o["rally"]["fast_gain_pct"] >= 50
+    flat = [10 + 0.05 * (k % 4) for k in range(60)]  # 横盘：无明显上涨段
+    assert bs.check_one_wave_v3(_df(flat, [100] * 60))["status"] == "unclear"
+    slow = (
+        list(np.linspace(10, 10, 10))
+        + list(np.linspace(10, 14.8, 40))
+        + list(np.linspace(14.8, 14.0, 12))
+    )  # 40 根涨 48%
+    h = bs.check_one_wave_v3(_df(slow, [100] * 10 + [110] * 40 + [50] * 12))
+    assert h["status"] == "healthy", h
+    assert {"one_wave", "healthy", "unclear"} >= {o["status"], h["status"]}

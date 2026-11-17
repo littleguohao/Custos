@@ -8,7 +8,7 @@
 
 ## 现状
 
-- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 74 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
+- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 77 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
   **P1 live 展示 99 个**（1800 证据标注，不进判定）、P2 研究 67 个。
 - **定义校准：0 / 233**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
 - **清单未覆盖**（需在逐因子校准时一并核）：①函数体内联常量（KDJ 9/3/3、BBI 周期、20 日相对强度窗口等）；
@@ -180,6 +180,15 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 - 20 日：买 −3.0%（n=24，38% 上涨）、不买 +0.4%（n=43，53%）、等 −1.2%（n=33）；同批基准 −0.9%。买 − 不买 −3.35pp，置换单侧 p=0.15——
   与 2026-11-13 的 141 条同向（判「买」的组反而较差），两批都与随机分不开。
 - 33 条「等」里 26 条没写批语、其余多写「等一下 / 快死叉」，只有 2 条能识别出等待条件，③ 无法复盘；继续练习时「等」请写明等什么。
+### 一波流 v3（2026-11-17，v0.538，owner 看 v2 图集后指正）
+
+- owner 看 v2 图集的读法是「这是不是一波流」，而字段问的是「是不是非一波流」（confirmed = 健康拉升、revoked = 撤销非一波流）——双重否定导致判读反向；
+  owner 认定这批「几乎都不是一波流」：v2 有 9 条「撤销」只因放量跌破启动位（段涨幅 1.7%~26%），4 条「健康拉升」实为横盘 / 单边下跌。
+- owner 定义（2026-11-17）：一波流 = 短期快速大涨后下跌（A 上 A 下），**20 根左右涨 ≥50%**；明显上涨 **≥45%**；出货单独标注。
+  候选 `b1_structure.check_one_wave_v3`（未接 live）：结论三态 一波流 / 健康拉升 / 判断不了 + 出货标注；放量跌破只标注、不改结论。
+- 开发机快照 J<13 抽样 1,287 根：判断不了 82%、一波流 18%、**健康拉升 0.3%（4 根）**——段涨幅 ≥45% 且非一波流的 123 根里 106 根卡在「上涨温和放量（单日量 < 段均量 2 倍）」，待 owner 定。
+- 图集 `b1_structure_v3__mining_v3cand`（36 张：一波流 19、判断不了 17，无健康拉升样本）。
+- 全部图集取值改正面中文（字段专属对照）：非一波流字段显示「健康拉升 / 疑似一波流或出货 / 判断不了」，MACD 区间与出货失效名单措辞同步改，不再出现双重否定。
 ## P0H 持仓大形态（v0.485 纳入，**排在 P0 之前**）
 
 注册表外、但直接驱动 live 持仓状态机（`b1_holding_state`）的检测器，`pipeline/market_timing/technical_monitor.py`，18 个参数
@@ -243,7 +252,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `technical_monitor` | `TREND_MIN_BARS` | 60 | 趋势判定最少 K 线数 | - | 未校准 |
 | `technical_monitor` | `QFQ_LOAD_BARS` | 100000 | - | - | 未校准 |
 
-### P0（74 个参数）
+### P0（77 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -268,6 +277,9 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `b1_structure` | `NOW_V2_MIN_GAIN_PCT` | 0.0 | v2 候选：明显上涨段下限，不足则 insufficient；只在 calib_probe 对照，不进 live | candidate | 未校准 |
 | `b1_structure` | `LIQUIDITY_WIN` | 20 | 近 20 日日均成交额；滚动均值，只作展示 | candidate | 无需 A 类（owner 2026-11-15） |
 | `b1_structure` | `STOP_LOOKBACK` | 10 | 止损参考位：近 10 日最低价；滚动极值，只作展示 | candidate | 无需 A 类（owner 2026-11-15） |
+| `b1_structure` | `OW3_RALLY_MIN_PCT` | 45.0 | - | candidate | 候选（owner 2026-11-17 定稿，图集 `b1_structure_v3__mining_v3cand`） |
+| `b1_structure` | `OW3_FAST_PCT` | 50.0 | 一波流：上涨段内任一 ≤OW3_FAST_BARS 根的窗口涨幅 ≥50% | candidate | 候选（owner 2026-11-17 定稿，图集 `b1_structure_v3__mining_v3cand`） |
+| `b1_structure` | `OW3_FAST_BARS` | 20 | 「20 根左右」 | candidate | 候选（owner 2026-11-17 定稿，图集 `b1_structure_v3__mining_v3cand`） |
 | `capital_intent` | `CAP_STRONG` | 5 | - | candidate | 未校准 |
 | `capital_intent` | `CAP_MID` | 2 | - | candidate | 未校准 |
 | `distribution` | `DIST_RECENT` | 5 | 待回测：出货形态观察最近N根 | active；R2 | 未校准 |

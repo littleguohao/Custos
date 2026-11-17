@@ -502,6 +502,107 @@ def check_non_one_wave_v2(df) -> dict[str, Any]:
     }
 
 
+# --- 一波流 v3 候选（owner 2026-11-17：一波流 = 短期快速大涨后下跌；不用「撤销非一波流」这种双重否定；未接 live）---
+OW3_RALLY_MIN_PCT = (
+    45.0  # 明显上涨：上涨段涨幅 ≥45%，不足 ⇒ 判断不了（横盘 / 单边下跌 / 左侧）
+)
+OW3_FAST_PCT = 50.0  # 一波流：上涨段内任一 ≤OW3_FAST_BARS 根的窗口涨幅 ≥50%
+OW3_FAST_BARS = 20  # 「20 根左右」
+
+
+def check_one_wave_v3(df) -> dict[str, Any]:
+    """一波流判定 v3（候选）。三种结论，正面表述：
+
+    - ``one_wave``（一波流）：上涨段里 ``OW3_FAST_BARS`` 根内涨幅 ≥ ``OW3_FAST_PCT``%，之后回落到当前（短期快速大涨后下跌，A 上 A 下）；
+    - ``healthy``（健康拉升）：上涨段涨幅 ≥ ``OW3_RALLY_MIN_PCT``% 但不是一波流，上涨温和放量（单日量 < 段均量 2 倍）、
+      回调缩量（回调段均量 < 上涨段 0.7 倍）、且无出货；
+    - ``unclear``（判断不了）：没有明显上涨段，或上涨不温和 / 回调不缩量 / 有出货。
+
+    另报 ``distribution``（出货）：阶段高点或次高点前后 3 日有放量大阴（阴线、跌 ≥3%、量 ≥ 前 5 日均量 1.5 倍且大于区内最大阳线量）；
+    ``break_with_volume``（放量跌破启动低点）只作标注，不改结论。上涨段识别同 v2。"""
+    from custos.core.factors.wave_type import WAVE_LOOKBACK  # noqa: PLC0415
+
+    close, opn, high, low, vol = (
+        df[k].astype(float).to_numpy()
+        for k in ("close", "open", "high", "low", "volume")
+    )
+    n = len(df)
+    start = max(0, n - WAVE_LOOKBACK)
+    if n < WAVE_MIN_BARS:
+        return {"status": "unclear", "available": False, "reason": "K 线不足"}
+    seg = _find_rally_segment(df)
+    if seg is not None and seg[2] < n - 2:
+        _, i_low, i_high, _ = seg
+    else:
+        i_high = start + int(high[start:].argmax())
+        if i_high <= start or i_high >= n - 2:
+            return {
+                "status": "unclear",
+                "available": False,
+                "reason": "阶段高点后无回调段",
+            }
+        i_low = start + int(low[start:i_high].argmin())
+    gain = pct_change(float(high[i_high]), float(low[i_low]), digits=2)
+    fast = None
+    for t in range(i_low, i_high + 1):
+        lo = float(low[max(i_low, t - OW3_FAST_BARS + 1) : t + 1].min())
+        g = pct_change(float(high[t]), lo, digits=2)
+        if g is not None and (fast is None or g > fast):
+            fast = g
+    up_vol = vol[i_low : i_high + 1]
+    up_mean = float(up_vol.mean()) if len(up_vol) else 0.0
+    max_burst = float(up_vol.max() / up_mean) if up_mean else None
+    mild = max_burst is not None and max_burst < NOW_MILD_VOL_BURST
+    pull = vol[i_high + 1 :]
+    pull_ratio = float(pull.mean() / up_mean) if len(pull) and up_mean else None
+    shrink = pull_ratio is not None and pull_ratio < NOW_PULLBACK_VOL_RATIO
+    top_bear = _v2_big_bear_zone(close, opn, vol, i_high, i_low + 1, n)
+    second = None
+    for t in range(i_low + 1, i_high - NOW_TOP_ZONE):
+        w = high[max(i_low, t - 3) : t + 4]
+        if high[t] >= w.max() and (second is None or high[t] > high[second]):
+            second = t
+    second_bear = second is not None and _v2_big_bear_zone(
+        close, opn, vol, second, i_low + 1, i_high
+    )
+    distribution = bool(top_bear or second_bear)
+    brk = any(
+        close[t] < close[i_low] and _v2_vol_up(vol, t) for t in range(i_high + 1, n)
+    )
+    if fast is not None and fast >= OW3_FAST_PCT:
+        status = "one_wave"
+    elif (
+        gain is not None
+        and gain >= OW3_RALLY_MIN_PCT
+        and mild
+        and shrink
+        and not distribution
+    ):
+        status = "healthy"
+    else:
+        status = "unclear"
+    return {
+        "status": status,
+        "available": True,
+        "distribution": distribution,
+        "break_with_volume": bool(brk),
+        "rally": {
+            "gain_pct": gain,
+            "fast_gain_pct": fast,
+            "up_bars": int(i_high - i_low),
+            "bars_since_high": int(n - 1 - i_high),
+        },
+        "mild_volume": {
+            "hit": bool(mild),
+            "max_vol_burst": None if max_burst is None else round(max_burst, 3),
+        },
+        "pullback_shrink": {
+            "hit": bool(shrink),
+            "pullback_vol_ratio": None if pull_ratio is None else round(pull_ratio, 3),
+        },
+    }
+
+
 def check_liquidity(df, win: int = LIQUIDITY_WIN) -> dict[str, Any]:
     """流动性：近 win 日均成交额（亿元）。仅计算值，底线判定在 score 层（可配）。"""
     if "amount" not in df.columns or len(df) < 5:

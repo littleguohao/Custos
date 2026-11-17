@@ -115,6 +115,11 @@ MODULES: dict[str, dict[str, Any]] = {
         "defmod": "custos.core.factors.s_shape",
         "fields": ["@sshape_suggest"],
     },
+    "b1_structure_v3": {  # 一波流 v3 候选（owner 2026-11-17）
+        "defmod": "custos.core.factors.b1_structure",
+        "eval": "one_wave_v3",
+        "fields": ["one_wave_v3.status"],
+    },
     "hourglass_b1": {  # v0.535 沙漏后的 B1（owner 2026-11-17：只看沙漏形态）
         "defmod": "custos.core.factors.s_shape",
         "eval": "hourglass_b1",
@@ -354,6 +359,7 @@ def is_hit(v: Any) -> bool:
         "unknown",
         "neutral",
         "insufficient",
+        "unclear",
         "弱",
         "横盘震荡",
         "数据不足",
@@ -404,6 +410,12 @@ def evaluate(
                 for k in keys
             }
         }
+        return {f: field_value(an, f) for f in fields}
+    if spec is not None and spec["eval"] == "one_wave_v3":
+        from custos.core.factors import b1_structure as bsm  # noqa: PLC0415
+
+        with patched(defmod, overrides):
+            an = {"one_wave_v3": bsm.check_one_wave_v3(df.reset_index(drop=True))}
         return {f: field_value(an, f) for f in fields}
     if spec is not None and spec["eval"] == "hourglass_b1":
         from custos.core.factors import s_shape as ssm  # noqa: PLC0415
@@ -1103,8 +1115,9 @@ FIELD_DEF: dict[str, str] = {
     "@sshape_suggest": "S_shape 沙漏评分 S**（0-100）的建议档：压缩收敛 + 枢轴邻近 / 突破 + 量能 + 口袋支点 + 上方套牢 + 均线结构 + 催化 − 放量阴线惩罚；≥70 = 可买、60-69 = 观望、<60 = 不买",
     "hourglass_b1.hit": "沙漏后的 B1（只看形态）：近 60 根内出现过「先收敛、后放量突破」——突破日前 10 根相对再前 10 根日均振幅收敛到 ≤0.75 倍、均量缩到 ≤0.8 倍，突破日收盘站上前 20 根最高价且量 ≥ 前 20 根均量 1.2 倍；当根日 J<13。图上黄线 = 突破的枢轴价（前 20 根最高），标「沙漏突破」",
     "red_green_v2.status": "红肥绿瘦 v2 候选（阴阳量 + 红肥绿瘦合并，owner 2026-11-16）：近 30 根剔除爆量根（量 ≥ 窗口均量 3 倍）后，阳线总量 > 阴线总量、阳线平均实体更大、阳线根数更多 = 阳占优；三项全反 = 阴占优。阶段底部（收盘距近 120 根最高回撤 ≥30%）+ 阳占优 = red_fat（红肥绿瘦）；阶段顶部（距最高 ≤5%）+ 阴占优 = green_fat（绿肥红瘦）；其余 neutral",
-    "non_one_wave_v2.status": "非一波流 v2 候选（owner 2026-11-13）：同 v1 三条件，另 ①放量统一为 ≥前 5 日均量 1.5 倍 ②顶部 / 次高点前后 3 日的放量大阴（阴线跌 ≥3%，量 ≥前 5 日均量 1.5 倍且大于区内最大阳线量）撤销 ③收盘跌破启动低点且放量 = 放量破位，撤销 ④上涨段涨幅 >50% = 一波流，不能判确认（证据不足）",
-    "non_one_wave.status": "非一波流（B1 §四），看最近一段上涨 + 回调：①上涨段温和放量（单日量 < 段均量 2 倍）②阶段高点前后 3 日无放量大阴（跌 >3% 且量 > 前 5 日均量 1.5 倍）③回调段缩量（均量 < 上涨段 0.7 倍）。confirmed = 三条全满足；revoked = 出现顶部放量大阴或回调放量破位；insufficient = 其余或没有完整上涨 + 回调段",
+    "one_wave_v3.status": "一波流判定 v3 候选（owner 2026-11-17：一波流 = 短期快速大涨后下跌，A 上 A 下）。结论三种——一波流：上涨段里 20 根内涨幅 ≥50%；健康拉升：上涨段涨幅 ≥45% 但不是一波流，且上涨温和放量（单日量 < 段均量 2 倍）、回调缩量（< 上涨段 0.7 倍）、无出货；判断不了：没有明显上涨段（横盘 / 单边下跌 / 左侧），或不满足健康拉升条件。另标「出货」（高点 / 次高点前后 3 日放量大阴）",
+    "non_one_wave_v2.status": "一波流判定 v2 候选（owner 2026-11-13）：健康拉升 / 疑似一波流或出货 / 判断不了三种结论；相对 v1：放量统一为 ≥ 前 5 日均量 1.5 倍且大于区内最大阳线量，次高点放量大阴也算出货，上涨段涨幅 >50% 判断不了",
+    "non_one_wave.status": "一波流判定（B1 §四，现行 v1）：看最近一段上涨 + 回调。结论三种——健康拉升（confirmed：上涨温和放量、高点前后 3 日无放量大阴、回调缩量三条全满足）；疑似一波流 / 出货（revoked：高点附近有放量大阴，或回调中放量跌破启动位）；判断不了（insufficient：其余或找不到完整上涨 + 回调）",
     "repair_signals.signals": "B1 修复信号（B1 §四.2）：J 拐头向上（昨日 J≤20 今日上拐）、缩量止跌（量比≤0.7 且涨跌幅在 ±2% 内）是否出现",
     "five_day_entry.hit": "五日战法入场三条件（CZ §十六，缺一不可）：①收盘 > 5 日均价 ②近 3 日量逐日放大，或 3 日都 ≥ 20 日均量 ③近 7 日内有一天量 ≥ 前一日的 1.45 倍",
     "stop_loss_ref.price": "建议止损参考位 = 近 10 个交易日（含当根）的最低价",
@@ -1116,13 +1129,13 @@ FIELD_DEF: dict[str, str] = {
     "ignition.hit": "放量点火：前段缩量之后，出现放量收阳的启动 K 线",
     "pullback_shrink.hit": "回调缩量企稳：自窗口高点回撤，回调段缩量，收盘守住多空线",
     "b1_ignition.hit": "B1 点火：B1 低位之后出现放量启动 K 线",
-    "macd_technics.zone": "MACD 区间：0=双线非水上；1=水上红柱扩张（h0≥h1）；2=水上红柱收缩；3=水上柱体≤0",
+    "macd_technics.zone": "MACD 区间：0 = 双线在水下（DIF / DEA 不全在 0 轴上方）；1 = 水上且红柱放长（本根 ≥ 上根）；2 = 水上但红柱缩短；3 = 水上但柱体已转绿或为 0",
     "macd_technics.bottom_divergence.hit": "MACD 底背离：价格创新低而 MACD 没有创新低",
     "macd_technics.top_divergence.hit": "MACD 顶背离：价格创新高而 MACD 没有创新高",
     "macd_technics.three_peaks.hit": "MACD 三峰形态是否出现",
     "macd_technics.overextended.hit": "MACD 过度伸展：|DIF| 近 120 根分位 ≥90%，且当根柱体与 DIF 同号（至少 20 根）",
     "distribution.risk_level": "主力出货风险等级（B1 §七.3）：none=无命中；watch=至少 1 腿但未达 high；high=命中①/②任一或同时 ≥2 腿",
-    "distribution_confirm.revoked": "①/②出货信号的撤销名单；空名单只表示无撤销或不适用，不是普通漏判",
+    "distribution_confirm.revoked": "出货信号失效名单：之前命中 ① / ② 出货、后来被走势否定的信号；名单为空表示没有失效的信号",
     "wave.wave_type": "拉升波三分类（B1 §四.0）：冲刺波 sprint / 拉升波 rally / 建仓波 buildup，冲突时取保守",
     "@capital_intent.level": "资金意图 = 10 项正向量价/资金流证据按 registry 的 ci_* 权重加分：≥5 强、≥2 中、否则弱；不是单看主力净流入",
 }
@@ -1159,10 +1172,31 @@ VALUE_ZH: dict[str, str] = {
 }
 
 
-def value_zh(value: Any) -> str:
-    """原值 → 「中文（原值）」；无对照的原样返回。"""
+#: 字段专属取值（同一个英文词在不同字段含义不同时用；owner 2026-11-17：不要双重否定）
+FIELD_VALUE_ZH: dict[str, dict[str, str]] = {
+    "non_one_wave.status": {
+        "confirmed": "健康拉升",
+        "revoked": "疑似一波流 / 出货",
+        "insufficient": "判断不了",
+    },
+    "non_one_wave_v2.status": {
+        "confirmed": "健康拉升",
+        "revoked": "疑似一波流 / 出货",
+        "insufficient": "判断不了",
+    },
+    "one_wave_v3.status": {
+        "one_wave": "一波流",
+        "healthy": "健康拉升",
+        "unclear": "判断不了",
+    },
+    "distribution_confirm.revoked": {"-": "无失效信号"},
+}
+
+
+def value_zh(value: Any, field: str = "") -> str:
+    """原值 → 「中文（原值）」；字段专属对照优先；无对照的原样返回。"""
     v = str(value)
-    zh = VALUE_ZH.get(v)
+    zh = FIELD_VALUE_ZH.get(field, {}).get(v) or VALUE_ZH.get(v)
     return f"{zh}（{v}）" if zh else v
 
 
@@ -1170,7 +1204,7 @@ def ask_html(field: str, cls: str, value: Any, boundary: str = "") -> str:
     """图块顶部「检测器在问什么」说明（v0.516）。数值型字段问「这个数算得对吗」。"""
     d = FIELD_DEF.get(field, f"{field}（定义见检测器源码）")
     is_bool0 = str(value).strip().lower() in ("true", "false")
-    v = html.escape(str(value) if is_bool0 else value_zh(value))
+    v = html.escape(str(value) if is_bool0 else value_zh(value, field))
     is_bool = str(value).strip().lower() in ("true", "false")
     if field in ("stop_loss_ref.price", "liquidity.avg_amount_yi"):
         q = f"检测器算出：<b>{v}</b>。请判断：按上面的定义，这个数算得对吗？"
@@ -1201,12 +1235,16 @@ def upgrade_gallery(d: Path) -> int:
     )  # 幂等：去旧 UI
     g = _re.sub(r"<style>\.lbl.*?</style><div id='bar'>.*?</div>", "", g, flags=_re.S)
     g = _re.sub(r"<div class='q'[^>]*>.*?</div>", "", g, flags=_re.S)  # v0.516 幂等
-    # 标题行检测值中文化（owner 2026-11-17；已中文化的值不在对照表 ⇒ 幂等）
+
+    # 标题行检测值中文化（owner 2026-11-17）：已中文化的「中文（原值）」取括注原值重算 ⇒ 幂等、对照表改了也能刷新
+    def _title(m: Any) -> str:
+        head, shown, raw, tail = m.group(1), m.group(2), m.group(3), m.group(4)
+        field = head.rsplit("] ", 1)[-1].rstrip("=")
+        return head + html.escape(value_zh(html.unescape(raw or shown), field)) + tail
+
     g = _re.sub(
-        r"(<div class='t'>#\d+ [^<]*?=)([^<（]+?)((?:（边界：[^<]*）)?</div>)",
-        lambda m: (
-            m.group(1) + html.escape(value_zh(html.unescape(m.group(2)))) + m.group(3)
-        ),
+        r"(<div class='t'>#\d+ [^<]*?=)([^<（]+?)(?:（(?!边界)([^<（）]+)）)?((?:（边界：[^<]*）)?</div>)",
+        _title,
         g,
     )
     if "const KC = " in g:  # v0.506 KLineChart 版：图块已带 data-id，不再包裹
@@ -1805,7 +1843,7 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
             for r in rows:
                 row = next(it)
                 fr = frames.get(tuple(r["key"]))
-                title = f"#{row[0]} {row[2]} {row[3]} [{r['class']}] {f}={value_zh(r['value'])}"
+                title = f"#{row[0]} {row[2]} {row[3]} [{r['class']}] {f}={value_zh(r['value'], f)}"
                 if row[6]:
                     title += f"（边界：{row[6]}）"
                 if use_kc:

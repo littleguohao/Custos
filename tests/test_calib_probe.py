@@ -22,7 +22,7 @@ def test_numeric_fields_and_revoked_list_excluded_from_calibration():
     assert cp.MODULES["distribution"]["fields"] == ["distribution.risk_level"]
     prompt = cp.ask_html("distribution.risk_level", "hit", "watch")
     assert "none=无命中" in prompt and "high=命中①/②任一或同时 ≥2 腿" in prompt
-    assert "不是普通漏判" in cp.FIELD_DEF["distribution_confirm.revoked"]
+    assert "名单为空表示没有失效的信号" in cp.FIELD_DEF["distribution_confirm.revoked"]
     assert "10 项" in cp.FIELD_DEF["@capital_intent.level"]
 
 
@@ -624,5 +624,8 @@ def test_label_ui_prefill_and_hidden_v0518():
 def test_values_shown_in_chinese_v0537():
     """owner 2026-11-17：检测值显示中文（原值括注），labels 原值不变。"""
     assert cp.value_zh("revoked") == "撤销（revoked）" and cp.value_zh("中") == "中"
-    assert "撤销（revoked）" in cp.ask_html("non_one_wave.status", "hit", "revoked")
+    assert "疑似一波流 / 出货（revoked）" in cp.ask_html(
+        "non_one_wave.status", "hit", "revoked"
+    )  # 字段专属，不用双重否定
+    assert "一波流（one_wave）" in cp.ask_html("one_wave_v3.status", "hit", "one_wave")
     assert "成立（成立" not in cp.ask_html("five_day_entry.hit", "hit", "True")
