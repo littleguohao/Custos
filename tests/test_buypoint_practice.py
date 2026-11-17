@@ -187,3 +187,13 @@ def test_review_empty_guard(tmp_path):
         == 2
     )
     assert not (tmp_path / "review.md").exists()
+
+
+def test_trade_sim_reading_truncated_to_segment_v0534():
+    """2026-11-17 owner 指正：主读数改按现行出场规则模拟交易；K 线截到段末，段外数据改动不影响结果。"""
+    df = _df(500, 3)
+    a = bp.trade_of(df, 300, 420)
+    df2 = df.copy()
+    df2.loc[421:, "close"] = df2.loc[421:, "close"] * 3  # 段外剧变
+    assert bp.trade_of(df2, 300, 420) == a
+    assert a is None or set(a) >= {"ret", "holding", "reason", "open_end"}

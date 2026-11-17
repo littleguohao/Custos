@@ -210,6 +210,51 @@ def _stat(xs: list[float]) -> dict[str, Any]:
     }
 
 
+COST_BPS = 25.0
+
+
+def trade_of(df: Any, i: int, limit: int) -> Optional[dict[str, Any]]:
+    """按现行出场规则（R47 参照格 ``LIVE_PARAMS``）模拟 i 日收盘买入的一笔交易（2026-11-17 owner 指正）。
+
+    K 线截到 ``limit``（所在挖掘段末）——不读段外；段末仍持有 ⇒ ``open_end=True``（不计入已实现读数）。"""
+    from custos.core.indicators import bbi_series  # noqa: PLC0415
+    from custos.research import backtest_factors as bt  # noqa: PLC0415
+    from custos.research import plan_rules_replay as prr  # noqa: PLC0415
+
+    d = df.iloc[: limit + 1].reset_index(drop=True)
+    tr = bt.simulate_b1_trade(d, i, bbi_series(d["close"]), **prr.LIVE_PARAMS)
+    if tr.get("skipped"):
+        return None
+    return {
+        "ret": round(float(tr["ret"]) * 100 - COST_BPS / 100, 3),
+        "holding": int(tr.get("holding") or 0),
+        "reason": tr.get("reason"),
+        "open_end": bool(bt.is_unrealized_reason(tr.get("reason"))),
+    }
+
+
+def _trade_stats(g: list[dict[str, Any]]) -> dict[str, Any]:
+    tr = [p["trade"] for p in g if p.get("trade") and not p["trade"]["open_end"]]
+    oe = sum(1 for p in g if p.get("trade") and p["trade"]["open_end"])
+    if not tr:
+        return {"n": 0, "open_end": oe}
+    r = [t["ret"] for t in tr]
+    win = [x for x in r if x > 0]
+    loss = [-x for x in r if x < 0]
+    payoff = (sum(win) / len(win)) / (sum(loss) / len(loss)) if win and loss else None
+    wr = len(win) / len(r)
+    return {
+        "n": len(r),
+        "mean": round(st.mean(r), 2),
+        "median": round(st.median(r), 2),
+        "win_rate": round(wr, 4),
+        "payoff": None if payoff is None else round(payoff, 2),
+        "margin": None if payoff is None else round(wr - 1 / (1 + payoff), 4),
+        "holding_median": st.median([t["holding"] for t in tr]),
+        "open_end": oe,
+    }
+
+
 def review_rows(labels: list[dict[str, str]], loader: Any = None) -> dict[str, Any]:
     """逐条复盘 + 汇总。``loader(code, seg) -> df``（测试注入）。"""
     loader = loader or _load
@@ -239,6 +284,7 @@ def review_rows(labels: list[dict[str, str]], loader: Any = None) -> dict[str, A
             "tags": tags,
             "now": now,
         }
+        rec["trade"] = trade_of(df, i, limit)
         rec["state"] = {t: rr.STATE_CHECK[t](a, i) for t in tags if t in rr.STATE_CHECK}
         rec["wait"] = {}
         for t in tags:
@@ -270,6 +316,23 @@ def summarize(per: list[dict[str, Any]]) -> dict[str, Any]:
             "mfe": _stat([p["now"]["mfe"] for p in g]),
             "mae": _stat([p["now"]["mae"] for p in g]),
         }
+    trades = {
+        j: _trade_stats([p for p in per if p["judge"] == j])
+        for j in ("买", "不买", "等")
+    }
+    trades["全部"] = _trade_stats(per)
+    real = [p for p in per if p.get("trade") and not p["trade"]["open_end"]]
+    tb = [p for p in real if p["judge"] == "买"]
+    tn = [p for p in real if p["judge"] == "不买"]
+    trade_acc = {
+        "buy_profit": [sum(p["trade"]["ret"] > 0 for p in tb), len(tb)],
+        "nobuy_would_lose": [sum(p["trade"]["ret"] <= 0 for p in tn), len(tn)],
+        "base_profit_rate": round(
+            sum(p["trade"]["ret"] > 0 for p in real) / len(real), 4
+        )
+        if real
+        else None,
+    }
     buy = [p for p in ok if p["judge"] == "买"]
     nob = [p for p in ok if p["judge"] == "不买"]
     hb = sum(p["now"]["r20"] > 0 for p in buy)
@@ -315,6 +378,8 @@ def summarize(per: list[dict[str, Any]]) -> dict[str, Any]:
         "n_forward": len(ok),
         "base_r20": _stat(base),
         "by_judge": by_judge,
+        "trades": trades,
+        "trade_accuracy": trade_acc,
         "accuracy": acc,
         "state_check": state,
         "wait": wait,
@@ -330,6 +395,17 @@ def _fmt(s: dict[str, Any]) -> str:
     )
 
 
+def _trade_row(j: str, t: dict[str, Any]) -> str:
+    if not t["n"]:
+        return f"| {j} | 0 | — | — | — | — | — | {t['open_end']} |"
+    pf = "—" if t["payoff"] is None else t["payoff"]
+    mg = "—" if t["margin"] is None else f"{t['margin']:+.3f}"
+    return (
+        f"| {j} | {t['n']} | {t['mean']:+.2f}% / {t['median']:+.2f}% | {t['win_rate']:.0%} | {pf} | {mg}"
+        f" | {t['holding_median']} | {t['open_end']} |"
+    )
+
+
 def render_md(rep: dict[str, Any]) -> str:
     s = rep["summary"]
     a = s["accuracy"]
@@ -340,7 +416,19 @@ def render_md(rep: dict[str, Any]) -> str:
         if s["accuracy"]["base_up_rate"] is not None
         else f"有效判断 {s['n']} 条。",
         "",
-        "## ① 判断 × 当根买入 20 日",
+        "## ① 判断 × 按现行出场规则模拟交易（主读数；R47 参照格 LIVE_PARAMS，成本 25bp）",
+        "",
+        "| 判断 | 笔数 | 已实现收益（均 / 中） | 胜率 | 盈亏比 | margin | 持有中位（天） | 段末未平 |",
+        "|---|---:|---|---:|---:|---:|---:|---:|",
+        *[_trade_row(j, t) for j, t in s["trades"].items()],
+        "",
+        "准确率（交易口径）：买 → 盈利 {}/{}；不买 → 买了会亏 {}/{}；同批盈利比例 {}。".format(
+            *s["trade_accuracy"]["buy_profit"],
+            *s["trade_accuracy"]["nobuy_would_lose"],
+            s["trade_accuracy"]["base_profit_rate"],
+        ),
+        "",
+        "## ①b 副读数：当根买入 20 日",
         "",
         "| 判断 | 20 日（均 / 中） | 上涨比例 | 20 日内最大涨 | 最大回撤 |",
         "|---|---|---|---|---|",
