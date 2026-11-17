@@ -514,9 +514,9 @@ def check_one_wave_v3(df) -> dict[str, Any]:
     """一波流判定 v3（候选）。三种结论，正面表述：
 
     - ``one_wave``（一波流）：上涨段里 ``OW3_FAST_BARS`` 根内涨幅 ≥ ``OW3_FAST_PCT``%，之后回落到当前（短期快速大涨后下跌，A 上 A 下）；
-    - ``healthy``（健康拉升）：上涨段涨幅 ≥ ``OW3_RALLY_MIN_PCT``% 但不是一波流，上涨温和放量（单日量 < 段均量 2 倍）、
-      回调缩量（回调段均量 < 上涨段 0.7 倍）、且无出货；
-    - ``unclear``（判断不了）：没有明显上涨段，或上涨不温和 / 回调不缩量 / 有出货。
+    - ``healthy``（健康拉升）：上涨段涨幅 ≥ ``OW3_RALLY_MIN_PCT``% 但不是一波流，回调缩量（回调段均量 < 上涨段 0.7 倍）且无出货
+      （owner 2026-11-17 去掉「温和放量」——大涨段几乎都有单日放量，该条使健康拉升近乎为零；``mild_volume`` 仍只作读数）；
+    - ``unclear``（判断不了）：没有明显上涨段，或回调不缩量 / 有出货。
 
     另报 ``distribution``（出货）：阶段高点或次高点前后 3 日有放量大阴（阴线、跌 ≥3%、量 ≥ 前 5 日均量 1.5 倍且大于区内最大阳线量）；
     ``break_with_volume``（放量跌破启动低点）只作标注，不改结论。上涨段识别同 v2。"""
@@ -574,8 +574,7 @@ def check_one_wave_v3(df) -> dict[str, Any]:
     elif (
         gain is not None
         and gain >= OW3_RALLY_MIN_PCT
-        and mild
-        and shrink
+        and shrink  # owner 2026-11-17：去掉「温和放量」
         and not distribution
     ):
         status = "healthy"

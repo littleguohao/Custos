@@ -58,7 +58,7 @@
     },
     "b1_structure": {
       "version": 1,
-      "source_digest": "cea7830afa9b711b2c8f",
+      "source_digest": "32d10908d25666536ac0",
       "history": [
         {
           "version": 1,
@@ -84,6 +84,16 @@
           "version": 1,
           "date": "2026-11-17",
           "refactor": "新增一波流 v3 候选 check_one_wave_v3（未接 live）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-17",
+          "refactor": "一波流 v3 候选去掉温和放量条件（未接 live）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-17",
+          "refactor": "一波流 v3 候选去掉温和放量条件（未接 live）"
         }
       ]
     },

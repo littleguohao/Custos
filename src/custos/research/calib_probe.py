@@ -916,6 +916,23 @@ def _diff_md(d: dict[str, Any], module: str) -> str:
     return "\n".join(lines)
 
 
+def _stratified(keys: list, base: dict, f: str, n: int, rng: Any) -> list:
+    """按检测值分层抽 n 个（v0.539：多档结论如 一波流 / 健康拉升 各有样本；单一取值时与原随机抽样等价）。"""
+    groups: dict[str, list] = {}
+    for k in keys:
+        groups.setdefault(str(base[k].get(f)), []).append(k)
+    if len(groups) <= 1:
+        return rng.sample(keys, min(n, len(keys)))
+    per = -(-n // len(groups))
+    picked: list = []
+    for v in sorted(groups):
+        picked += rng.sample(groups[v], min(per, len(groups[v])))
+    rest = [k for k in keys if k not in set(picked)]
+    if len(picked) < n and rest:
+        picked += rng.sample(rest, min(n - len(picked), len(rest)))
+    return picked[:n]
+
+
 def _samples(pool, base, hits, flips, fields, args, rng) -> dict[str, list[dict]]:
     out: dict[str, list[dict]] = {}
     for f in fields:
@@ -931,7 +948,7 @@ def _samples(pool, base, hits, flips, fields, args, rng) -> dict[str, list[dict]
         }
         rows = []
         for c, keys in cls.items():
-            for key in rng.sample(keys, min(args.n_show, len(keys))):
+            for key in _stratified(keys, base, f, args.n_show, rng):
                 ps = sorted(p for (ff, p), v in flips.items() if ff == f and key in v)
                 rows.append(
                     {
@@ -1115,7 +1132,7 @@ FIELD_DEF: dict[str, str] = {
     "@sshape_suggest": "S_shape 沙漏评分 S**（0-100）的建议档：压缩收敛 + 枢轴邻近 / 突破 + 量能 + 口袋支点 + 上方套牢 + 均线结构 + 催化 − 放量阴线惩罚；≥70 = 可买、60-69 = 观望、<60 = 不买",
     "hourglass_b1.hit": "沙漏后的 B1（只看形态）：近 60 根内出现过「先收敛、后放量突破」——突破日前 10 根相对再前 10 根日均振幅收敛到 ≤0.75 倍、均量缩到 ≤0.8 倍，突破日收盘站上前 20 根最高价且量 ≥ 前 20 根均量 1.2 倍；当根日 J<13。图上黄线 = 突破的枢轴价（前 20 根最高），标「沙漏突破」",
     "red_green_v2.status": "红肥绿瘦 v2 候选（阴阳量 + 红肥绿瘦合并，owner 2026-11-16）：近 30 根剔除爆量根（量 ≥ 窗口均量 3 倍）后，阳线总量 > 阴线总量、阳线平均实体更大、阳线根数更多 = 阳占优；三项全反 = 阴占优。阶段底部（收盘距近 120 根最高回撤 ≥30%）+ 阳占优 = red_fat（红肥绿瘦）；阶段顶部（距最高 ≤5%）+ 阴占优 = green_fat（绿肥红瘦）；其余 neutral",
-    "one_wave_v3.status": "一波流判定 v3 候选（owner 2026-11-17：一波流 = 短期快速大涨后下跌，A 上 A 下）。结论三种——一波流：上涨段里 20 根内涨幅 ≥50%；健康拉升：上涨段涨幅 ≥45% 但不是一波流，且上涨温和放量（单日量 < 段均量 2 倍）、回调缩量（< 上涨段 0.7 倍）、无出货；判断不了：没有明显上涨段（横盘 / 单边下跌 / 左侧），或不满足健康拉升条件。另标「出货」（高点 / 次高点前后 3 日放量大阴）",
+    "one_wave_v3.status": "一波流判定 v3 候选（owner 2026-11-17：一波流 = 短期快速大涨后下跌，A 上 A 下）。结论三种——一波流：上涨段里 20 根内涨幅 ≥50%；健康拉升：上涨段涨幅 ≥45% 但不是一波流，且回调缩量（回调段均量 < 上涨段 0.7 倍）、无出货；判断不了：没有明显上涨段（横盘 / 单边下跌 / 左侧），或回调不缩量 / 有出货。另标「出货」（高点 / 次高点前后 3 日放量大阴）",
     "non_one_wave_v2.status": "一波流判定 v2 候选（owner 2026-11-13）：健康拉升 / 疑似一波流或出货 / 判断不了三种结论；相对 v1：放量统一为 ≥ 前 5 日均量 1.5 倍且大于区内最大阳线量，次高点放量大阴也算出货，上涨段涨幅 >50% 判断不了",
     "non_one_wave.status": "一波流判定（B1 §四，现行 v1）：看最近一段上涨 + 回调。结论三种——健康拉升（confirmed：上涨温和放量、高点前后 3 日无放量大阴、回调缩量三条全满足）；疑似一波流 / 出货（revoked：高点附近有放量大阴，或回调中放量跌破启动位）；判断不了（insufficient：其余或找不到完整上涨 + 回调）",
     "repair_signals.signals": "B1 修复信号（B1 §四.2）：J 拐头向上（昨日 J≤20 今日上拐）、缩量止跌（量比≤0.7 且涨跌幅在 ±2% 内）是否出现",
