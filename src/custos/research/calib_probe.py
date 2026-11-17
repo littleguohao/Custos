@@ -1134,10 +1134,43 @@ _CLASS_ASK = {
 }
 
 
+#: 检测值的中文显示（只影响图集文字，labels.csv 与产物仍存原值；owner 2026-11-17）
+VALUE_ZH: dict[str, str] = {
+    "True": "成立",
+    "False": "不成立",
+    "true": "成立",
+    "false": "不成立",
+    "None": "无数据",
+    "revoked": "撤销",
+    "confirmed": "确认",
+    "insufficient": "证据不足",
+    "red_fat": "红肥绿瘦",
+    "green_fat": "绿肥红瘦",
+    "neutral": "中性",
+    "none": "无",
+    "watch": "观察",
+    "high": "高",
+    "mainline_confirmed": "主线确认",
+    "retreat": "撤退",
+    "sprint": "冲刺波",
+    "rally": "拉升波",
+    "buildup": "建仓波",
+    "unknown": "未知",
+}
+
+
+def value_zh(value: Any) -> str:
+    """原值 → 「中文（原值）」；无对照的原样返回。"""
+    v = str(value)
+    zh = VALUE_ZH.get(v)
+    return f"{zh}（{v}）" if zh else v
+
+
 def ask_html(field: str, cls: str, value: Any, boundary: str = "") -> str:
     """图块顶部「检测器在问什么」说明（v0.516）。数值型字段问「这个数算得对吗」。"""
     d = FIELD_DEF.get(field, f"{field}（定义见检测器源码）")
-    v = html.escape(str(value))
+    is_bool0 = str(value).strip().lower() in ("true", "false")
+    v = html.escape(str(value) if is_bool0 else value_zh(value))
     is_bool = str(value).strip().lower() in ("true", "false")
     if field in ("stop_loss_ref.price", "liquidity.avg_amount_yi"):
         q = f"检测器算出：<b>{v}</b>。请判断：按上面的定义，这个数算得对吗？"
@@ -1168,6 +1201,14 @@ def upgrade_gallery(d: Path) -> int:
     )  # 幂等：去旧 UI
     g = _re.sub(r"<style>\.lbl.*?</style><div id='bar'>.*?</div>", "", g, flags=_re.S)
     g = _re.sub(r"<div class='q'[^>]*>.*?</div>", "", g, flags=_re.S)  # v0.516 幂等
+    # 标题行检测值中文化（owner 2026-11-17；已中文化的值不在对照表 ⇒ 幂等）
+    g = _re.sub(
+        r"(<div class='t'>#\d+ [^<]*?=)([^<（]+?)((?:（边界：[^<]*）)?</div>)",
+        lambda m: (
+            m.group(1) + html.escape(value_zh(html.unescape(m.group(2)))) + m.group(3)
+        ),
+        g,
+    )
     if "const KC = " in g:  # v0.506 KLineChart 版：图块已带 data-id，不再包裹
         n = g.count("<div class='s' data-id=")
     else:
@@ -1764,7 +1805,7 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
             for r in rows:
                 row = next(it)
                 fr = frames.get(tuple(r["key"]))
-                title = f"#{row[0]} {row[2]} {row[3]} [{r['class']}] {f}={r['value']}"
+                title = f"#{row[0]} {row[2]} {row[3]} [{r['class']}] {f}={value_zh(r['value'])}"
                 if row[6]:
                     title += f"（边界：{row[6]}）"
                 if use_kc:

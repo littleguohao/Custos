@@ -619,3 +619,10 @@ def test_label_ui_prefill_and_hidden_v0518():
         and '"hidden": ["2"]' in ui
         and "HID.has" in ui
     )
+
+
+def test_values_shown_in_chinese_v0537():
+    """owner 2026-11-17：检测值显示中文（原值括注），labels 原值不变。"""
+    assert cp.value_zh("revoked") == "撤销（revoked）" and cp.value_zh("中") == "中"
+    assert "撤销（revoked）" in cp.ask_html("non_one_wave.status", "hit", "revoked")
+    assert "成立（成立" not in cp.ask_html("five_day_entry.hit", "hit", "True")
