@@ -9,7 +9,7 @@
 ## 现状
 
 - **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 74 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
-  **P1 live 展示 98 个**（1800 证据标注，不进判定）、P2 研究 67 个。
+  **P1 live 展示 99 个**（1800 证据标注，不进判定）、P2 研究 67 个。
 - **定义校准：0 / 233**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
 - **清单未覆盖**（需在逐因子校准时一并核）：①函数体内联常量（KDJ 9/3/3、BBI 周期、20 日相对强度窗口等）；
   ②打分权重与分档（`DEFAULT_TECH_WEIGHTS`、`tech_strong/mid` 60/30、资金意图 `ci_*` 与 `CAP_STRONG/MID`——属打分，R35 终局 A 已收口，
@@ -164,6 +164,9 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 - `s_shape`：J<13 池 2000 根里 **S** 全部 < 60（建议档全为「不买」）**，抽样只得 13 张。开发机快照挖掘 B 抽 150 票：J<13 时 S** 中位 14、p99 37，
   无一 ≥60；J≥13 时中位 27、p90 59、≥60 占 9%。S_shape 是突破 / 压缩型评分，与 B1 超跌形态天然相反——**在 B1 候选上不具备可校准的信息**，
   coder 建议从 1800 候选表撤出（检测器保留给研究），待 owner 定。
+- **owner 2026-11-17 定：改为「沙漏后的 B1」，只看沙漏形态本身**（v0.535 候选 `s_shape.detect_hourglass_then_b1`，未接 live）：近 60 根内出现「先收敛、后放量突破」
+  （突破日前 10 根相对再前 10 根日均振幅 ≤0.75 倍、均量 ≤0.8 倍；突破日收盘站上前 20 根最高价且量 ≥ 前 20 根均量 1.2 倍——阈值沿用 S_shape 的 VCP / 枢轴 / 放量常量），
+  当根日 J<13。J<13 池命中 11.5%（S** 总分口径近 60 根 ≥70 为 61%，太宽）。图集 `hourglass_b1__mining_v1`（36 张，图上标突破枢轴线）。校准通过后替换候选表的 S_shape 展示。
 ### b1_thresholds（owner 上周末标注，2026-11-17 读回；`labels_owner_20261117.csv`）
 
 - 周 J（36 条，错 15）：图集只有日 J 副图、无周线 J，owner 按日 J 判（「这个 J 都 95 了怎么处于低位」）——**这批不作证据**，与 v0.523「周 J 退出人工校准」一致，只留档。
@@ -319,7 +322,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `wave_type` | `WAVE_START_CANDLE_VOL` | 1.5 | 待回测参数：启动段放量倍数 | active；R2 | 未校准 |
 | `wave_type` | `WAVE_SECOND_START_GAIN` | 15.0 | 待回测参数：二次启动（前一段摆动幅度%下限） | active；R2 | 未校准 |
 
-### P1（98 个参数）
+### P1（99 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -419,6 +422,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `s_shape` | `PEN_FRONTHIGH_PCT` | 5.0 | 前高距收盘 ≤此% → 惩罚减半 | needs_work；R2 | 未校准 |
 | `s_shape` | `SSTAR_STRONG` | 65.0 | - | needs_work；R2 | 未校准 |
 | `s_shape` | `SSTAR_MID` | 40.0 | - | needs_work；R2 | 未校准 |
+| `s_shape` | `HOURGLASS_LOOKBACK` | 60 | 沙漏事件回看根数（同 SB 异动后的 B1） | needs_work；R2 | 候选（owner 2026-11-17，抽检图集 `hourglass_b1__mining_v1`） |
 | `sector_phase` | `PHASE_LOOKBACK` | 60 | 顶背离/三打回看窗口(交易日) | active；R4 | 未校准 |
 | `sector_phase` | `PHASE_FRACTAL` | 2 | 摆动高点左右确认根数 | active；R4 | 未校准 |
 

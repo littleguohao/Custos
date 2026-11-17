@@ -462,12 +462,17 @@
     },
     "s_shape": {
       "version": 1,
-      "source_digest": "56057ae308c7a49ba66c",
+      "source_digest": "e9178e7ae6aecf31ba83",
       "history": [
         {
           "version": 1,
           "date": "2026-11-03",
           "change": "初始版本（定义校准前基线，TODO #121）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-17",
+          "refactor": "新增 hourglass_events / detect_hourglass_then_b1 候选（未接 live）"
         }
       ]
     },

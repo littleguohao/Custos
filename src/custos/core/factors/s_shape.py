@@ -436,6 +436,70 @@ def compute_s_shape(df, code: str = "") -> dict[str, Any]:
         }
 
 
+# ---- 沙漏后的 B1（v0.535 候选，owner 2026-11-17：只看沙漏形态本身；未接 live）----
+HOURGLASS_LOOKBACK = 60  # 沙漏事件回看根数（同 SB 异动后的 B1）
+
+
+def hourglass_events(df) -> list[dict[str, Any]]:
+    """沙漏事件：t 日之前 VCP_LEG 根相对再前 VCP_LEG 根**振幅收敛**（比 ≤ VCP_RANGE_MILD）且**缩量**（比 ≤ VCP_VOL_MILD），
+    t 日**放量突破**枢轴（收盘 > 前 PIVOT_BASE_WIN 根最高价，且量 ≥ 前 20 根均量 × VOL_SURGE_RATIO）。只读 ≤t。"""
+    close, high, low, vol, _ = _arrays(df)
+    n = len(df)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rng = (high - low) / np.where(close == 0, np.nan, close)
+    out: list[dict[str, Any]] = []
+    start = max(2 * VCP_LEG, PIVOT_BASE_WIN)
+    for t in range(start, n):
+        pr = float(np.nanmean(rng[t - 2 * VCP_LEG : t - VCP_LEG]))
+        pv = float(vol[t - 2 * VCP_LEG : t - VCP_LEG].mean())
+        if not pr or not pv:
+            continue
+        rr = float(np.nanmean(rng[t - VCP_LEG : t])) / pr
+        vr = float(vol[t - VCP_LEG : t].mean()) / pv
+        pivot = float(high[t - PIVOT_BASE_WIN : t].max())
+        vma = float(vol[t - 20 : t].mean())
+        if (
+            rr <= VCP_RANGE_MILD
+            and vr <= VCP_VOL_MILD
+            and close[t] > pivot
+            and vma
+            and vol[t] >= VOL_SURGE_RATIO * vma
+        ):
+            out.append(
+                {
+                    "t": t,
+                    "pivot": round(pivot, 4),
+                    "range_ratio": round(rr, 3),
+                    "vol_ratio": round(vr, 3),
+                }
+            )
+    return out
+
+
+def detect_hourglass_then_b1(df, lookback: int = HOURGLASS_LOOKBACK) -> dict[str, Any]:
+    """沙漏后的 B1：近 ``lookback`` 根内（不含当根）出现过沙漏事件，且当根日 J < 13。绝不 raise。"""
+    try:
+        n = len(df)
+        if n < 2 * VCP_LEG + PIVOT_BASE_WIN:
+            return {"available": False, "hit": False}
+        j, _j_prev = _kdj_jvals(df)
+        evs = [e for e in hourglass_events(df) if n - 1 - lookback <= e["t"] < n - 1]
+        last = evs[-1] if evs else None
+        return {
+            "available": j is not None,
+            "hit": bool(last and j is not None and j < 13),
+            "j": j,
+            "event": None if last is None else {**last, "bars_ago": n - 1 - last["t"]},
+            "n_events": len(evs),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "available": False,
+            "hit": False,
+            "error": f"{type(exc).__name__}:{str(exc)[:80]}",
+        }
+
+
 def sstar_level(s_star: Optional[float]) -> str:
     """S** → 技术面层级（强/中/弱），供分层矩阵；阈值待回测。"""
     if s_star is None:
