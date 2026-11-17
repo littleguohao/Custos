@@ -294,3 +294,9 @@ def test_r51(tmp_path, monkeypatch):
 
     rep = tar.world_report(tmp_path, monkeypatch)
     _assert_complete("r51", _dump(tmp_path, "r51", rep))
+
+
+def test_r52(tmp_path):
+    import test_remark_entry_study as tre
+
+    _assert_complete("r52", _dump(tmp_path, "r52", tre.world_report(tmp_path)))

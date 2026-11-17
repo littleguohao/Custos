@@ -166,6 +166,8 @@ git commit -m "batch b1 reads" && git push
 
 ## 第二批预告（不在第一批，第一批判定段读完后再跑）
 
+> **R52（v0.536 起同排第二批，只读挖掘段）**：`uv run python -m custos.research remark_entry_study --warm-procs <物理核数-2> --tag r52_v1`，产物 `artifacts/logs/remark_entry/_remark_entry__r52_v1.json`，回填 `result_digest r52`。
+
 > **修订注记（v0.529，跑数前）**：live 技术分权重改动（强 RS 15→0、五日战法 8→0）⇒ 研究侧 as-of V0 技术分（`asof_technical_score`，同 live 默认权重）随之变化——第二批各单元的 V0 分 / 1800 观察线口径即 v0.529 口径，跑数前不再改；V0 分缓存会整体失效（冷缓存打分耗时见上）。
 
 > **提速（v0.508）**：第二批四工具（R47 / R48 / R49 / R50）一律加 `--warm-procs <物理核数-2>`（替代 `--load-workers`）；开发机实测 V0 预热 300 票 6.6×、R50 100 票端到端 627s → 66s（9.5×），产物逐字段相同。🔄 **v0.514 更正**：66s 是 V0 分缓存命中的读数；冷缓存实测 482s，其中 V0 打分占 435s（90%）——第二批真瓶颈是打分，`--score-workers` 一律取 `<物理核数-2>`（估：R50 冷缓存实测约 71ms/bar/进程、每票约 490 根待打分 bar ⇒ 全宇宙 5,500 票约 2.7M bar，10 进程约 5 小时、20 进程约 2.7 小时；以 stderr `[warm-score]` / `[TIME] warm` 为准）；打分相关源码任何改动都会让缓存整体失效，跑数前勿改 `core/**`、`pipeline/screening/**`、`score_return_study.py`、契约 JSON。R50 命令同理：`swing_recall_study --tag r50_v1 --warm-procs <物理核数-2> --score-workers <物理核数-2>`。

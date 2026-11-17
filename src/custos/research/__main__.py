@@ -202,6 +202,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "（--mode make，KLineChart 图集，买 / 不买 / 等 + 批语）与复盘（--mode review：判断 × 20 日走势、"
         "批语状态核实、等待条件触发 vs 当根买、未触发放弃是否躲亏）",
     ),
+    "remark_entry_study": (
+        "study",
+        "R52 owner 批语入场规则（v0.536，预注册）：同一批 B1 信号上，等绿柱缩短 / 底分型 / 回 0 轴 / 企稳再进（20 根内不出现即放弃）"
+        "或按放量下跌 / 绿柱增大 / 刚死叉 / 离 0 轴远过滤，相对当根进的 Δmargin（簇配对 bootstrap + 同参与率随机臂，m=8）",
+    ),
     "remark_rules": (
         "diagnostic",
         "owner 批语规则机械化定义（v0.517 单一来源，买点练习复盘与 R52 共用）：状态陈述核实、等待条件触发、前向读数；"

@@ -428,6 +428,23 @@ SPECS: dict[str, tuple[str, list[str]]] = {
             *_PROV,
         ],
     ),
+    "r52": (
+        "R52",
+        [
+            "criteria_version",
+            "n_signals",
+            "verdicts",
+            "arms.*.windows",
+            "arms.*.merged_delta",
+            "arms.*.c4",
+            "arms.*.yearly_b",
+            "arms.*.C1",
+            "arms.*.C2",
+            "arms.*.C3",
+            "arms.*.verdict",
+            *_PROV,
+        ],
+    ),
     "r51": (
         "R51",
         [
