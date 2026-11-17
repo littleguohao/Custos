@@ -445,6 +445,8 @@ def hourglass_events(df) -> list[dict[str, Any]]:
     t 日**放量突破**枢轴（收盘 > 前 PIVOT_BASE_WIN 根最高价，且量 ≥ 前 20 根均量 × VOL_SURGE_RATIO）。只读 ≤t。"""
     close, high, low, vol, _ = _arrays(df)
     n = len(df)
+    # ⚠️ 与 `indicators.amplitude_pct` 的「(高−低)/前收」**刻意不同**：同 compute_vcp 的 VCP 压缩度中间量，
+    #    只作 recent/prior 比值，分母口径在比值里抵消（与 VCP 同口径才是同一个「沙漏」）。
     with np.errstate(divide="ignore", invalid="ignore"):
         rng = (high - low) / np.where(close == 0, np.nan, close)
     out: list[dict[str, Any]] = []

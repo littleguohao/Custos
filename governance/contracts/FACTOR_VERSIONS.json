@@ -473,6 +473,11 @@
           "version": 1,
           "date": "2026-11-17",
           "refactor": "新增 hourglass_events / detect_hourglass_then_b1 候选（未接 live）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-17",
+          "refactor": "沙漏候选补口径注释"
         }
       ]
     },
