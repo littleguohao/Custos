@@ -58,7 +58,7 @@
     },
     "b1_structure": {
       "version": 1,
-      "source_digest": "32d10908d25666536ac0",
+      "source_digest": "6a7b6c6d30543d25ac41",
       "history": [
         {
           "version": 1,
@@ -94,6 +94,11 @@
           "version": 1,
           "date": "2026-11-17",
           "refactor": "一波流 v3 候选去掉温和放量条件（未接 live）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-17",
+          "refactor": "一波流 v3：一波流加回调不缩量、健康拉升加 N 型结构不破（未接 live）"
         }
       ]
     },

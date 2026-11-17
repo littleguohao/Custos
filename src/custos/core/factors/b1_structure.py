@@ -508,14 +508,31 @@ OW3_RALLY_MIN_PCT = (
 )
 OW3_FAST_PCT = 50.0  # 一波流：上涨段内任一 ≤OW3_FAST_BARS 根的窗口涨幅 ≥50%
 OW3_FAST_BARS = 20  # 「20 根左右」
+OW3_HEAVY_PULLBACK = (
+    0.9  # 一波流的「A 下」：回调不缩量 = 回调段均量 ≥ 上涨段 0.9 倍（owner 2026-11-17）
+)
+OW3_PIVOT = 3  # N 型结构回踩低点：收盘分型左右各 3 根确认（同 technical_monitor.N_PIVOT_LEFT/RIGHT 口径）
+
+
+def _ow3_n_floor(close, i_low: int, i_high: int) -> tuple[float, int]:
+    """上涨段内最后一个已确认的回踩低点（收盘分型，左右各 OW3_PIVOT 根）；没有则取启动低点收盘。
+    健康拉升要求高点之后收盘不跌破它（上升 N 型结构不破；因子层不得 import technical_monitor，故本地同口径实现）。"""
+    floor_i = i_low
+    for t in range(i_low + OW3_PIVOT, i_high - OW3_PIVOT + 1):
+        w = close[t - OW3_PIVOT : t + OW3_PIVOT + 1]
+        if close[t] <= w.min():
+            floor_i = t
+    return float(close[floor_i]), int(floor_i)
 
 
 def check_one_wave_v3(df) -> dict[str, Any]:
     """一波流判定 v3（候选）。三种结论，正面表述：
 
-    - ``one_wave``（一波流）：上涨段里 ``OW3_FAST_BARS`` 根内涨幅 ≥ ``OW3_FAST_PCT``%，之后回落到当前（短期快速大涨后下跌，A 上 A 下）；
+    - ``one_wave``（一波流）：上涨段里 ``OW3_FAST_BARS`` 根内涨幅 ≥ ``OW3_FAST_PCT``%（A 上），且回调**不缩量**
+      （回调段均量 ≥ 上涨段 ``OW3_HEAVY_PULLBACK`` 倍，A 下；owner 2026-11-17）；
     - ``healthy``（健康拉升）：上涨段涨幅 ≥ ``OW3_RALLY_MIN_PCT``% 但不是一波流，回调缩量（回调段均量 < 上涨段 0.7 倍）且无出货
-      （owner 2026-11-17 去掉「温和放量」——大涨段几乎都有单日放量，该条使健康拉升近乎为零；``mild_volume`` 仍只作读数）；
+      （owner 2026-11-17 去掉「温和放量」——大涨段几乎都有单日放量，该条使健康拉升近乎为零；``mild_volume`` 仍只作读数），
+      且**上升 N 型结构不破**（高点后收盘不跌破上涨段内最后一个回踩低点，owner 2026-11-17）；
     - ``unclear``（判断不了）：没有明显上涨段，或回调不缩量 / 有出货。
 
     另报 ``distribution``（出货）：阶段高点或次高点前后 3 日有放量大阴（阴线、跌 ≥3%、量 ≥ 前 5 日均量 1.5 倍且大于区内最大阳线量）；
@@ -569,12 +586,18 @@ def check_one_wave_v3(df) -> dict[str, Any]:
     brk = any(
         close[t] < close[i_low] and _v2_vol_up(vol, t) for t in range(i_high + 1, n)
     )
-    if fast is not None and fast >= OW3_FAST_PCT:
+    n_floor, n_floor_i = _ow3_n_floor(close, i_low, i_high)
+    n_intact = (
+        bool(float(close[i_high + 1 :].min()) >= n_floor) if i_high + 1 < n else True
+    )
+    heavy = pull_ratio is not None and pull_ratio >= OW3_HEAVY_PULLBACK
+    if fast is not None and fast >= OW3_FAST_PCT and heavy:
         status = "one_wave"
     elif (
         gain is not None
         and gain >= OW3_RALLY_MIN_PCT
         and shrink  # owner 2026-11-17：去掉「温和放量」
+        and n_intact  # owner 2026-11-17：N 型结构不破
         and not distribution
     ):
         status = "healthy"
@@ -585,6 +608,11 @@ def check_one_wave_v3(df) -> dict[str, Any]:
         "available": True,
         "distribution": distribution,
         "break_with_volume": bool(brk),
+        "n_structure": {
+            "intact": n_intact,
+            "floor": round(n_floor, 4),
+            "floor_bars_ago": int(n - 1 - n_floor_i),
+        },
         "rally": {
             "gain_pct": gain,
             "fast_gain_pct": fast,

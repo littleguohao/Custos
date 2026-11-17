@@ -75,7 +75,9 @@ def test_one_wave_v3_three_states_positive_wording():
         + list(np.linspace(10, 16, 15))
         + list(np.linspace(16, 13, 25))
     )  # 15 根涨 60%
-    o = bs.check_one_wave_v3(_df(fast, [100] * 20 + [110] * 15 + [60] * 25))
+    o = bs.check_one_wave_v3(
+        _df(fast, [100] * 20 + [110] * 15 + [130] * 25)
+    )  # 回调放量（A 下）
     assert o["status"] == "one_wave" and o["rally"]["fast_gain_pct"] >= 50
     flat = [10 + 0.05 * (k % 4) for k in range(60)]  # 横盘：无明显上涨段
     assert bs.check_one_wave_v3(_df(flat, [100] * 60))["status"] == "unclear"
@@ -87,3 +89,15 @@ def test_one_wave_v3_three_states_positive_wording():
     h = bs.check_one_wave_v3(_df(slow, [100] * 10 + [110] * 40 + [50] * 12))
     assert h["status"] == "healthy", h
     assert {"one_wave", "healthy", "unclear"} >= {o["status"], h["status"]}
+
+
+def test_one_wave_v3_shrinking_pullback_not_one_wave_and_n_floor():
+    fast = (
+        list(np.linspace(10, 10, 20))
+        + list(np.linspace(10, 16, 15))
+        + list(np.linspace(16, 13, 25))
+    )
+    o = bs.check_one_wave_v3(
+        _df(fast, [100] * 20 + [110] * 15 + [60] * 25)
+    )  # 快涨但回调缩量 ⇒ 不是一波流
+    assert o["status"] != "one_wave" and "n_structure" in o

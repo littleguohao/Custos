@@ -8,7 +8,7 @@
 
 ## 现状
 
-- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 77 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
+- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 79 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
   **P1 live 展示 99 个**（1800 证据标注，不进判定）、P2 研究 67 个。
 - **定义校准：0 / 233**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
 - **清单未覆盖**（需在逐因子校准时一并核）：①函数体内联常量（KDJ 9/3/3、BBI 周期、20 日相对强度窗口等）；
@@ -189,6 +189,9 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 - 开发机快照 J<13 抽样 1,287 根：判断不了 82%、一波流 18%、**健康拉升 0.3%（4 根）**——段涨幅 ≥45% 且非一波流的 123 根里 106 根卡在「上涨温和放量（单日量 < 段均量 2 倍）」，待 owner 定。
 - 🔄 owner 2026-11-17 定：健康拉升**去掉「温和放量」**，只留回调缩量 + 无出货（v0.539）。同一抽样：判断不了 80%、一波流 18%、健康拉升 2.0%（26 根）。
 - 图集 `b1_structure_v3__mining_v3cand` 按新定义重出，命中类按结论分层抽样：一波流 14、健康拉升 6、判断不了 16。
+- owner 标注 `labels-yb2.csv`（36 条，错 8）后定（v0.540）：**一波流须回调不缩量**（回调段均量 ≥ 上涨段 0.9 倍 = A 下）；**健康拉升须上升 N 型结构不破**（高点后收盘不跌破上涨段内最后一个回踩低点）。
+  对照这 36 条：与 owner 一致 28 → 33；仍不一致 3 条（#11 / #12 / #30：owner 认可的一波流，回调缩量但跌得深 −20%~−49%）。同一抽样：判断不了 89%、一波流 8.4%、健康拉升 2.4%。
+  阈值由这 36 条调出 ⇒ 用新抽样图集 `b1_structure_v3__mining_v3b` 复验。
 - 全部图集取值改正面中文（字段专属对照）：非一波流字段显示「健康拉升 / 疑似一波流或出货 / 判断不了」，MACD 区间与出货失效名单措辞同步改，不再出现双重否定。
 ## P0H 持仓大形态（v0.485 纳入，**排在 P0 之前**）
 
@@ -253,7 +256,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `technical_monitor` | `TREND_MIN_BARS` | 60 | 趋势判定最少 K 线数 | - | 未校准 |
 | `technical_monitor` | `QFQ_LOAD_BARS` | 100000 | - | - | 未校准 |
 
-### P0（77 个参数）
+### P0（79 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -281,6 +284,8 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `b1_structure` | `OW3_RALLY_MIN_PCT` | 45.0 | - | candidate | 候选（owner 2026-11-17 定稿，图集 `b1_structure_v3__mining_v3cand`） |
 | `b1_structure` | `OW3_FAST_PCT` | 50.0 | 一波流：上涨段内任一 ≤OW3_FAST_BARS 根的窗口涨幅 ≥50% | candidate | 候选（owner 2026-11-17 定稿，图集 `b1_structure_v3__mining_v3cand`） |
 | `b1_structure` | `OW3_FAST_BARS` | 20 | 「20 根左右」 | candidate | 候选（owner 2026-11-17 定稿，图集 `b1_structure_v3__mining_v3cand`） |
+| `b1_structure` | `OW3_HEAVY_PULLBACK` | 0.9 | - | candidate | 候选（owner 2026-11-17） |
+| `b1_structure` | `OW3_PIVOT` | 3 | N 型结构回踩低点：收盘分型左右各 3 根确认（同 technical_monitor.N_PIVOT_LEFT/RIGHT 口径） | candidate | 候选（owner 2026-11-17） |
 | `capital_intent` | `CAP_STRONG` | 5 | - | candidate | 未校准 |
 | `capital_intent` | `CAP_MID` | 2 | - | candidate | 未校准 |
 | `distribution` | `DIST_RECENT` | 5 | 待回测：出货形态观察最近N根 | active；R2 | 未校准 |
