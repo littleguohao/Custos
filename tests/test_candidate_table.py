@@ -371,7 +371,10 @@ def test_no_bucket_sections_or_letters():
         "| 分层 |",
     ):
         assert gone not in md, gone
-    assert "## 📋 候选总表（2 只，按状态排序，同状态内按技术分降序）" in md and "## 📖 列含义" in md
+    assert (
+        "## 📋 候选总表（2 只，按状态排序，同状态内按技术分降序）" in md
+        and "## 📖 列含义" in md
+    )
 
 
 def test_status_column_keeps_invariants():

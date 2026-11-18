@@ -433,6 +433,9 @@ SPECS: dict[str, tuple[str, list[str]]] = {
         [
             "criteria_version",
             "n_signals",
+            "n_edge_dropped",
+            "cost_sensitivity",
+            "power",
             "verdicts",
             "arms.*.windows",
             "arms.*.merged_delta",

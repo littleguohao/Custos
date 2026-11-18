@@ -29,7 +29,7 @@ from custos.research import criteria_kit as kit
 from custos.research import load_window as lw
 from custos.research import remark_rules as rr
 
-CRITERIA_VERSION = "v0.536"
+CRITERIA_VERSION = "v0.545"
 COST_BPS = 25.0
 MAX_DELAY = rr.WAIT_N
 N_RANDOM = 200
@@ -88,14 +88,19 @@ def code_records(
     a = rr.arrays(d)
     bbi = bbi_series(d["close"])
     memo: dict[int, Optional[float]] = {}
+    edge_j: set[int] = set()  # 越过段末 / 隔离带 / 段末未平的进场位
 
     def outcome(j: int) -> Optional[float]:
         if j > limit or ds[j] > deadline:
+            edge_j.add(j)
             return None
         if j not in memo:
             tr = bt.simulate_b1_trade(d, j, bbi, **prr.LIVE_PARAMS)
-            if tr.get("skipped") or bt.is_unrealized_reason(tr.get("reason")):
+            if bt.is_unrealized_reason(tr.get("reason")):
+                edge_j.add(j)
                 memo[j] = None
+            elif tr.get("skipped"):
+                memo[j] = None  # 买不到：该臂自然不成交，不算段末
             else:
                 memo[j] = float(tr["ret"]) * 100 - COST_BPS / 100
         return memo[j]
@@ -122,6 +127,8 @@ def code_records(
                 "out": {
                     dd: outcome(i + dd) for dd in range(MAX_DELAY + 1)
                 },  # 随机臂按任意延后档查表
+                # v0.545：前向窗（等待 20 根 + 持有）任一档越过段末 ⇒ 整笔剔除，所有臂同剔（保配对）
+                "edge": any(i + dd in edge_j for dd in range(MAX_DELAY + 1)),
                 "wait": waits,
                 "flag": flags,
             }
@@ -194,32 +201,44 @@ def window_reading(
     }
 
 
+def _arm_clusters_by_seg(
+    recs: list[dict[str, Any]], cids: list[int], delays: list[Optional[int]]
+) -> dict[str, set[int]]:
+    by: dict[str, set[int]] = {w: set() for w in SEGS}
+    for x, c, dl in zip(recs, cids, delays):
+        if dl is not None and x["out"].get(dl) is not None:
+            by.setdefault(x["_seg"], set()).add(c)
+    return by
+
+
 def random_pool(
     recs: list[dict[str, Any]], cids: list[int], arm: str, n: int, seed: int
-) -> list[float]:
-    """C4 随机臂：同参与率 p 随机放弃；等待臂另按其实际等待天数分布随机延后（只取已预算的延后档）。"""
-    del cids
+) -> dict[str, Any]:
+    """C4 随机臂（v0.545 修订）：**整簇抽签**（``criteria_kit.cluster_draw``）——每簇从该臂的
+    逐信号延后分布（含放弃 None）里抽一个签，同簇同签，参与率与等待天数分布同该臂；
+    过门 = 随机臂两窗各自已实现簇数 ≥ ``MIN_CLUSTERS``（同 C1）；过门臂凑满 n、上限 10×n
+    （``criteria_kit.assemble_c4_pool``）。池值 = 两窗合并 Δmargin 点估计。"""
     rng = random.Random(seed)
-    part = [arm_delay(x, arm) for x in recs]
-    p = sum(d is not None for d in part) / len(recs) if recs else 0.0
-    delays = [d for d in part if d is not None] or [0]
-    base = [x["out"].get(0) for x in recs]
-    base_r = [v for v in base if v is not None]
+    choices = tuple(arm_delay(x, arm) for x in recs)
+    base_r = [v for v in (x["out"].get(0) for x in recs) if v is not None]
     mb = _margin(base_r)
-    pool: list[float] = []
-    for _ in range(n):
-        rs = []
-        for x in recs:
-            if rng.random() >= p:
-                continue
-            dl = rng.choice(delays)
-            v = x["out"].get(dl)
-            if v is not None:
-                rs.append(v)
+
+    def evaluate(_i: int) -> Optional[float]:
+        if not choices or mb is None:
+            return None
+        delays = kit.cluster_draw(cids, choices, rng)
+        by = _arm_clusters_by_seg(recs, cids, delays)
+        if any(len(by.get(w, ())) < kit.MIN_CLUSTERS for w in SEGS):
+            return None
+        rs = [
+            v
+            for x, dl in zip(recs, delays)
+            if dl is not None and (v := x["out"].get(dl)) is not None
+        ]
         m = _margin(rs)
-        if m is not None and mb is not None:
-            pool.append(m - mb)
-    return pool
+        return None if m is None else m - mb
+
+    return kit.assemble_c4_pool(n, evaluate, cap_factor=10)
 
 
 def judge(
@@ -264,7 +283,8 @@ def judge(
         rb, _cb = _trades(merged, merged_c, "B0")
         ma, mb = _margin(ra), _margin(rb)
         cand_delta = None if ma is None or mb is None else ma - mb
-        pool = random_pool(merged, merged_c, arm, n_random, seed + 101 * k)
+        c4p = random_pool(merged, merged_c, arm, n_random, seed + 101 * k)
+        pool = c4p["pool"]
         thr = kit.batch_threshold(pool, len(ARMS)) if pool else None
         if not pool:
             c4 = "indeterminate"
@@ -280,7 +300,14 @@ def judge(
             "name": ARM_NAME[arm],
             "windows": wins,
             "merged_delta": cand_delta,
-            "c4": {"state": c4, "threshold": thr, "pool_n": len(pool), "m": len(ARMS)},
+            "c4": {
+                "state": c4,
+                "threshold": thr,
+                "pool_n": len(pool),
+                "m": len(ARMS),
+                "evaluated": c4p["evaluated"],
+                "gate_pass_rate": c4p["gate_pass_rate"],
+            },
             "yearly_b": c3,
             "C1": c1,
             "C2": c2,
@@ -329,6 +356,9 @@ def _production(args: Any) -> dict[str, list[dict[str, Any]]]:
     )
     codes = bt._resolve_universe(ns, _build_parser())
     args.universe_meta = getattr(ns, "universe_meta", None)
+    from custos.research.exit_c5_terminal import check_reach  # noqa: PLC0415
+
+    check_reach(args.count, lw.SEG_MINING_A[0])  # 逐股加载到达校验（fail-closed）
     regime = bt.load_amv_regime(since=lw.SEG_MINING_A[0])
     if not regime:
         raise RuntimeError("0AMV regime 读不到")
@@ -354,6 +384,62 @@ def _production(args: Any) -> dict[str, list[dict[str, Any]]]:
     return out
 
 
+def cost_block(
+    recs: dict[str, list[dict[str, Any]]], side_bps: Optional[float] = None
+) -> dict[str, Any]:
+    """成本副读数：``cost_sensitivity.shift_cost`` 把逐笔收益平移到副成本（默认 50bp），margin 用本单元主读数同一公式；
+    报每臂每窗 Δ(臂−B0) 在主 / 副成本下的值与是否翻号。"""
+    from custos.research import cost_sensitivity as cs  # noqa: PLC0415
+
+    side = cs.DEFAULT_SIDE_BPS if side_bps is None else side_bps
+
+    def m_at(rs: list[float], bps: float) -> Optional[float]:
+        sh = cs.shift_cost([{"ret": v / 100} for v in rs], bps - COST_BPS)
+        return _margin([t["ret"] * 100 for t in sh])
+
+    out: dict[str, Any] = {"base_bps": COST_BPS, "side_bps": side, "deltas": {}}
+    for w in SEGS:
+        rr_ = recs.get(w, [])
+        zc = [0] * len(rr_)
+        rb, _ = _trades(rr_, zc, "B0")
+        for a in ARMS:
+            ra, _ = _trades(rr_, zc, a)
+            d = {}
+            for tag, bps in (("base", COST_BPS), ("side", side)):
+                ma, mb = m_at(ra, bps), m_at(rb, bps)
+                d[tag] = None if ma is None or mb is None else round(ma - mb, 5)
+            d["flip"] = (
+                d["base"] is not None
+                and d["side"] is not None
+                and (d["base"] > 0) != (d["side"] > 0)
+            )
+            out["deltas"][f"{a}_vs_B0_{w}"] = d
+    return out
+
+
+def power_block(recs: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    """功效（``power_mde``，k=2.8、配对 ρ=0.75、deff 情景 1/1.5/2）：每窗 B0 交易数与胜率下的 Δmargin MDE（pp）。"""
+    from custos.research import power_mde as pm  # noqa: PLC0415
+
+    out: dict[str, Any] = {}
+    for w in SEGS:
+        r, _c = _trades(recs.get(w, []), [0] * len(recs.get(w, [])), "B0")
+        wr = sum(v > 0 for v in r) / len(r) if r else None
+        out[w] = {
+            "n_b0": len(r),
+            "wr_b0": None if wr is None else round(wr, 4),
+            "mde_pp": (
+                {
+                    str(dfx): round(100 * pm.mde(wr, len(r), pm.RHO_PAIRED, dfx), 2)
+                    for dfx in pm.DEFF_SCENARIOS
+                }
+                if r and wr is not None and 0 < wr < 1
+                else None
+            ),
+        }
+    return out
+
+
 def run_study(
     args: Any,
     *,
@@ -365,7 +451,9 @@ def run_study(
         bad = lw.mining_violation(s, e)
         if bad:
             raise RuntimeError(f"remark_entry_study 窗口校验失败 {nm}: {bad}")
-    recs = (recs_fn or _production)(args)
+    raw = (recs_fn or _production)(args)
+    n_edge = {s: sum(bool(x.get("edge")) for x in raw.get(s, [])) for s in SEGS}
+    recs = {s: [x for x in raw.get(s, []) if not x.get("edge")] for s in SEGS}
     if not any(recs.get(s) for s in SEGS):
         raise RuntimeError("空结果护栏：两挖掘段 0 个 B1 信号——不落盘")
     arms = judge(recs, n_random=args.n_random, seed=args.seed)
@@ -376,7 +464,10 @@ def run_study(
         "tag": args.tag,
         "criteria_version": CRITERIA_VERSION,
         "n_signals": {s: len(recs.get(s, [])) for s in SEGS},
+        "n_edge_dropped": n_edge,
         "arms": arms,
+        "cost_sensitivity": cost_block(recs),
+        "power": power_block(recs),
         "verdicts": {k: v["verdict"] for k, v in arms.items()},
         "window_usage": {
             "window": "not_read",

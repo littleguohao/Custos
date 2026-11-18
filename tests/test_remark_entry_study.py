@@ -123,3 +123,57 @@ def world_report(tmp_path):
     args.cmdline = "remark_entry_study test"
     _ = argparse
     return res.run_study(args, recs_fn=lambda a: _world(5, n_codes=40))
+
+
+def _flat(w):
+    recs = [x for s in res.SEGS for x in w[s]]
+    return recs
+
+
+def test_c4_random_pool_draws_by_cluster():
+    """v0.545：随机臂整簇抽签——簇结构变了，随机池随之变化（逐笔独立时两者相同）。"""
+    recs = _flat(_world(5, n_codes=60, per=8))
+    same = [0] * len(recs)
+    diff = list(range(len(recs)))
+    a = res.random_pool(recs, diff, "W1", 20, 9)
+    b = res.random_pool(recs, [i // 4 for i in range(len(recs))], "W1", 20, 9)
+    assert a["pool"] != b["pool"]
+    # 全部同簇 ⇒ 每臂只有 1 簇，过不了门（簇数 ≥30），池为空且评估到上限 10×N
+    c = res.random_pool(recs, same, "W1", 20, 9)
+    assert c["pool"] == [] and c["evaluated"] == 200
+
+
+def test_c4_pool_fills_to_n_gate_passers():
+    recs = _flat(_world(6, n_codes=60, per=8))
+    p = res.random_pool(recs, list(range(len(recs))), "F1", 30, 1)
+    assert len(p["pool"]) == 30 and p["evaluated"] >= 30
+
+
+def test_edge_signal_dropped_from_both_arms():
+    """段末：等待臂延后档越界的信号整笔剔除，B0 同剔（保配对）。"""
+    w = _world(7, n_codes=40, per=6)
+    x = w["mining_b"][0]
+    x["edge"] = True
+    x["out"][0] = 99.0
+    seen = {}
+
+    def fake_judge(recs, **kw):
+        seen["recs"] = recs
+        return {a: {"verdict": "untested"} for a in res.ARMS}
+
+    import custos.research.remark_entry_study as m
+
+    orig = m.judge
+    m.judge = fake_judge
+    try:
+        rep = m.run_study(_args(), recs_fn=lambda _a: w)
+    finally:
+        m.judge = orig
+    assert rep["n_edge_dropped"]["mining_b"] == 1
+    assert all(99.0 not in r["out"].values() for r in seen["recs"]["mining_b"])
+
+
+def _args():
+    a = res._build_parser().parse_args(["--tag", "t", "--n-random", "5"])
+    a.cmdline = "remark_entry_study test"
+    return a
