@@ -456,9 +456,37 @@ COLUMN_LEGEND = [
     ),
     (
         "风险",
-        "risk_flags：风控降档 / 封顶原因（顶背离、出货、量能撤退等）",
+        "风控标记（中文显示）：带「否决」的会让状态变为受限；其余只是提醒（如出货观察、MACD 顶背离减分、量能退潮）",
     ),
 ]
+
+
+#: 风险列中文（owner 2026-11-18；stock_pool 产物仍存英文键，只改展示）
+RISK_ZH: dict[str, str] = {
+    "distribution_high": "出货（高，否决）",
+    "distribution_watch": "出货（观察）",
+    "distribution_detected_cap_disabled": "出货（已检出，封顶关闭）",
+    "macd_three_peaks": "MACD 三打白骨精（否决）",
+    "macd_top_divergence": "MACD 顶背离（减分）",
+    "macd_overextended": "MACD 过度伸展",
+    "macd_divergence_detected_cap_disabled": "MACD 背离（已检出，封顶关闭）",
+    "non_one_wave_revoked": "疑似一波流 / 出货（否决）",
+    "non_one_wave_revoked_cap_disabled": "疑似一波流 / 出货（已检出，封顶关闭）",
+    "sprint_wave_first_b1_forbidden": "冲刺波首个 B1（否决）",
+    "sprint_wave_detected_cap_disabled": "冲刺波（已检出，封顶关闭）",
+    "main_force_retreat": "量能退潮",
+    "main_force_retreat_cap_disabled": "量能退潮（仅标记）",
+    "low_liquidity": "流动性偏低",
+    "is_holding": "已持仓",
+    "sector_score_unavailable": "板块分缺失",
+}
+
+
+def _risk_cell(c: dict) -> str:
+    return (
+        "、".join(RISK_ZH.get(str(f), str(f)) for f in (c.get("risk_flags") or []))
+        or "-"
+    )
 
 
 def _unified_table(lines, candidates, is_bear, hot_hits=None):
@@ -495,7 +523,7 @@ def _unified_table(lines, candidates, is_bear, hot_hits=None):
             f" | {_trigger_cell(c)}"
             f" | {_evidence_cell(c)}"
             f" | {_signal_cell(c)}"
-            f" | {'、'.join(c.get('risk_flags') or []) or '-'} |"
+            f" | {_risk_cell(c)} |"
         )
     lines.append("")
 

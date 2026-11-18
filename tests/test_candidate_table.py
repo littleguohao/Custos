@@ -400,7 +400,7 @@ def test_status_column_keeps_invariants():
     assert r["600000"][5] == "🐂可买"
     assert r["600007"][5] == "🐂观察价位"
     assert r["600008"][5] == "待0AMV做多"
-    assert r["600003"][5] == "🔍受限·非可买" and "distribution_high" in r["600003"][9]
+    assert r["600003"][5] == "🔍受限·非可买" and "出货（高，否决）" in r["600003"][9]
     assert r["300001"][5] == "-"
     assert list(r)[:2] == ["600000", "600007"]  # 技术分降序
 
@@ -467,3 +467,11 @@ def test_hot_sub_industry_marks_board_column_v0529():
     md = ct.render_table({"status": "ok", "candidates": [c]}, "2026-11-03", hot=hot)
     assert "## 🔥 近 10 个交易日热门细分行业" in md and "| 全国性银行 | 4 | 2 |" in md
     assert _rows(md)["601939"][2] == "🔥4 全国性银行"
+
+
+def test_risk_flags_shown_in_chinese():
+    from custos.pipeline.screening import score_candidates as sc  # noqa: F401
+    import inspect, re
+
+    flags = set(re.findall(r'risk_flags\.append\("([^"]+)"\)', inspect.getsource(sc)))
+    assert flags and flags <= set(ct.RISK_ZH), flags - set(ct.RISK_ZH)
