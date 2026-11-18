@@ -397,11 +397,11 @@ def test_status_column_keeps_invariants():
         ],
     }
     r = _rows(ct.render_table(pool, "2026-11-03"))
-    assert r["600000"][3] == "🐂可买"
-    assert r["600007"][3] == "🐂观察价位"
-    assert r["600008"][3] == "待0AMV做多"
-    assert r["600003"][3] == "🔍受限·非可买" and "distribution_high" in r["600003"][7]
-    assert r["300001"][3] == "-"
+    assert r["600000"][5] == "🐂可买"
+    assert r["600007"][5] == "🐂观察价位"
+    assert r["600008"][5] == "待0AMV做多"
+    assert r["600003"][5] == "🔍受限·非可买" and "distribution_high" in r["600003"][9]
+    assert r["300001"][5] == "-"
     assert list(r)[:2] == ["600000", "600007"]  # 技术分降序
 
 
@@ -409,7 +409,7 @@ def test_bear_waits_for_amv_v0529():
     """v0.529：空头前哨撤销——空头期满足 B1 条件的候选统一显示「待0AMV做多」（b1_status 由打分侧给出）。"""
     c = _cand("600100", "哨", "半导体", "B", "优", 3, False, status="待0AMV做多")
     bear = {"status": "ok", "amv_state": "空头", "candidates": [c]}
-    assert _rows(ct.render_table(bear, "2026-11-03"))["600100"][3] == "待0AMV做多"
+    assert _rows(ct.render_table(bear, "2026-11-03"))["600100"][5] == "待0AMV做多"
     assert "空头前哨" not in ct.render_table(bear, "2026-11-03")
 
 
@@ -427,9 +427,9 @@ def test_evidence_and_trigger_cells():
     )
     c2 = _cand("000002", "乙", "AI", "D", "差", 1, False)
     r = _rows(ct.render_table({"status": "ok", "candidates": [c, c2]}, "2026-11-03"))
-    assert "ADX25" in r["600000"][5] and "S反转66.5" in r["600000"][5]
-    assert "平台回踩✓@10.25" in r["600000"][5] and r["000002"][5] == "-"
-    assert r["600000"][4] == "KDJ_J_LOW · 低J · 五日"
+    assert "ADX25" in r["600000"][7] and "S反转66.5" in r["600000"][7]
+    assert "平台回踩✓@10.25" in r["600000"][7] and r["000002"][7] == "-"
+    assert r["600000"][6] == "KDJ_J_LOW · 低J · 五日"
 
 
 def test_industry_preferred_over_theme_sector():
@@ -437,7 +437,7 @@ def test_industry_preferred_over_theme_sector():
     c["industry"] = "全国性银行"
     c2 = _cand("000977", "浪潮信息", "AI算力/服务器/液冷", "A", "优", 4, True)
     r = _rows(ct.render_table({"status": "ok", "candidates": [c, c2]}, "2026-11-03"))
-    assert r["601939"][8] == "全国性银行" and r["000977"][8] == "AI算力/服务器/液冷"
+    assert r["601939"][2] == "全国性银行" and r["000977"][2] == "AI算力/服务器/液冷"
 
 
 def test_legend_covers_every_header_column():
@@ -450,9 +450,7 @@ def test_legend_covers_every_header_column():
         },
         "2026-11-03",
     )
-    header = next(
-        ln for ln in md.splitlines() if ln.startswith("| 代码 | 名称 | 技术分")
-    )
+    header = next(ln for ln in md.splitlines() if ln.startswith("| 代码 | 名称 | 板块"))
     cols = [c.strip() for c in header.split("|")[1:-1]]
     assert "建议止损位" not in cols  # v0.528：近 10 日最低价退出 live
     assert set(cols) - {"代码", "名称"} <= keys
@@ -468,4 +466,4 @@ def test_hot_sub_industry_marks_board_column_v0529():
     }
     md = ct.render_table({"status": "ok", "candidates": [c]}, "2026-11-03", hot=hot)
     assert "## 🔥 近 10 个交易日热门细分行业" in md and "| 全国性银行 | 4 | 2 |" in md
-    assert _rows(md)["601939"][8] == "🔥4 全国性银行"
+    assert _rows(md)["601939"][2] == "🔥4 全国性银行"

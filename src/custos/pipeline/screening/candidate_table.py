@@ -427,6 +427,14 @@ def _evidence_cell(c: dict) -> str:
 #: 单表列含义（v0.478 改版；口径以代码为准，改判定须同步本表）
 COLUMN_LEGEND = [
     (
+        "板块",
+        "TDX 细分行业（缺则主题族）+ 板块状态（只提示不进分）；🔥N = 近 10 个交易日进细分行业当日涨幅前十 N 次",
+    ),
+    (
+        "基本面",
+        "公司品质档 优/中/差（当前快照，非 PIT；⚠三无=三无标记）",
+    ),
+    (
         "技术分",
         "八段 patterns 累加分（score_candidates.technical_score）；**未校准启发式**，R6/R19/R42 证排序无效，只作参考",
     ),
@@ -446,12 +454,10 @@ COLUMN_LEGEND = [
         "研究标注",
         "研究标注（v0.529 只留 RD = RSI 深水区、SB = 异动后的 B1）：命中数/可评 + 缩写；只作观察记录，不进判定",
     ),
-    ("风险", "risk_flags：风控降档 / 封顶原因（顶背离、出货、量能撤退等）"),
     (
-        "板块",
-        "TDX 细分行业（缺则主题族）+ 板块状态（只提示不进分）；🔥N = 近 10 个交易日进细分行业当日涨幅前十 N 次",
+        "风险",
+        "risk_flags：风控降档 / 封顶原因（顶背离、出货、量能撤退等）",
     ),
-    ("基本面", "公司品质档 优/中/差（当前快照，非 PIT；⚠三无=三无标记）"),
 ]
 
 
@@ -472,9 +478,9 @@ def _unified_table(lines, candidates, is_bear, hot_hits=None):
         lines.append("")
         return
     lines.append(
-        "| 代码 | 名称 | 技术分 | 状态 | 触发 | 证据标记 | 研究标注 | 风险 | 板块 | 基本面 |"
-    )
-    lines.append("|---|---|---:|---|---|---|---|---|---|---|")
+        "| 代码 | 名称 | 板块 | 基本面 | 技术分 | 状态 | 触发 | 证据标记 | 研究标注 | 风险 |"
+    )  # v0.541 列序（owner 2026-11-18）：板块、基本面前移
+    lines.append("|---|---|---|---|---:|---|---|---|---|---|")
     for c in rows:
         sector = c.get("industry") or c.get("sector", "未知")
         if hot_hits and sector in hot_hits:
@@ -482,14 +488,14 @@ def _unified_table(lines, candidates, is_bear, hot_hits=None):
         state = (c.get("sector_heat_filter") or {}).get("sector_state")
         lines.append(
             f"| {c.get('code')} | {c.get('name')}"
+            f" | {sector}{f'（{state}）' if state else ''}"
+            f" | {_fq_disp(c)}"
             f" | {_fmt((c.get('score_detail') or {}).get('technical_score'))}"
             f" | {_status_of(c)}"
             f" | {_trigger_cell(c)}"
             f" | {_evidence_cell(c)}"
             f" | {_signal_cell(c)}"
-            f" | {'、'.join(c.get('risk_flags') or []) or '-'}"
-            f" | {sector}{f'（{state}）' if state else ''}"
-            f" | {_fq_disp(c)} |"
+            f" | {'、'.join(c.get('risk_flags') or []) or '-'} |"
         )
     lines.append("")
 

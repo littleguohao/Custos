@@ -395,8 +395,10 @@ class TestLabelsNeverAlterSelection:
                 # v0.51：主表加 ADX25/S反转 两列 ⇒ 标注列 raw index 17→19
                 # v0.56：再加 W底/红肥绿瘦 两列 ⇒ 19→21
                 # v0.478 单表：| 代码 | 名称 | 技术分 | 资金意图 | 状态 | 触发 | 证据标记 | 研究标注 | ... ⇒ raw 8
-                if len(cells) == 12:  # v0.529 再去「资金意图」列；研究标注列 raw 7
-                    del cells[7]  # 抹掉研究标注列
+                if (
+                    len(cells) == 12
+                ):  # v0.529 再去「资金意图」列；列序 v0.541 后研究标注列 raw 9
+                    del cells[9]  # 抹掉研究标注列（v0.541 列序：raw 9）
                     line = "|".join(cells)
             out.append(line)
         return "\n".join(out)
@@ -430,7 +432,7 @@ class TestLabelsNeverAlterSelection:
                     "600000",
                     "000001",
                 ):  # v0.528 去止损列
-                    out[cells[0]] = cells[3]
+                    out[cells[0]] = cells[5]
             return out
 
         base = statuses(ct.render_table(self._pool_with(_sig()), "2026-08-04"))
