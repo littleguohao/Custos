@@ -183,7 +183,7 @@ def test_daily_signal_summary_section():
     wait_line = next(l for l in sec.splitlines() if "待0AMV做多" in l)
     assert "600000" in buy_line and "600007" not in buy_line
     assert "600007" in obs_line and "600000" not in obs_line
-    assert "600008" in wait_line and "300001" not in sec
+    assert "1 只" in wait_line and "600008" not in wait_line and "300001" not in sec  # v0.543：只给计数
 
 
 def test_daily_signal_summary_bear_discipline():
@@ -280,7 +280,7 @@ def test_rd_no_light_outside_action_zone():
     lines = _overview_lines(ct.render_table(pool, "2026-09-14"))
     assert not any("⚡RD" in l for l in lines)
     wait_line = next(l for l in lines if "待0AMV做多" in l)
-    assert "600008" in wait_line  # 等待区名单照常，只是不亮灯
+    assert "1 只" in wait_line  # v0.543：等待区只给计数，不列名单
     assert not any("600003" in l for l in lines)
 
 

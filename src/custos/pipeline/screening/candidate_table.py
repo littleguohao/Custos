@@ -318,7 +318,10 @@ def _signal_overview(lines, is_bear, candidates):
         f"- **可买（0AMV 做多 + J<13 + QSX>DKX + 无风控否决）**：{_action_names_or_none(_buy)}"
     )
     lines.append(f"- **观察价位（同上但 QSX≤DKX）**：{_action_names_or_none(_obs)}")
-    lines.append(f"- **待0AMV做多（B1 条件已满足）**：{_names_or_none(_wait)}")
+    if (
+        _wait
+    ):  # v0.543（owner 2026-11-18）：名单常有大片，只给计数，明细看总表「状态」列
+        lines.append(f"- **待0AMV做多**：{len(_wait)} 只（明细见候选总表「状态」列）")
     if any(_rd_hit(c) for c in [*_buy, *_obs]):
         lines.append(
             "> ⚡RD = RSI 深水区证据命中（R21 跨窗证据：深水 RSI 四档出场压基底 "
