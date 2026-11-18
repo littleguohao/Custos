@@ -91,8 +91,8 @@ class TestNewPosition:
 
 
 class TestAddAndClose:
-    def test_add_buy_keeps_stop_updates_entry_price(self, _tmp):
-        """补仓：不重建计划、止损价不动；entry_price 随摊薄成本更新并标 averaged。"""
+    def test_add_buy_restops_at_diluted_cost(self, _tmp):
+        """v0.547：补仓不重建计划；entry_price 随摊薄成本更新并标 averaged，止损价按摊薄成本 × 0.93 重算。"""
         pp.sync_plans(_trades([_buy()]), [], [_pos()])
         plans = pp.sync_plans(
             _trades([_buy(day="2026-08-20", price=12.0)]),
@@ -103,8 +103,24 @@ class TestAddAndClose:
         assert plan["entry_price"] == 11.0  # 摊薄后单位成本（与 live pnl 口径同源）
         assert plan["averaged"] is True
         assert "rebuilt" not in plan  # 真补仓摊薄不标 rebuilt（两种情形不混）
-        assert plan["stop"]["price"] == pytest.approx(10.0 * 0.93)  # 止损价不被覆盖
+        assert plan["stop"]["price"] == pytest.approx(11.0 * 0.93)  # 锚定最新摊薄成本
+        assert plan["stop"]["rule_id"] == "loss_reduction"
+        assert plan["prev_stops"][0]["price"] == pytest.approx(
+            10.0 * 0.93
+        )  # 原止损留痕
         assert plan["entry_date"] == "2026-08-19"  # 首笔买入日不变
+
+    def test_add_buy_down_moves_stop_down_and_breach_uses_new_price(self, _tmp):
+        """向下补仓：止损随摊薄成本下移；计划止损与 −7% 减仓线同价。"""
+        pp.sync_plans(_trades([_buy()]), [], [_pos()])
+        plans = pp.sync_plans(
+            _trades([_buy(day="2026-08-20", price=9.0)]),
+            [_pos(cost=10.0)],
+            [_pos(cost=9.5, qty=200)],
+        )
+        plan = plans["positions"]["000001"]
+        assert plan["stop"]["price"] == pytest.approx(9.5 * 0.93)
+        assert len(plan["prev_stops"]) == 1
 
     def test_close_moves_plan_to_archive(self, _tmp):
         """清仓：条目从 positions 移入 archive，带 closed_at。"""

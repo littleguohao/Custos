@@ -35,7 +35,8 @@
 
 - **新建仓**（新出现的代码且本批有「买入」行）→ 生成计划。
 - **补仓**（已有代码加买）→ 不重建计划；``entry_price`` 随摊薄成本更新并标
-  ``averaged: true``，止损价不动（最初的计划点位不因补仓改写）。
+  ``averaged: true``；止损价按**最新摊薄成本** × (1 + loss_reduction) 重算（v0.547，owner 2026-11-18；
+  🔄 原「补仓不动止损」已失效），原止损追加进 ``prev_stops``。依据：单票交易后仓位 ≤20%，止损亏损约 ≤ 总权益 1.4%。
 - **丢失后补建**（持仓在、计划不在——文件丢失或历史持仓早于机制落地）→ 按新建
   补一份并标 ``rebuilt: true``；``averaged`` 只标真补仓摊薄，两种情形不混。
 - **清仓**（代码从快照消失）→ 条目移入 ``archive``（``closed_at`` 记本批最后一笔
@@ -229,12 +230,27 @@ def sync_plans(
                 positions[code] = _new_plan(code, buys[code], unit_cost, rules, pool)
                 positions[code]["rebuilt"] = True
                 continue
-            # 补仓：不重建计划、不动止损价；entry_price 随摊薄成本更新。
+            # 补仓：不重建计划；entry_price 随摊薄成本更新。
             # 用摊薄单位成本而不是该笔成交价：live 三处判定点的 pnl 口径都是
             # （现价 − 单位成本）/单位成本（含费），计划基准与判定基准必须同源，
             # 否则补仓后 −7% 判的是另一个价。
             plan["entry_price"] = unit_cost
             plan["averaged"] = True
+            # v0.547（owner 2026-11-18）：止损锚定最新摊薄成本——loss_reduction 计划的止损价重算为
+            # 摊薄成本 × (1 + loss_reduction)，与持仓 pnl −7% 减仓线同价。向下补仓会让止损下移；
+            # 单票交易后仓位 ≤20%（MASTER_WORKFLOW「单票20%硬上限」）⇒ 单票止损亏损约 ≤ 总权益 1.4%。
+            # 原止损逐次留在 prev_stops 便于追溯。
+            stop = plan.get("stop") or {}
+            if stop.get("rule_id") == "loss_reduction" and unit_cost is not None:
+                price, basis = _default_stop(unit_cost, rules)
+                plan.setdefault("prev_stops", []).append(
+                    {**stop, "replaced_at": cn_now().isoformat(timespec="seconds")}
+                )
+                plan["stop"] = {
+                    "rule_id": "loss_reduction",
+                    "price": price,
+                    "basis": basis + "（补仓后按摊薄成本重算）",
+                }
             plan["updated_at"] = cn_now().isoformat(timespec="seconds")
 
     _migrate_legacy_stops(positions, rules)
