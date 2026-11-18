@@ -285,4 +285,3 @@ r40_a1 停跑，读数不作数（见头部审计注记）。重跑按以下修�
 （R45 模式另加「打过不交易」与 R45-C3）。这几种情况下四态映射（`criteria_kit.verdict_four_state`）的结局与池无关，
 随机臂跳过，C4 落 indeterminate 并记 `criteria.C4.early_stop`；结局与跑满逐位一致（钉测 `TestEarlyStop`）。
 代价：提前终止的报告里没有随机臂池（q95 / pools 为空），C2 的池比较项为 None。要池作描述读数时加 `--no-early-stop`。
-

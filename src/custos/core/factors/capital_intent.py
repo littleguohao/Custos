@@ -9,7 +9,7 @@
 ## status 定档理由（candidate）
 
 - `live_use=scorer` / `stage=release` 是**事实**：本因子驱动的
-  capital_intent_level 直接进 RESONANCE_MATRIX 决定分层（A/B/C/D）。
+  capital_intent_level 直接进 RESONANCE_MATRIX 决定分层（A/B/C/D）。🔄 v0.529 起已不进分层，只落盘展示。
 - `NOT_FOR_LIVE={needs_work, untested}` 由
   `tests/test_factor_registry.py::test_needs_work_cannot_be_gate_or_scorer`
   机械禁止与 scorer 共存 ⇒ 合规候选只剩 active / candidate。

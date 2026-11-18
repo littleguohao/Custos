@@ -83,7 +83,15 @@ owner 拍板：无在链消费方）。
 **2026-07-23 重构（用户决策）**：分层 A/B/C/D 由**个股自身**定夺，**板块不再封顶**
 ——很多强势个股不跟原板块走，仅因板块弱把走势好的个股打到 D 得不偿失。
 
-base bucket ＝ 技术结构 × 资金意图（均为个股维度）：
+**v0.529（owner 2026-11-16，TODO #124）起分层改为 B1 规则判定**，原「技术结构 × 资金意图」矩阵已撤（🔄 下方矩阵仅留档）：
+
+- **状态 `b1_status`**（`score_candidates._b1_status`，候选表「状态」列）：
+  可买 = 0AMV 做多 ∧ 日 J<13 ∧ QSX>DKX ∧ 无风控否决；观察价位 = 同上但 QSX≤DKX；
+  待0AMV做多 = 0AMV 非做多、其余都满足；受限 = B1 点（J<13）但被风控否决；其余 `-`。
+- **bucket**：base = A（J<13 ∧ QSX>DKX）/ B（J<13）/ D（非 B1 点），再经风控封顶（只降不升）；next_step 由 bucket 定。
+- 技术分（`technical_score`，八段累加，权重在 registry `scoring.weights`）**不进分层**，只作展示与同状态内排序；**未校准**（R19 / R42 证排序无效）。
+
+🔄 已失效的旧矩阵（v0.528 及以前，勿照做）：base bucket ＝ 技术结构 × 资金意图（均为个股维度）：
 
 | 技术结构\资金意图 | 强 | 中 | 弱 |
 |---|---|---|---|
@@ -91,7 +99,7 @@ base bucket ＝ 技术结构 × 资金意图（均为个股维度）：
 | 中 | B | C | D |
 | 弱 | C | D | D |
 
-- 技术结构 = `technical_score` 分级（强>=60 / 中30-59 / 弱<30，阈值待回测）。
+- （旧）技术结构 = `technical_score` 分级（强>=60 / 中30-59 / 弱<30）。v0.529 起不再用于分层。
 
   ⚠️ **v0.50（2026-08-13，#37 阶段 A，owner 拍板）：s_shape 已移出分层**。
   此前 `technical_score` 主路径是 S**（阈值 65/40，与 patterns 路径的 60/30 两套
@@ -127,7 +135,7 @@ base bucket ＝ 技术结构 × 资金意图（均为个股维度）：
     `financials.enabled=false` 默认关，只证据层落盘、不驱动分层。
 - **因子 lift 验证**（`backtest_factors.py --factor-field <名>`）：把任意数值字段(如 `c_liquidity`)按分位
   分组看前向胜率/收益，验证是否有 lift。**流动性可历史回测**；**资金流无历史存档(只有每日快照)，只能前向验证**。
-- 资金意图 = `capital_intent_strength`（B1点火 +3；知行多头且沿短线上行、20日相对强度强、
+- 🔄 资金意图（v0.529 起不进分层，只落盘；候选表资金意图列已删）= `capital_intent_strength`（B1点火 +3；知行多头且沿短线上行、20日相对强度强、
   龙头量能、底部巨量、量能持续=主线确认、回调缩量、个股主力净流入在榜且为正各 +2；放量点火、反转K各 +1；
   ≥5 强 / ≥2 中 / 否则弱）。仅正向计"资金在进"，派发/顶背离由风控 cap 否决；实际权重以 registry 的 ci_* 为准。
 
@@ -140,24 +148,29 @@ base bucket ＝ 技术结构 × 资金意图（均为个股维度）：
 
 **仍保留的风控/回避硬否决**（与"板块弱"无关）：
 
-- 0AMV 空头 → 封顶 B 且 next_step=observe_price。（🔄「无止损位 → 封顶 B」v0.528 起已删除，随近 10 日最低价退出 live。）
-- 冲刺波首个B1 → 封顶 B；非一波流撤销/量能撤退 → 封顶 C。
-- 主力出货五方式 high→D/watch→C；MACD 顶背离/三打白骨精 → 封顶 C；CZ 回避名单 → D。
-- 以上封顶开关见 `scoring.cap_rules`（默认全开）。
+- 0AMV 空头 → 封顶 B 且 next_step=observe_price（状态显示「待0AMV做多」）。
+- **风控否决（状态 = 受限）**：冲刺波首个 B1 → 封顶 B；非一波流撤销 → 封顶 C；主力出货 high → D；MACD 三打白骨精 → 封顶 C。
+- **只标记、不否决**：出货 watch（v0.530，技术分 −10 照旧）；MACD 顶背离（v0.61，技术分 −8）；MACD 过度伸展；
+  量能撤退（v0.60 起封顶关闭，留 `main_force_retreat_cap_disabled`）；流动性偏低（`liquidity_floor` 默认关）。
+- 🔄 已删：「无止损位 → 封顶 B」（v0.528，live 止损固定买入价 −7%）；CZ 回避名单 → D（v0.80）。
+- 封顶开关见 `scoring.cap_rules`。一波流 v3 升版后计划改为只标记（owner 2026-11-17，见 `calibration_inventory.md`）。
 
-next_step：A→buy_review（v0.50：原 generate_buy_plan 是虚假承诺，BuyPlan 契约已删、
+next_step（由封顶后的 bucket 定）：A→buy_review（v0.50：原 generate_buy_plan 是虚假承诺，BuyPlan 契约已删、
 无组件生成买入计划），B→observe_price，C→long_term_track，D→avoid
-（0AMV 空头一律 observe_price）。打分明细（score_detail，含 capital_intent_level）
+（0AMV 空头一律 observe_price）。打分明细（score_detail；capital_intent_level 仍落盘但不进分层）
 与 trade_style 随 StockPool 落盘可复盘。
 
 ### [4] 备选表格 + 日报
 
 - `candidate_table.py` 渲染进 `artifacts/reports/daily/{date}/`。**v0.478（owner 2026-11-03）改版**：去掉 A/B/C/D
-  四个分池表、得分 Top 5 与 🐂/🔍/📡 三个子区，全部候选并成**一张「📋 候选总表」**（技术分降序，12 列：
-  技术分 / 资金意图 / 状态 / 触发 / 证据标记 / 研究标注 / 风险 / 板块 / 基本面 / 止损位），原各区判定收进「状态」列
-  （🐂可买 / 🐂观察价位 / 待0AMV做多 / 🔍受限·非可买 / 📡空头前哨·非可买），文末「📖 列含义」（`COLUMN_LEGEND`，
-  钉测要求覆盖全部列）。bucket / next_step 仍在 StockPool 产物里计算（下游契约不变），报告不再按它分组。
-  ⭐ 今日信号一览、🏷️ 信号标注一览、📌 门内提醒保留。
+  四个分池表与得分 Top 5，全部候选并成**一张「📋 候选总表」**。现行（v0.544）：10 列
+  代码 / 名称 / 板块 / 基本面 / 技术分 / 状态 / 触发 / 证据标记 / 研究标注 / 风险（v0.541 列序；资金意图列 v0.529 删、
+  止损位列 v0.528 删）；**按状态排序**（可买 → 观察价位 → 待0AMV做多 → 受限 → 其余），同状态内技术分降序（v0.544）；
+  状态 = `b1_status`（🐂可买 / 🐂观察价位 / 待0AMV做多 / 🔍受限·非可买；📡空头前哨 v0.529 删）；风险列中文显示（v0.542，`RISK_ZH`）；
+  板块列带 🔥N（近 10 日进细分行业涨幅前十次数，`hot_sectors`）。文末「📖 列含义」（`COLUMN_LEGEND`，钉测要求覆盖全部列）。
+  bucket / next_step 仍在 StockPool 产物里计算（下游契约不变），报告不按它分组。
+  其余区块：0AMV 背景、⭐ 今日信号一览（可买 / 观察价位名单；待0AMV做多只给计数，v0.543）、🔥 热门细分行业、
+  🏷️ 信号标注一览（RD / SB，v0.529）、📌 门内提醒。
 - `daily_report.py` 在"主线、机会与风险"节内追加"公式选股备选池"小节，
   只读 stock_pool.json；文件缺失显示"当日未运行选股链"，不影响报告生成。
   v0.52（#37 阶段 C）：**全量 A/B 展示**（原 top-10 截断删除）+ 证据列
@@ -212,15 +225,15 @@ next_step：A→buy_review（v0.50：原 generate_buy_plan 是虚假承诺，Buy
 
 ### 打分与分层整合（score_candidates.py）
 
-- 加分（计入技术分，factor_contrib 逐项落盘）：five_day_entry +8、
-  leader_volume +6、bottom_volume +6、repair_signals 每项 +3（上限 +6）、
-  non_one_wave=confirmed +5。
+- 加分（计入技术分，factor_contrib 逐项落盘；**现值以 registry `scoring.weights` 为准**）：
+  leader_volume +6、bottom_volume +10、repair_signals 每项 +4（上限 +8）、non_one_wave=confirmed +5；
+  five_day_entry 0（v0.529 退出打分，owner：五日战法属持股规则）。
 - 降档/否决（cap 只降不升）：
   - wave_type=sprint → 最高 B（B1 §四.0：冲刺波后首个 B1 禁买），
     next_step 不得 buy_review；
-  - volume_sustain=retreat → 最高 C（CZ §14.6：主力撤退）；
+  - volume_sustain=retreat → 🔄 v0.60 起封顶关闭（`volume_retreat: false`），只留痕；
   - non_one_wave=revoked → 最高 C（B1 §四：撤销条件）。
-- 0AMV 空头最高 B、无止损位禁 A、共振矩阵等既有规则不变。
+- 0AMV 空头最高 B。🔄「无止损位禁 A」v0.528 起删除；共振矩阵 v0.529 起撤（改 B1 规则状态）。
 
 ### 证据列（v0.51，#37 阶段 B——只落盘+展示，不进技术分/分层/gate）
 
@@ -244,7 +257,7 @@ next_step：A→buy_review（v0.50：原 generate_buy_plan 是虚假承诺，Buy
 - **知行指标**（`technical_monitor.zhixing_state`）：`QSX=EMA(EMA(C,10),10)`（白线/快）、`DKS=(MA14+MA28+MA57+MA114)/4`（黄线/慢）；多头 `QSX>DKS`，金叉=上穿当日；需 ≥114 根，否则 available=false。
 - **正向因子**（`enrich`，进 `technical_score` 加分）：知行多头 `qsx_gt_dks`(+6)、放量点火 `ignition`(+4)、回调缩量企稳 `pullback_shrink`(+3)、复合 `b1_ignition`(+8，=（J<13 或 反转K）+ 缩量企稳 +（近N日金叉 或 点火））、沿短线上行 `ride_above_fast`。
 - **负向因子**（`enrich.detect_distribution`，出货五方式）：① 顶部天量大阴、② 次高点巨量长阴、③ 阶梯放量跌破 QSX（白线用 QSX）、④ 双头双巨阴、⑤ 顶部绿肥红瘦；命中 ①/② 或 ≥2 项 → `risk_level=high`，否则 `watch`。
-- **打分接入**：`score_candidates` 新增 `distribution_cap`（registry `scoring.cap_rules`，默认开）——high→封 D、watch→封 C；关闭则仅记 `distribution_detected_cap_disabled`、不降档。
+- **打分接入**：`score_candidates` 新增 `distribution_cap`（registry `scoring.cap_rules`，默认开）——high→封 D；watch 只标记、不封顶（v0.530，技术分 −10 照旧）；关闭则仅记 `distribution_detected_cap_disabled`、不降档。
 - **落盘**：候选带 `zhixing/ignition/pullback_shrink/ride_above_fast/b1_ignition/distribution`，`entry_reason` 追加"知行B1点火确认/知行多头/出货信号:*"。
 
 ### 边界声明

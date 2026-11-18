@@ -4,19 +4,9 @@
 2026-07-23 重构（用户决策）：分层（A/B/C/D）由**个股自身**定夺，不再被板块弱势
 封顶——很多强势个股不跟原板块走，仅因板块弱把走势好的个股打到 D 得不偿失。
 
-个股共振矩阵（base bucket）＝ 技术结构 × 资金意图（均为个股维度）：
-
-| 技术结构\\资金意图 | 强 | 中 | 弱 |
-|---|---|---|---|
-| 强 | A | B | C |
-| 中 | B | C | D |
-| 弱 | C | D | D |
-
-- 技术结构 = technical_score 分级（强>=60 / 中30-59 / 弱<30，patterns 累加
-  单一路径；**v0.50 起 s_shape 主路径已删**——R2 证无 alpha，owner 拍板
-  #37 阶段 A。s_shape 仅作展示/证据列落盘，不驱动分层）。
-- 资金意图 = capital_intent_strength（放量点火/龙头量/底部巨量/相对强度/知行多头/
-  量能持续；命中派发或 MACD 顶背离则判资金流出=弱）。
+v0.529（owner 2026-11-16）起分层 = B1 规则：base bucket = A（日 J<13 ∧ QSX>DKX）/ B（J<13）/ D，
+再经风控封顶；状态 ``b1_status`` 见 :func:`_b1_status`。🔄 原「技术结构 × 资金意图」矩阵已撤；
+technical_score 只作展示与同状态内排序（未校准），capital_intent 只落盘。
 
 板块信息**只作提示**（v0.24 起不封顶；v0.50 起不进总分），只体现在：
 - score：总分 = 技术分（原 0.6×技术+0.4×板块+共振±5 已废；板块分与共振
@@ -25,10 +15,9 @@
 
 仍保留的**风控/回避硬否决**（与"板块弱"无关）：
 - 0AMV 空头 → 封顶 B 且 next_step=observe_price。
-- 无可定义止损位 → 封顶 B。
-- 冲刺波首个B1 → 封顶 B；非一波流撤销 → 封顶 C；量能撤退 → 封顶 C。
-- 主力出货五方式 high→D/watch→C；MACD 顶背离/三打白骨精 → 封顶 C。
-  （v0.80：CZ 回避方向名单 → D 已随板块名单机制一并移除。）
+- 冲刺波首个B1 → 封顶 B；非一波流撤销 → 封顶 C；主力出货 high → D；MACD 三打白骨精 → 封顶 C。
+- 只标记不否决：出货 watch（v0.530）、MACD 顶背离（v0.61，−8 分）、量能撤退（v0.60 封顶关）。
+- 🔄 已删：无可定义止损位 → 封顶 B（v0.528）；CZ 回避方向名单 → D（v0.80）。
 
 CLI::
 
@@ -83,8 +72,8 @@ REGISTRY_PATH = SCREEN_FORMULA_REGISTRY_FILE
 
 BUCKET_ORDER = ["A", "B", "C", "D"]
 
-# 个股共振矩阵：(technical_level, capital_intent_level) → base bucket。
-# 两轴均为个股维度（技术结构 × 资金意图）；板块不参与分层，只进 score/共振/trade_style。
+# 🔄 v0.529 起不再使用（分层改 B1 规则，见 _b1_status / score_candidate 的 base_bucket），仅留档、勿照做：
+# 旧个股共振矩阵 (technical_level, capital_intent_level) → base bucket。
 RESONANCE_MATRIX = {
     ("强", "强"): "A",
     ("强", "中"): "B",
