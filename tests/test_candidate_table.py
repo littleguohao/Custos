@@ -183,7 +183,9 @@ def test_daily_signal_summary_section():
     wait_line = next(l for l in sec.splitlines() if "待0AMV做多" in l)
     assert "600000" in buy_line and "600007" not in buy_line
     assert "600007" in obs_line and "600000" not in obs_line
-    assert "1 只" in wait_line and "600008" not in wait_line and "300001" not in sec  # v0.543：只给计数
+    assert (
+        "1 只" in wait_line and "600008" not in wait_line and "300001" not in sec
+    )  # v0.543：只给计数
 
 
 def test_daily_signal_summary_bear_discipline():
@@ -369,7 +371,7 @@ def test_no_bucket_sections_or_letters():
         "| 分层 |",
     ):
         assert gone not in md, gone
-    assert "## 📋 候选总表（2 只，按技术分降序）" in md and "## 📖 列含义" in md
+    assert "## 📋 候选总表（2 只，按状态排序，同状态内按技术分降序）" in md and "## 📖 列含义" in md
 
 
 def test_status_column_keeps_invariants():
@@ -475,3 +477,31 @@ def test_risk_flags_shown_in_chinese():
 
     flags = set(re.findall(r'risk_flags\.append\("([^"]+)"\)', inspect.getsource(sc)))
     assert flags and flags <= set(ct.RISK_ZH), flags - set(ct.RISK_ZH)
+
+
+def test_unified_table_sorted_by_status_then_score():
+    def c(code, st, tech):
+        return {
+            "code": code,
+            "name": code,
+            "b1_status": st,
+            "score_detail": {"technical_score": tech},
+        }
+
+    pool = {
+        "status": "ok",
+        "candidates": [
+            c("1", "-", 90),
+            c("2", "受限", 80),
+            c("3", "可买", 30),
+            c("4", "观察价位", 70),
+            c("5", "可买", 60),
+            c("6", "待0AMV做多", 99),
+        ],
+    }
+    order = [
+        ln.split("|")[1].strip()
+        for ln in ct.render_table(pool, "2026-11-18").splitlines()
+        if ln.startswith("| ") and ln.split("|")[1].strip().isdigit()
+    ]
+    assert order[:6] == ["5", "3", "4", "6", "2", "1"]

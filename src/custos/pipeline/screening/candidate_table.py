@@ -394,6 +394,10 @@ _STATUS_DISP = {
 }
 
 
+#: 候选总表一级排序：可买 → 观察价位 → 待0AMV做多 → 受限 → 其余
+STATUS_ORDER: dict[str, int] = {"可买": 0, "观察价位": 1, "待0AMV做多": 2, "受限": 3}
+
+
 def _status_of(c: dict) -> str:
     """单表「状态」列：直接显示 score_candidates 的 B1 规则状态 ``b1_status``（v0.529）。"""
     return _STATUS_DISP.get(str(c.get("b1_status") or ""), "-")
@@ -439,7 +443,7 @@ COLUMN_LEGEND = [
     ),
     (
         "技术分",
-        "八段 patterns 累加分（score_candidates.technical_score）；**未校准启发式**，R6/R19/R42 证排序无效，只作参考",
+        "八段 patterns 累加分（score_candidates.technical_score）；**未校准启发式**，R6/R19/R42 证排序无效，只作参考；总表按状态排序，同状态内才按技术分",
     ),
     (
         "状态",
@@ -498,11 +502,12 @@ def _unified_table(lines, candidates, is_bear, hot_hits=None):
     rows = sorted(
         candidates,
         key=lambda c: (
+            STATUS_ORDER.get(str(c.get("b1_status") or ""), len(STATUS_ORDER)),
             -((c.get("score_detail") or {}).get("technical_score") or 0),
             str(c.get("code")),
         ),
-    )
-    lines.append(f"## 📋 候选总表（{len(rows)} 只，按技术分降序）")
+    )  # v0.544（owner 2026-11-18）：状态一级、技术分二级（技术分未校准，R19/R42）
+    lines.append(f"## 📋 候选总表（{len(rows)} 只，按状态排序，同状态内按技术分降序）")
     lines.append("")
     if not rows:
         lines.append("（空）")
