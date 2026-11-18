@@ -115,6 +115,16 @@ MODULES: dict[str, dict[str, Any]] = {
         "defmod": "custos.core.factors.s_shape",
         "fields": ["@sshape_suggest"],
     },
+    # v0.548 前置走势形态合并校准（owner 2026-11-18）：一张图只问「B1 之前是什么走势」，owner 从固定菜单单选
+    # + 附加勾「顶部放量出货」；同图并排一波流 v3 / 趋势三态 / wave_type / 出货 / N 结构读数，一份标注评估全部检测器。
+    # 抽样按「一波流 v3 × 趋势三态」组合分层；无参数（不做边界翻转）。
+    "trend_shape": {
+        "defmod": "custos.core.factors.b1_structure",
+        "eval": "trend_shape",
+        "fields": ["trend_shape.combo"],
+        "params": [],
+        "label_mode": "shape",
+    },
     "b1_structure_v3": {  # 一波流 v3 候选（owner 2026-11-17）
         "defmod": "custos.core.factors.b1_structure",
         "eval": "one_wave_v3",
@@ -211,7 +221,7 @@ def param_names(module: str) -> list[str]:
     import ast  # noqa: PLC0415
     import importlib  # noqa: PLC0415
 
-    if MODULES[module].get("params"):
+    if "params" in MODULES[module]:  # 显式空表 = 无参数（trend_shape）
         return list(MODULES[module]["params"])
     mod = importlib.import_module(MODULES[module]["defmod"])
     src = Path(mod.__file__ or "").read_text(encoding="utf-8")
@@ -411,6 +421,9 @@ def evaluate(
             }
         }
         return {f: field_value(an, f) for f in fields}
+    if spec is not None and spec["eval"] == "trend_shape":
+        rd = trend_shape_readings(frames)
+        return {"trend_shape.combo": _shape_combo(rd), **rd}
     if spec is not None and spec["eval"] == "one_wave_v3":
         from custos.core.factors import b1_structure as bsm  # noqa: PLC0415
 
@@ -445,6 +458,49 @@ def evaluate(
     with patched(defmod, overrides, aliases):
         cand = ec.compute_metrics(df, index_asof, code=code, df_long=df_long)
         return {f: field_value(cand, f) for f in fields}
+
+
+#: 合并图集并排展示的检测器读数（键 → 中文名）
+SHAPE_READINGS: dict[str, str] = {
+    "one_wave_v3": "一波流 v3",
+    "one_wave_v3_distribution": "一波流 v3 顶部出货",
+    "trend": "趋势三态",
+    "wave_type": "前置拉升波",
+    "distribution": "出货五方式",
+    "n_structure": "上升 N 结构",
+    "n_breached": "N 结构收盘破位",
+}
+
+
+def trend_shape_readings(frames: tuple) -> dict[str, Any]:
+    """前置走势形态各检测器读数（只读 as-of 帧）：短帧给因子层检测器，长帧给 technical_monitor。"""
+    from custos.core.factors import b1_structure as bsm  # noqa: PLC0415
+    from custos.core.factors import distribution as dm  # noqa: PLC0415
+    from custos.core.factors import wave_type as wt  # noqa: PLC0415
+    from custos.pipeline.market_timing import technical_monitor as tm  # noqa: PLC0415
+
+    df, df_long, _idx, code = frames
+    d = df.reset_index(drop=True)
+    ow = bsm.check_one_wave_v3(d)
+    an = tm.analyze(df_long.reset_index(drop=True), code)
+    ns = an.get("n_structure") or {}
+    dist = dm.detect_distribution(d, code)
+    return {
+        "_readings": {
+            "one_wave_v3": ow.get("status") if ow.get("available") else None,
+            "one_wave_v3_distribution": ow.get("distribution"),
+            "trend": (an.get("trend") or {}).get("state"),
+            "wave_type": (wt.detect_wave_type(d) or {}).get("wave_type"),
+            "distribution": dist.get("risk_level") if dist.get("hits") else "none",
+            "n_structure": ns.get("status") if ns.get("available") else None,
+            "n_breached": ns.get("breached_on_close") if ns.get("available") else None,
+        }
+    }
+
+
+def _shape_combo(r: dict[str, Any]) -> str:
+    rd = r.get("_readings") or {}
+    return f"{rd.get('one_wave_v3')}|{rd.get('trend')}"
 
 
 def _eval_bar(job: tuple) -> tuple:
@@ -865,14 +921,15 @@ def _review_rows(pool, base, hits, flips, fields) -> dict[str, list[dict]]:
         ):
             for key in keys:
                 ps = sorted(p for (ff, p), v in flips.items() if ff == f and key in v)
-                rows.append(
-                    {
-                        "key": list(key),
-                        "class": c,
-                        "value": base[key].get(f),
-                        "flip_params": ps,
-                    }
-                )
+                row = {
+                    "key": list(key),
+                    "class": c,
+                    "value": base[key].get(f),
+                    "flip_params": ps,
+                }
+                if base[key].get("_readings") is not None:
+                    row["readings"] = base[key]["_readings"]
+                rows.append(row)
         out[f] = rows
     return out
 
@@ -947,17 +1004,30 @@ def _samples(pool, base, hits, flips, fields, args, rng) -> dict[str, list[dict]
             "boundary": sorted(boundary),
         }
         rows = []
+        one_per_code = MODULES.get(args.module, {}).get("label_mode") == "shape"
+        seen_codes: set[str] = set()
         for c, keys in cls.items():
-            for key in _stratified(keys, base, f, args.n_show, rng):
-                ps = sorted(p for (ff, p), v in flips.items() if ff == f and key in v)
-                rows.append(
-                    {
-                        "key": list(key),
-                        "class": c,
-                        "value": base[key].get(f),
-                        "flip_params": ps,
-                    }
+            if one_per_code:  # v0.548：同票相邻日几乎同图 ⇒ 每票随机留一根
+                by: dict[str, list] = {}
+                for k in keys:
+                    by.setdefault(str(k[0]).split("|")[0], []).append(k)
+                keys = sorted(
+                    rng.choice(v)
+                    for cd, v in sorted(by.items())
+                    if cd not in seen_codes
                 )
+            for key in _stratified(keys, base, f, args.n_show, rng):
+                seen_codes.add(str(key[0]).split("|")[0])
+                ps = sorted(p for (ff, p), v in flips.items() if ff == f and key in v)
+                row = {
+                    "key": list(key),
+                    "class": c,
+                    "value": base[key].get(f),
+                    "flip_params": ps,
+                }
+                if base[key].get("_readings") is not None:
+                    row["readings"] = base[key]["_readings"]
+                rows.append(row)
         out[f] = rows
     return out
 
@@ -976,12 +1046,27 @@ LABEL_CHOICES = {
     "sample": ("对", "错", "不确定"),
     "review": ("Y", "N", "不确定"),
     "buypoint": ("买", "不买", "等"),  # v0.517 买点练习
+    # v0.548 前置走势形态（owner 2026-11-18，按两轮备注整理）：单选 + 附加勾「顶部放量出货」
+    "shape": (
+        "一波流",
+        "健康拉升",
+        "拉升后横盘震荡",
+        "横盘震荡",
+        "下跌后横盘震荡",
+        "震荡下跌",
+        "下跌中",
+        "震荡上涨",
+        "不确定",
+    ),
 }
+#: 形态标注的附加勾选项（可与任一形态同时勾）
+SHAPE_EXTRA = "顶部放量出货"
 CSV_HEAD = ["id", "字段", "代码", "日期", "类别", "检测值", "边界翻转参数"]
 CSV_TAIL = {
     "sample": ["判定(对/错/不确定)", "备注"],
     "review": ["应命中(Y/N)", "形态理由（写形态，不写后来涨跌）"],
     "buypoint": ["判断(买/不买/等)", "批语"],
+    "shape": ["形态", f"{SHAPE_EXTRA}(Y)", "备注"],
 }
 
 
@@ -1007,6 +1092,7 @@ def label_ui(
             "ph": "批语（看到什么、等什么条件）" if mode == "buypoint" else "形态理由",
             "prefill": prefill or {},
             "hidden": [str(x) for x in (hidden or [])],
+            "extra": SHAPE_EXTRA if mode == "shape" else "",
         },
         ensure_ascii=False,
     )
@@ -1046,7 +1132,8 @@ function refresh(){
     d.classList.toggle('done', done);
     d.style.display = (HID.has(d.dataset.id) || (document.getElementById('onlyTodo').checked && done)) ? 'none' : '';
     d.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.textContent === v.c));
-    const inp = d.querySelector('input'); if (document.activeElement !== inp) inp.value = v.r || '';
+    const ex = d.querySelector('input.ex'); if (ex) ex.checked = !!v.x;
+    const inp = d.querySelector('input:not(.ex)'); if (document.activeElement !== inp) inp.value = v.r || '';
   });
   document.getElementById('prog').textContent = n + ' / ' + (M.rows.length - HID.size) + (HID.size ? '（另 ' + HID.size + ' 张已隐藏，不需逐张标）' : '');
 }
@@ -1058,6 +1145,12 @@ document.querySelectorAll('div.s').forEach(d => {
     b.onclick = () => { const v = get(id); v.c = (v.c === c ? '' : c); put(id, v); refresh(); };
     box.appendChild(b);
   });
+  if (M.extra) {
+    const lb = document.createElement('label'), cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.className = 'ex'; cb.style.width = 'auto';
+    cb.onchange = () => { const v = get(id); v.x = cb.checked; put(id, v); };
+    lb.appendChild(cb); lb.appendChild(document.createTextNode(' ' + M.extra + '　')); box.appendChild(lb);
+  }
   const inp = document.createElement('input'); inp.placeholder = M.ph || '形态理由';
   inp.oninput = () => { const v = get(id); v.r = inp.value; put(id, v); };
   box.appendChild(inp); d.appendChild(box);
@@ -1065,7 +1158,7 @@ document.querySelectorAll('div.s').forEach(d => {
 const q = s => /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 document.getElementById('exp').onclick = () => {
   const out = [M.head.map(q).join(',')];
-  M.rows.forEach(r => { const v = get(r[0]); out.push([...r.map(x => String(x ?? '')), v.c || '', v.r || ''].map(q).join(',')); });
+  M.rows.forEach(r => { const v = get(r[0]); out.push([...r.map(x => String(x ?? '')), v.c || '', ...(M.extra ? [v.x ? 'Y' : ''] : []), v.r || ''].map(q).join(',')); });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob(['\ufeff' + out.join('\r\n') + '\r\n'], {type: 'text/csv'}));
   a.download = 'labels.csv'; a.click();
@@ -1083,7 +1176,10 @@ function parseCsv(t){
 }
 document.getElementById('imp').onchange = ev => {
   const fr = new FileReader();
-  fr.onload = () => { parseCsv(fr.result).slice(1).forEach(r => { if (r[0] && (r[7] || r[8])) put(r[0], {c: r[7] || '', r: r[8] || ''}); }); refresh(); };
+  fr.onload = () => { parseCsv(fr.result).slice(1).forEach(r => {
+    if (M.extra) { if (r[0] && (r[7] || r[8] || r[9])) put(r[0], {c: r[7] || '', x: r[8] === 'Y', r: r[9] || ''}); }
+    else if (r[0] && (r[7] || r[8])) put(r[0], {c: r[7] || '', r: r[8] || ''});
+  }); refresh(); };
   fr.readAsText(ev.target.files[0], 'utf-8');
 };
 document.getElementById('onlyTodo').onchange = refresh;
@@ -1110,6 +1206,7 @@ def _csv_rows(rep: dict[str, Any], frames: dict) -> list[list[Any]]:
 #: 每个字段「检测器在测什么」的中文说明（v0.516，owner 2026-11-13：放在每张图最上方）。
 #: 只说定义，不说好坏；出处见各检测器 docstring。键 = summary 里的字段名。
 FIELD_DEF: dict[str, str] = {
+    "trend_shape.combo": "前置走势形态（合并校准）：B1 点之前的走势属于哪种形态；抽样按一波流 v3 × 趋势三态组合分层",
     "n_structure.status": "上升 N 型结构（分型版）：前低 → 前高 → 回踩不破前低形成更高的低点；状态为成立 / 确认 / 破位等",
     "n_structure.fresh_breach": "上升 N 型结构是否刚刚被跌破（收盘跌破结构前低）",
     "descending_n_structure.status": "下降 N 型结构（分型版）：高点、低点依次下移",
@@ -1239,6 +1336,19 @@ def ask_html(field: str, cls: str, value: Any, boundary: str = "") -> str:
     )
 
 
+def shape_ask_html(readings: dict[str, Any]) -> str:
+    """合并图集图块顶部：问题 + 各检测器读数（只作参考）。"""
+    cells = "　".join(
+        f"{html.escape(nm)}：<b>{html.escape(value_zh(readings.get(k), k))}</b>"
+        for k, nm in SHAPE_READINGS.items()
+    )
+    return (
+        "<div class='q' style='font:14px sans-serif;background:#f4f7fb;border-left:4px solid #3b6fb6;"
+        "padding:6px 10px;margin:6px 0'><b>请判断：</b>这个 B1 点（最后一根）之前是什么走势？从下方菜单选一个；"
+        f"顶部有放量出货另勾上。<br><span style='color:#666'>检测器读数（只作参考）：{cells}</span></div>"
+    )
+
+
 def upgrade_gallery(d: Path) -> int:
     """给既有产物目录的 gallery.html 加标注 UI（不重算）：第 n 个图块 ⇔ labels.csv 第 n 行。返回行数。"""
     import re as _re  # noqa: PLC0415
@@ -1319,6 +1429,8 @@ def ingest(d: Path, labels: Optional[Path] = None) -> dict[str, Any]:
     参数改向表：错样本里某 ``PARAM×k`` 会翻转它 ⇒ 修正票 +1；对样本里同一 ``PARAM×k`` 也会翻转 ⇒ 误伤票 +1。
     只描述、不拍板（owner 2026-11-09：不设固定门槛，持续进化——每条「错」都进候选讨论）。"""
     summ = json.loads((d / "summary.json").read_text(encoding="utf-8-sig"))
+    if summ.get("label_mode") == "shape":
+        return ingest_shape(d, summ, labels)
     mode = summ["mode"]
     path = labels or d / "labels.csv"
     with path.open(encoding="utf-8-sig", newline="") as fh:
@@ -1380,6 +1492,149 @@ def ingest(d: Path, labels: Optional[Path] = None) -> dict[str, Any]:
     )
     (d / "ingest.md").write_text(_ingest_md(out), encoding="utf-8")
     return out
+
+
+#: owner 形态 → 各检测器的期望值（缺省 = 该形态对这个检测器不作要求，只进交叉表）。
+#: 一波流 v3 三态：一波流 / 健康拉升 / 其余都是 unclear；趋势三态：上涨 / 下跌 / 横盘震荡。
+SHAPE_EXPECT: dict[str, dict[str, str]] = {
+    "one_wave_v3": {
+        "一波流": "one_wave",
+        "健康拉升": "healthy",
+        "拉升后横盘震荡": "unclear",
+        "横盘震荡": "unclear",
+        "下跌后横盘震荡": "unclear",
+        "震荡下跌": "unclear",
+        "下跌中": "unclear",
+        "震荡上涨": "unclear",
+    },
+    "trend": {
+        "健康拉升": "上涨",
+        "震荡上涨": "上涨",
+        "拉升后横盘震荡": "横盘震荡",
+        "横盘震荡": "横盘震荡",
+        "下跌后横盘震荡": "横盘震荡",
+        "震荡下跌": "下跌",
+        "下跌中": "下跌",
+    },
+}
+
+
+def _shape_checks(
+    shape: str, top: bool, rd: dict[str, Any]
+) -> dict[str, tuple[Optional[str], str]]:
+    """(期望, 检测) 对；期望 None = 不计一致率。"""
+    out: dict[str, tuple[Optional[str], str]] = {
+        k: (m.get(shape), str(rd.get(k))) for k, m in SHAPE_EXPECT.items()
+    }
+    want = "有" if top else "无"
+    out["distribution"] = (
+        want,
+        "无" if rd.get("distribution") in (None, "none") else "有",
+    )
+    out["one_wave_v3_distribution"] = (
+        want,
+        "有" if rd.get("one_wave_v3_distribution") else "无",
+    )
+    if shape == "不确定":
+        out = {k: (None, g) for k, (_w, g) in out.items()}
+    return out
+
+
+def ingest_shape(
+    d: Path, summ: dict[str, Any], labels: Optional[Path] = None
+) -> dict[str, Any]:
+    """合并形态图集读回（v0.548）：owner 形态换算到各检测器口径出一致率；「顶部放量出货」勾选对两个出货读数；
+    wave_type、N 结构只出交叉表。只描述，改不改由 owner 定。"""
+    path = labels or d / "labels.csv"
+    with path.open(encoding="utf-8-sig", newline="") as fh:
+        rows = list(csv.reader(fh))[1:]
+    readings: dict[str, dict[str, Any]] = {}
+    n = 0
+    for _f, rs in summ["samples"].items():
+        for r in rs:
+            n += 1
+            readings[str(n)] = r.get("readings") or {}
+    acc: dict[str, dict[str, int]] = {}
+    cross: dict[str, dict[str, dict[str, int]]] = {}
+    wrong: list[dict[str, Any]] = []
+    n_labeled = 0
+    for r in rows:
+        if len(r) < 10 or not r[7].strip():
+            continue
+        lid, code, date = r[0].strip(), r[2].strip(), r[3].strip()
+        shape, top, why = r[7].strip(), r[8].strip() == "Y", r[9].strip()
+        n_labeled += 1
+        rd = readings.get(lid, {})
+        key = shape + ("+顶部出货" if top else "")
+        for k in SHAPE_READINGS:
+            c = cross.setdefault(k, {}).setdefault(key, {})
+            v = str(rd.get(k))
+            c[v] = c.get(v, 0) + 1
+        for k, (want, got) in _shape_checks(shape, top, rd).items():
+            if want is None:
+                continue
+            st = acc.setdefault(k, {"一致": 0, "不一致": 0})
+            ok = want == got
+            st["一致" if ok else "不一致"] += 1
+            if not ok:
+                wrong.append(
+                    {
+                        "id": lid,
+                        "code": code,
+                        "date": date,
+                        "detector": k,
+                        "owner": key,
+                        "want": want,
+                        "got": got,
+                        "reason": why,
+                    }
+                )
+    out = {
+        "module": summ["module"],
+        "tag": summ.get("tag"),
+        "mode": "shape",
+        "n_rows": len(rows),
+        "n_labeled": n_labeled,
+        "agreement": acc,
+        "crosstab": cross,
+        "wrong": wrong,
+        "note": "只描述：owner 形态按 SHAPE_EXPECT 换算成各检测器期望值；「不确定」与无要求的形态不计一致率，只进交叉表",
+    }
+    (d / "ingest.json").write_text(
+        json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    (d / "ingest.md").write_text(_ingest_shape_md(out), encoding="utf-8")
+    return out
+
+
+def _ingest_shape_md(o: dict[str, Any]) -> str:
+    L = [
+        f"# 前置走势形态标注汇总（{o['tag']}；已标 {o['n_labeled']}/{o['n_rows']}）",
+        "",
+        "| 检测器 | 一致 | 不一致 |",
+        "|---|---:|---:|",
+    ]
+    for k, st in o["agreement"].items():
+        L.append(f"| {SHAPE_READINGS.get(k, k)} | {st['一致']} | {st['不一致']} |")
+    for k, c in o["crosstab"].items():
+        vals = sorted({v for m in c.values() for v in m})
+        L += [
+            "",
+            f"## {SHAPE_READINGS.get(k, k)} × owner 形态",
+            "",
+            "| owner 形态 | " + " | ".join(vals) + " |",
+            "|---|" + "---:|" * len(vals),
+        ]
+        for sh, m in c.items():
+            L.append(f"| {sh} | " + " | ".join(str(m.get(v, 0)) for v in vals) + " |")
+    L += ["", "## 不一致样本", ""]
+    for w in sorted(o["wrong"], key=lambda x: (x["detector"], int(x["id"]))):
+        L.append(
+            f"- #{w['id']} {w['code']} {w['date']} {SHAPE_READINGS.get(w['detector'], w['detector'])}："
+            f"owner {w['owner']} ⇒ 期望 {w['want']}，检测 {w['got']}｜{w['reason'] or '—'}"
+        )
+    L += ["", f"> {o['note']}"]
+    return "\n".join(L) + "\n"
 
 
 def _parse_val(v: str) -> Any:
@@ -1840,6 +2095,8 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
     d = out_dir / f"{rep['module']}__{rep['tag']}"
     d.mkdir(parents=True, exist_ok=True)
     frames = rep.pop("_frames", {})
+    lmode = MODULES.get(rep["module"], {}).get("label_mode") or rep["mode"]
+    rep["label_mode"] = lmode
     if rep["mode"] in ("sample", "review"):
         parts = [
             f"<html><meta charset='utf-8'><title>{rep['module']} 抽检</title><body>",
@@ -1849,9 +2106,9 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
         csv_rows = _csv_rows(rep, frames)
         with (d / "labels.csv").open("w", encoding="utf-8-sig", newline="") as fh:
             w = csv.writer(fh)
-            w.writerow(CSV_HEAD + CSV_TAIL[rep["mode"]])
+            w.writerow(CSV_HEAD + CSV_TAIL[lmode])
             for row in csv_rows:
-                w.writerow([*row, "", ""])
+                w.writerow([*row, *([""] * len(CSV_TAIL[lmode]))])
         it = iter(csv_rows)
         chart_data: dict[str, Any] = {}
         use_kc = kc_assets() is not None
@@ -1863,11 +2120,17 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
                 title = f"#{row[0]} {row[2]} {row[3]} [{r['class']}] {f}={value_zh(r['value'], f)}"
                 if row[6]:
                     title += f"（边界：{row[6]}）"
+                if lmode == "shape":
+                    title = f"#{row[0]} {row[2]} {row[3]}"
                 if use_kc:
                     parts.append(
                         f"<div class='s' data-id='{row[0]}'>"
-                        f"{ask_html(f, r['class'], r['value'], row[6])}"
-                        f"<div class='t'>{html.escape(title)}</div>"
+                        + (
+                            shape_ask_html(r.get("readings") or {})
+                            if lmode == "shape"
+                            else ask_html(f, r["class"], r["value"], row[6])
+                        )
+                        + f"<div class='t'>{html.escape(title)}</div>"
                         f"<div class='kc'></div></div>"
                     )
                 else:
@@ -1891,7 +2154,19 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
         )
         if use_kc:
             parts.append(kc_section(chart_data))
-        parts.append(label_ui(csv_rows, rep["mode"], f"calib:{d.name}"))
+        parts.append(
+            label_ui(
+                csv_rows,
+                lmode,
+                f"calib:{d.name}",
+                hint=(
+                    "从菜单选一个形态；顶部有放量出货另勾上。按你看到的走势选，不用逐个判检测器对错；"
+                    "备注写形态，不写后来涨跌"
+                    if lmode == "shape"
+                    else None
+                ),
+            )
+        )
         parts.append("</body></html>")
         (d / "gallery.html").write_text("".join(parts), encoding="utf-8")
     else:

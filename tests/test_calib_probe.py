@@ -184,6 +184,8 @@ def test_empty_pool_guard():
 
 def test_every_module_params_resolve():
     for m in cp.MODULES:
+        if cp.MODULES[m].get("params") == []:  # 显式无参（v0.548 trend_shape）
+            continue
         assert cp.param_names(m), m
 
 
@@ -629,3 +631,51 @@ def test_values_shown_in_chinese_v0537():
     )  # 字段专属，不用双重否定
     assert "一波流（one_wave）" in cp.ask_html("one_wave_v3.status", "hit", "one_wave")
     assert "成立（成立" not in cp.ask_html("five_day_entry.hit", "hit", "True")
+
+
+class TestTrendShapeV0548:
+    """v0.548 前置走势形态合并图集：多检测器读数 + 形态菜单 + 顶部出货勾选 + 对照读回。"""
+
+    def _rep(self, tmp_path):
+        bars = {"000001|2014": _df(1), "000002|2014": _df(2)}
+        rep = cp.run_study(
+            _args("sample", module="trend_shape", workers=1, n_show=3),
+            bars=bars,
+            index_df=_df(9),
+            spans=[("2014-01-01", "2016-12-31")],
+        )
+        return rep, cp.write_outputs(rep, tmp_path)
+
+    def test_readings_menu_and_extra(self, tmp_path):
+        rep, d = self._rep(tmp_path)
+        rows = [r for rs in rep["samples"].values() for r in rs]
+        assert rows and set(rows[0]["readings"]) == set(cp.SHAPE_READINGS)
+        codes = [r["key"][0].split("|")[0] for r in rows]
+        assert len(codes) == len(set(codes))  # 每票最多一张
+        g = (d / "gallery.html").read_text(encoding="utf-8")
+        assert "下跌后横盘震荡" in g and cp.SHAPE_EXTRA in g and "检测器读数" in g
+        head = (d / "labels.csv").read_text(encoding="utf-8-sig").splitlines()[0]
+        assert head.endswith("形态,顶部放量出货(Y),备注")
+
+    def test_ingest_maps_shape_to_detectors(self, tmp_path):
+        import csv as _csv
+
+        rep, d = self._rep(tmp_path)
+        rows = list(_csv.reader((d / "labels.csv").open(encoding="utf-8-sig")))
+        rd = [r for rs in rep["samples"].values() for r in rs]
+        for k, r in enumerate(rows[1:]):
+            ow = rd[k]["readings"]["one_wave_v3"]
+            r[7] = {"one_wave": "一波流", "healthy": "健康拉升", None: "不确定"}.get(
+                ow, "横盘震荡"
+            )
+            r[8] = "Y" if k == 0 else ""
+        with (d / "labels.csv").open("w", encoding="utf-8-sig", newline="") as fh:
+            _csv.writer(fh).writerows(rows)
+        o = cp.ingest(d)
+        assert o["mode"] == "shape" and o["n_labeled"] == len(rows) - 1
+        assert o["agreement"]["one_wave_v3"]["不一致"] == 0  # 按读数标 ⇒ 全一致
+        assert "trend" in o["crosstab"] and (d / "ingest.md").exists()
+
+    def test_uncertain_not_counted(self):
+        chk = cp._shape_checks("不确定", True, {"one_wave_v3": "unclear"})
+        assert all(w is None for w, _g in chk.values())
