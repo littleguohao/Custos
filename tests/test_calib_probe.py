@@ -655,7 +655,8 @@ class TestTrendShapeV0548:
         g = (d / "gallery.html").read_text(encoding="utf-8")
         assert "下跌后横盘震荡" in g and cp.SHAPE_EXTRA in g and "检测器读数" in g
         head = (d / "labels.csv").read_text(encoding="utf-8-sig").splitlines()[0]
-        assert head.endswith("形态,顶部放量出货(Y),备注")
+        assert head.endswith("形态,顶部放量出货(Y/N),备注")
+        assert "button.xb" in g or "'xb'" in g  # v0.551 有/无 按钮
 
     def test_ingest_maps_shape_to_detectors(self, tmp_path):
         import csv as _csv
@@ -668,7 +669,7 @@ class TestTrendShapeV0548:
             r[7] = {"one_wave": "一波流", "healthy": "健康拉升", None: "不确定"}.get(
                 ow, "横盘震荡"
             )
-            r[8] = "Y" if k == 0 else ""
+            r[8] = "Y" if k == 0 else ("N" if k == 1 else "")  # 其余未选 ⇒ 不计
         with (d / "labels.csv").open("w", encoding="utf-8-sig", newline="") as fh:
             _csv.writer(fh).writerows(rows)
         o = cp.ingest(d)
@@ -679,3 +680,7 @@ class TestTrendShapeV0548:
     def test_uncertain_not_counted(self):
         chk = cp._shape_checks("不确定", True, {"one_wave_v3": "unclear"})
         assert all(w is None for w, _g in chk.values())
+
+    def test_unanswered_top_not_counted(self):
+        chk = cp._shape_checks("横盘震荡", None, {"distribution": "watch"})
+        assert chk["distribution"][0] is None and chk["one_wave_v3"][0] == "unclear"

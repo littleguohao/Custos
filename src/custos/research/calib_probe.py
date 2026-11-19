@@ -1061,12 +1061,16 @@ LABEL_CHOICES = {
 }
 #: 形态标注的附加勾选项（可与任一形态同时勾）
 SHAPE_EXTRA = "顶部放量出货"
+SHAPE_HINT = (
+    "每张图两步：① 从菜单选一个形态；② 第二行「顶部放量出货」选 有 / 无（两项都选才算标完）。"
+    "按你看到的走势选，不用逐个判检测器对错；备注写形态，不写后来涨跌"
+)
 CSV_HEAD = ["id", "字段", "代码", "日期", "类别", "检测值", "边界翻转参数"]
 CSV_TAIL = {
     "sample": ["判定(对/错/不确定)", "备注"],
     "review": ["应命中(Y/N)", "形态理由（写形态，不写后来涨跌）"],
     "buypoint": ["判断(买/不买/等)", "批语"],
-    "shape": ["形态", f"{SHAPE_EXTRA}(Y)", "备注"],
+    "shape": ["形态", f"{SHAPE_EXTRA}(Y/N)", "备注"],
 }
 
 
@@ -1127,12 +1131,12 @@ const HID = new Set(M.hidden || []);
 function refresh(){
   let n = 0;
   document.querySelectorAll('div.s').forEach(d => {
-    const v = get(d.dataset.id), done = !!v.c;
+    const v = get(d.dataset.id), done = !!v.c && (!M.extra || !!v.x);
     n += (done && !HID.has(d.dataset.id)) ? 1 : 0;
     d.classList.toggle('done', done);
     d.style.display = (HID.has(d.dataset.id) || (document.getElementById('onlyTodo').checked && done)) ? 'none' : '';
-    d.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.textContent === v.c));
-    const ex = d.querySelector('input.ex'); if (ex) ex.checked = !!v.x;
+    d.querySelectorAll('button:not(.xb)').forEach(b => b.classList.toggle('on', b.textContent === v.c));
+    d.querySelectorAll('button.xb').forEach(b => b.classList.toggle('on', b.dataset.x === (v.x || '')));
     const inp = d.querySelector('input:not(.ex)'); if (document.activeElement !== inp) inp.value = v.r || '';
   });
   document.getElementById('prog').textContent = n + ' / ' + (M.rows.length - HID.size) + (HID.size ? '（另 ' + HID.size + ' 张已隐藏，不需逐张标）' : '');
@@ -1145,11 +1149,15 @@ document.querySelectorAll('div.s').forEach(d => {
     b.onclick = () => { const v = get(id); v.c = (v.c === c ? '' : c); put(id, v); refresh(); };
     box.appendChild(b);
   });
-  if (M.extra) {
-    const lb = document.createElement('label'), cb = document.createElement('input');
-    cb.type = 'checkbox'; cb.className = 'ex'; cb.style.width = 'auto';
-    cb.onchange = () => { const v = get(id); v.x = cb.checked; put(id, v); };
-    lb.appendChild(cb); lb.appendChild(document.createTextNode(' ' + M.extra + '　')); box.appendChild(lb);
+  if (M.extra) {  // v0.551：独立一行、与形态按钮同款（owner 2026-11-19：原勾选框不显眼）
+    const row = document.createElement('div'); row.style.margin = '6px 0';
+    const t = document.createElement('b'); t.textContent = M.extra + '：'; row.appendChild(t);
+    [['有', 'Y'], ['无', 'N']].forEach(([lab, x]) => {
+      const b = document.createElement('button'); b.textContent = lab; b.className = 'xb'; b.dataset.x = x;
+      b.onclick = () => { const v = get(id); v.x = (v.x === x ? '' : x); put(id, v); refresh(); };
+      row.appendChild(b);
+    });
+    box.appendChild(row);
   }
   const inp = document.createElement('input'); inp.placeholder = M.ph || '形态理由';
   inp.oninput = () => { const v = get(id); v.r = inp.value; put(id, v); };
@@ -1158,7 +1166,7 @@ document.querySelectorAll('div.s').forEach(d => {
 const q = s => /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 document.getElementById('exp').onclick = () => {
   const out = [M.head.map(q).join(',')];
-  M.rows.forEach(r => { const v = get(r[0]); out.push([...r.map(x => String(x ?? '')), v.c || '', ...(M.extra ? [v.x ? 'Y' : ''] : []), v.r || ''].map(q).join(',')); });
+  M.rows.forEach(r => { const v = get(r[0]); out.push([...r.map(x => String(x ?? '')), v.c || '', ...(M.extra ? [v.x === true ? 'Y' : (v.x || '')] : []), v.r || ''].map(q).join(',')); });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob(['\ufeff' + out.join('\r\n') + '\r\n'], {type: 'text/csv'}));
   a.download = 'labels.csv'; a.click();
@@ -1177,7 +1185,7 @@ function parseCsv(t){
 document.getElementById('imp').onchange = ev => {
   const fr = new FileReader();
   fr.onload = () => { parseCsv(fr.result).slice(1).forEach(r => {
-    if (M.extra) { if (r[0] && (r[7] || r[8] || r[9])) put(r[0], {c: r[7] || '', x: r[8] === 'Y', r: r[9] || ''}); }
+    if (M.extra) { if (r[0] && (r[7] || r[8] || r[9])) put(r[0], {c: r[7] || '', x: r[8] || '', r: r[9] || ''}); }
     else if (r[0] && (r[7] || r[8])) put(r[0], {c: r[7] || '', r: r[8] || ''});
   }); refresh(); };
   fr.readAsText(ev.target.files[0], 'utf-8');
@@ -1345,7 +1353,7 @@ def shape_ask_html(readings: dict[str, Any]) -> str:
     return (
         "<div class='q' style='font:14px sans-serif;background:#f4f7fb;border-left:4px solid #3b6fb6;"
         "padding:6px 10px;margin:6px 0'><b>请判断：</b>这个 B1 点（最后一根）之前是什么走势？从下方菜单选一个；"
-        f"顶部有放量出货另勾上。<br><span style='color:#666'>检测器读数（只作参考）：{cells}</span></div>"
+        f"再在第二行选「顶部放量出货」有 / 无。<br><span style='color:#666'>检测器读数（只作参考）：{cells}</span></div>"
     )
 
 
@@ -1361,6 +1369,12 @@ def upgrade_gallery(d: Path) -> int:
         r"\n*<script>\nconst M = .*?</script>", "", g, flags=_re.S
     )  # 幂等：去旧 UI
     g = _re.sub(r"<style>\.lbl.*?</style><div id='bar'>.*?</div>", "", g, flags=_re.S)
+    if summ.get("label_mode") == "shape" or summ.get("module") == "trend_shape":
+        # v0.551 形态图集：只换标注 UI（读数说明与标题保留），同一 localStorage 键 ⇒ 已标形态不丢
+        ui = label_ui(rows, "shape", f"calib:{d.name}", hint=SHAPE_HINT)
+        g = g.replace("</body></html>", ui + "</body></html>")
+        (d / "gallery.html").write_text(g, encoding="utf-8")
+        return len(rows)
     g = _re.sub(r"<div class='q'[^>]*>.*?</div>", "", g, flags=_re.S)  # v0.516 幂等
 
     # 标题行检测值中文化（owner 2026-11-17）：已中文化的「中文（原值）」取括注原值重算 ⇒ 幂等、对照表改了也能刷新
@@ -1520,13 +1534,13 @@ SHAPE_EXPECT: dict[str, dict[str, str]] = {
 
 
 def _shape_checks(
-    shape: str, top: bool, rd: dict[str, Any]
+    shape: str, top: Optional[bool], rd: dict[str, Any]
 ) -> dict[str, tuple[Optional[str], str]]:
     """(期望, 检测) 对；期望 None = 不计一致率。"""
     out: dict[str, tuple[Optional[str], str]] = {
         k: (m.get(shape), str(rd.get(k))) for k, m in SHAPE_EXPECT.items()
     }
-    want = "有" if top else "无"
+    want: Optional[str] = None if top is None else ("有" if top else "无")
     out["distribution"] = (
         want,
         "无" if rd.get("distribution") in (None, "none") else "有",
@@ -1562,7 +1576,10 @@ def ingest_shape(
         if len(r) < 10 or not r[7].strip():
             continue
         lid, code, date = r[0].strip(), r[2].strip(), r[3].strip()
-        shape, top, why = r[7].strip(), r[8].strip() == "Y", r[9].strip()
+        shape, xv, why = r[7].strip(), r[8].strip(), r[9].strip()
+        top = (
+            None if xv not in ("Y", "N") else xv == "Y"
+        )  # v0.551：未选 = 不计出货一致率
         n_labeled += 1
         rd = readings.get(lid, {})
         key = shape + ("+顶部出货" if top else "")
@@ -2159,12 +2176,7 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
                 csv_rows,
                 lmode,
                 f"calib:{d.name}",
-                hint=(
-                    "从菜单选一个形态；顶部有放量出货另勾上。按你看到的走势选，不用逐个判检测器对错；"
-                    "备注写形态，不写后来涨跌"
-                    if lmode == "shape"
-                    else None
-                ),
+                hint=SHAPE_HINT if lmode == "shape" else None,
             )
         )
         parts.append("</body></html>")
