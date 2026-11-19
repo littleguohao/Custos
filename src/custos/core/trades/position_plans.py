@@ -263,3 +263,37 @@ def sync_plans(
 
     save_plans(plans, path)
     return plans
+
+
+def restop_averaged(
+    plans: dict[str, Any], rules: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    """#131 一次性迁移（v0.547 之前补过仓的计划）：``averaged`` 且止损规则为 loss_reduction、
+    止损价 ≠ 摊薄成本 × (1 + loss_reduction) 的持仓，止损按摊薄成本重算；原止损追加进 ``prev_stops``。
+
+    原地修改 ``plans["positions"]``（archive 只增不改，不碰），返回变更清单（预览用）。幂等：重跑无变更。"""
+    rules = rules or _effective_rules()
+    changes: list[dict[str, Any]] = []
+    for code, plan in sorted((plans.get("positions") or {}).items()):
+        stop = plan.get("stop") or {}
+        entry = finite(plan.get("entry_price"))
+        if not plan.get("averaged") or stop.get("rule_id") != "loss_reduction":
+            continue
+        if entry is None:
+            continue
+        price, basis = _default_stop(entry, rules)
+        old = finite(stop.get("price"))
+        if old is not None and abs(old - price) < 1e-6:
+            continue
+        plan.setdefault("prev_stops", []).append(
+            {**stop, "replaced_at": cn_now().isoformat(timespec="seconds")}
+        )
+        plan["stop"] = {
+            "rule_id": "loss_reduction",
+            "price": price,
+            "basis": basis + "（#131 迁移：按摊薄成本重算）",
+        }
+        changes.append(
+            {"code": code, "entry_price": entry, "old_stop": old, "new_stop": price}
+        )
+    return changes

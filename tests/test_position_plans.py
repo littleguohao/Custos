@@ -301,3 +301,52 @@ def test_legacy_pool_stop_migrated_to_fixed_7pct_v0528(tmp_path, monkeypatch):
         "price"
     ] == pytest.approx(9.3)
     assert plan["source"] == "default" and plan["legacy_stop"]["price"] == 9.5
+
+
+class TestRestopAveraged131:
+    """#131：v0.547 前补过仓的计划，止损一次性改为摊薄成本 × 0.93；默认预览、--apply 才写、幂等。"""
+
+    def _old_style(self, _tmp):
+        pp.sync_plans(_trades([_buy()]), [], [_pos()])
+        plans = pp.load_plans()
+        plan = plans["positions"]["000001"]
+        plan["entry_price"], plan["averaged"] = (
+            9.5,
+            True,
+        )  # 旧逻辑：摊薄了但止损仍 10×0.93
+        pp.save_plans(plans)
+        return plans
+
+    def test_restop_and_idempotent(self, _tmp):
+        plans = self._old_style(_tmp)
+        ch = pp.restop_averaged(plans)
+        assert len(ch) == 1 and ch[0]["old_stop"] == pytest.approx(9.3)
+        plan = plans["positions"]["000001"]
+        assert plan["stop"]["price"] == pytest.approx(9.5 * 0.93)
+        assert plan["prev_stops"][-1]["price"] == pytest.approx(9.3)
+        assert pp.restop_averaged(plans) == []
+
+    def test_not_averaged_untouched(self, _tmp):
+        pp.sync_plans(_trades([_buy()]), [], [_pos()])
+        assert pp.restop_averaged(pp.load_plans()) == []
+
+    def test_script_preview_then_apply(self, _tmp):
+        import importlib.util
+
+        self._old_style(_tmp)
+        spec = importlib.util.spec_from_file_location(
+            "restop",
+            pp.Path(__file__).resolve().parents[1]
+            / "scripts/dev/restop_averaged_plans.py",
+        )
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        assert m.main([]) == 0
+        assert pp.load_plans()["positions"]["000001"]["stop"]["price"] == pytest.approx(
+            9.3
+        )
+        assert m.main(["--apply"]) == 0
+        assert pp.load_plans()["positions"]["000001"]["stop"]["price"] == pytest.approx(
+            9.5 * 0.93
+        )
+        assert list(pp.PLANS_FILE.parent.glob("*.bak_restop_*"))
