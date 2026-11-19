@@ -28,7 +28,7 @@
 | `entry_patterns` | patterns 五单项判定 | scorer | 技术分：j_low **+24**（最大单项）、volume_contraction +15、relative_strength_strong 0（v0.529 退出，改 QSX>DKX）、bbi_above +5、reversal_k_candidate +4 |
 | `macd_technics` | MACD 十大技术 | scorer | 技术分：底背离 +8、水上 +7、zone1_restart +5、红柱增长 +5、周月红柱 +5、zone1 +3、**顶背离 −8**；cap：三打白骨精封顶 C |
 | `volume_detectors` | 量能三件套 | scorer | 技术分：bottom_volume +10、leader_volume +6；资金意图证据；volume_sustain 主线确认（retreat 留痕，v0.60 起不封顶） |
-| `b1_structure` | B1 结构检测器族 | scorer | 技术分：five_day_entry 0（v0.529 退出）、repair 每项 +4（上限 +8）、non_one_wave confirmed +5；cap：non_one_wave revoked 封顶 C；liquidity 仅 flag；🔄 止损参考位 `_stop_ref` v0.528 退出 live |
+| `b1_structure` | B1 结构检测器族 | scorer | 技术分：five_day_entry 0（v0.529 退出）、repair 每项 +4（上限 +8）、non_one_wave confirmed +5；non_one_wave revoked 只标记（owner 2026-11-17 封顶关）；liquidity 仅 flag；🔄 止损参考位 `_stop_ref` v0.528 退出 live |
 | `ignition` | 点火族 | scorer | 技术分：b1_ignition +8、pullback_shrink +5、ignition +4；资金意图证据；门内提醒判据（v0.89 起） |
 | `weekly_j` | 周线 J 状态 | scorer | 技术分：weekly_j_low +5（周日共振） |
 | `capital_intent` | 资金意图强度 | scorer | 🔄 **v0.529 起不再进分层**（分层改 B1 规则：J<13 ∧ QSX>DKX，owner 2026-11-16），只落盘展示；原为分层第二轴：10 条正向证据（ci_* 分值见 registry），≥5 强 / ≥2 中 / 否则弱 |
@@ -37,7 +37,7 @@
 
 配套（非因子注册但影响结果）：技术分组合器与分层矩阵在 `pipeline/screening/score_candidates.py`
 （scorer 的家）；组合奖 `b1_healthy_pullback_pack` +9；趋势腿 adx>60 +5；阴阳量 volume_yy +7/−5
-（检测器在 `bottom_patterns.bull_bear_volume`）；cap 编排 `apply_risk_downgrades`（冲刺波 / 一波流撤销 / 出货 high / 三打白骨精 + 0AMV 空头→B；
+（检测器在 `bottom_patterns.bull_bear_volume`）；cap 编排 `apply_risk_downgrades`（冲刺波 / 出货 high / 三打白骨精 + 0AMV 空头→B；
 🔄 无止损位→B v0.528 删）。分层与状态见 `SCREENING_WORKFLOW.md` [3]（v0.529 B1 规则）。
 
 ### B. live 证据层因子（落盘展示，不进分不进分层）

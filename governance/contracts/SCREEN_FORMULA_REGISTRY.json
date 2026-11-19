@@ -61,7 +61,7 @@
     "cap_rules": {
       "sprint_wave": true,
       "volume_retreat": false,
-      "non_one_wave_revoked": true,
+      "non_one_wave_revoked": false,
       "distribution_cap": true,
       "macd_divergence": true,
       "liquidity_floor": false,

@@ -447,7 +447,7 @@ COLUMN_LEGEND = [
     ),
     (
         "状态",
-        "B1 规则（v0.529）：🐂可买 = 0AMV 做多 + J<13 + QSX>DKX + 无风控否决；🐂观察价位 = 同上但 QSX≤DKX；待0AMV做多 = 0AMV 非做多、其余满足；🔍受限 = B1 点但被风控否决（冲刺波 / 出货 high / MACD 三打白骨精 / 非一波流撤销；出货 watch 只标记）",
+        "B1 规则（v0.529）：🐂可买 = 0AMV 做多 + J<13 + QSX>DKX + 无风控否决；🐂观察价位 = 同上但 QSX≤DKX；待0AMV做多 = 0AMV 非做多、其余满足；🔍受限 = B1 点但被风控否决（冲刺波 / 出货 high / MACD 三打白骨精；疑似一波流、出货 watch 只标记）",
     ),
     (
         "触发",
@@ -478,7 +478,7 @@ RISK_ZH: dict[str, str] = {
     "macd_overextended": "MACD 过度伸展",
     "macd_divergence_detected_cap_disabled": "MACD 背离（已检出，封顶关闭）",
     "non_one_wave_revoked": "疑似一波流 / 出货（否决）",
-    "non_one_wave_revoked_cap_disabled": "疑似一波流 / 出货（已检出，封顶关闭）",
+    "non_one_wave_revoked_cap_disabled": "疑似一波流 / 出货（提醒）",
     "sprint_wave_first_b1_forbidden": "冲刺波首个 B1（否决）",
     "sprint_wave_detected_cap_disabled": "冲刺波（已检出，封顶关闭）",
     "main_force_retreat": "量能退潮",
