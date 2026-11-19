@@ -653,7 +653,12 @@ class TestTrendShapeV0548:
         codes = [r["key"][0].split("|")[0] for r in rows]
         assert len(codes) == len(set(codes))  # 每票最多一张
         g = (d / "gallery.html").read_text(encoding="utf-8")
-        assert "下跌后横盘震荡" in g and cp.SHAPE_EXTRA in g and "检测器读数" in g
+        assert (
+            "下跌转横盘" in g
+            and "横盘转上涨" in g
+            and cp.SHAPE_EXTRA in g
+            and "检测器读数" in g
+        )
         head = (d / "labels.csv").read_text(encoding="utf-8-sig").splitlines()[0]
         assert head.endswith("形态,顶部放量出货(Y/N),备注")
         assert "button.xb" in g or "'xb'" in g  # v0.551 有/无 按钮
@@ -665,16 +670,18 @@ class TestTrendShapeV0548:
         rows = list(_csv.reader((d / "labels.csv").open(encoding="utf-8-sig")))
         rd = [r for rs in rep["samples"].values() for r in rs]
         for k, r in enumerate(rows[1:]):
-            ow = rd[k]["readings"]["one_wave_v3"]
-            r[7] = {"one_wave": "一波流", "healthy": "健康拉升", None: "不确定"}.get(
-                ow, "横盘震荡"
-            )
+            tr = rd[k]["readings"]["trend"]
+            r[7] = {
+                "上涨": "横盘转上涨",
+                "下跌": "震荡下跌",
+                "横盘震荡": "上涨转横盘",
+            }.get(tr, "不确定")
             r[8] = "Y" if k == 0 else ("N" if k == 1 else "")  # 其余未选 ⇒ 不计
         with (d / "labels.csv").open("w", encoding="utf-8-sig", newline="") as fh:
             _csv.writer(fh).writerows(rows)
         o = cp.ingest(d)
         assert o["mode"] == "shape" and o["n_labeled"] == len(rows) - 1
-        assert o["agreement"]["one_wave_v3"]["不一致"] == 0  # 按读数标 ⇒ 全一致
+        assert o["agreement"]["trend"]["不一致"] == 0  # 按读数标（转折取后段）⇒ 全一致
         assert "trend" in o["crosstab"] and (d / "ingest.md").exists()
 
     def test_uncertain_not_counted(self):
@@ -683,4 +690,14 @@ class TestTrendShapeV0548:
 
     def test_unanswered_top_not_counted(self):
         chk = cp._shape_checks("横盘震荡", None, {"distribution": "watch"})
-        assert chk["distribution"][0] is None and chk["one_wave_v3"][0] == "unclear"
+        assert chk["distribution"][0] is None and chk["trend"][0] == "横盘震荡"
+
+
+def test_shape_menu_three_states_and_legacy_v0552():
+    """owner 2026-11-19：三态 + 6 种转折；旧标签换算；趋势期望取转折后段。"""
+    assert len(cp.SHAPE_MENU) == 10 and cp.SHAPE_MENU[:3] == cp.SHAPE_STATES
+    assert (
+        cp.shape_now("上涨转横盘") == "横盘震荡"
+        and cp.shape_now("下跌中") == "震荡下跌"
+    )
+    assert cp.SHAPE_LEGACY["拉升后横盘震荡"] in cp.SHAPE_MENU

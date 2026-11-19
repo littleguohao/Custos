@@ -1041,23 +1041,48 @@ def _attach_steps(
             r["flip_steps"] = sorted(flip_steps.get((f, tuple(r["key"])), []))
 
 
+#: 三态（owner 2026-11-19）与转折菜单：先三态，再 6 种「X 转 Y」，最后不确定
+SHAPE_STATES = ("震荡上涨", "横盘震荡", "震荡下跌")
+_SHAPE_SHORT = {"震荡上涨": "上涨", "横盘震荡": "横盘", "震荡下跌": "下跌"}
+SHAPE_MENU = (
+    *SHAPE_STATES,
+    *(
+        f"{_SHAPE_SHORT[a]}转{_SHAPE_SHORT[b]}"
+        for a in SHAPE_STATES
+        for b in SHAPE_STATES
+        if a != b
+    ),
+    "不确定",
+)
+#: v0.548 旧菜单 → 新菜单（labels2.csv 等旧标注换算；一波流 = 快涨后转跌，owner 待确认）
+SHAPE_LEGACY = {
+    "一波流": "上涨转下跌",
+    "健康拉升": "震荡上涨",
+    "拉升后横盘震荡": "上涨转横盘",
+    "下跌后横盘震荡": "下跌转横盘",
+    "下跌中": "震荡下跌",
+}
+
+
+def shape_now(shape: str) -> Optional[str]:
+    """形态标签的「当前」状态（转折取后段）：上涨转横盘 ⇒ 横盘震荡。"""
+    shape = SHAPE_LEGACY.get(shape, shape)
+    if shape in SHAPE_STATES:
+        return shape
+    if "转" in shape:
+        b = shape.split("转", 1)[1]
+        return {"上涨": "震荡上涨", "下跌": "震荡下跌", "横盘": "横盘震荡"}.get(b)
+    return None
+
+
 #: 标注选项（网页 UI 与 ingest 同源）
 LABEL_CHOICES = {
     "sample": ("对", "错", "不确定"),
     "review": ("Y", "N", "不确定"),
     "buypoint": ("买", "不买", "等"),  # v0.517 买点练习
-    # v0.548 前置走势形态（owner 2026-11-18，按两轮备注整理）：单选 + 附加勾「顶部放量出货」
-    "shape": (
-        "一波流",
-        "健康拉升",
-        "拉升后横盘震荡",
-        "横盘震荡",
-        "下跌后横盘震荡",
-        "震荡下跌",
-        "下跌中",
-        "震荡上涨",
-        "不确定",
-    ),
+    # v0.552 前置走势形态（owner 2026-11-19）：浓缩为三态 震荡上涨 / 横盘震荡 / 震荡下跌，
+    # 中间有转折记「X 转 Y」（三态来回切换）；单选 + 「顶部放量出货」有 / 无
+    "shape": SHAPE_MENU,
 }
 #: 形态标注的附加勾选项（可与任一形态同时勾）
 SHAPE_EXTRA = "顶部放量出货"
@@ -1371,7 +1396,8 @@ def upgrade_gallery(d: Path) -> int:
     g = _re.sub(r"<style>\.lbl.*?</style><div id='bar'>.*?</div>", "", g, flags=_re.S)
     if summ.get("label_mode") == "shape" or summ.get("module") == "trend_shape":
         # v0.551 形态图集：只换标注 UI（读数说明与标题保留），同一 localStorage 键 ⇒ 已标形态不丢
-        ui = label_ui(rows, "shape", f"calib:{d.name}", hint=SHAPE_HINT)
+        # v0.552 菜单换过 ⇒ 换存储键（旧形态值与新按钮对不上）；旧标注经 SHAPE_LEGACY 换算后导入续标
+        ui = label_ui(rows, "shape", f"calib:{d.name}:v552", hint=SHAPE_HINT)
         g = g.replace("</body></html>", ui + "</body></html>")
         (d / "gallery.html").write_text(g, encoding="utf-8")
         return len(rows)
@@ -1511,24 +1537,12 @@ def ingest(d: Path, labels: Optional[Path] = None) -> dict[str, Any]:
 #: owner 形态 → 各检测器的期望值（缺省 = 该形态对这个检测器不作要求，只进交叉表）。
 #: 一波流 v3 三态：一波流 / 健康拉升 / 其余都是 unclear；趋势三态：上涨 / 下跌 / 横盘震荡。
 SHAPE_EXPECT: dict[str, dict[str, str]] = {
-    "one_wave_v3": {
-        "一波流": "one_wave",
-        "健康拉升": "healthy",
-        "拉升后横盘震荡": "unclear",
-        "横盘震荡": "unclear",
-        "下跌后横盘震荡": "unclear",
-        "震荡下跌": "unclear",
-        "下跌中": "unclear",
-        "震荡上涨": "unclear",
-    },
+    # v0.552：趋势三态对「当前」状态（转折取后段）；一波流 v3 不再有一一对应的形态，只进交叉表
     "trend": {
-        "健康拉升": "上涨",
-        "震荡上涨": "上涨",
-        "拉升后横盘震荡": "横盘震荡",
-        "横盘震荡": "横盘震荡",
-        "下跌后横盘震荡": "横盘震荡",
-        "震荡下跌": "下跌",
-        "下跌中": "下跌",
+        m: {"震荡上涨": "上涨", "震荡下跌": "下跌", "横盘震荡": "横盘震荡"}[
+            shape_now(m) or "横盘震荡"
+        ]
+        for m in (*SHAPE_MENU[:-1], *SHAPE_LEGACY)
     },
 }
 
@@ -1576,7 +1590,11 @@ def ingest_shape(
         if len(r) < 10 or not r[7].strip():
             continue
         lid, code, date = r[0].strip(), r[2].strip(), r[3].strip()
-        shape, xv, why = r[7].strip(), r[8].strip(), r[9].strip()
+        shape, xv, why = (
+            SHAPE_LEGACY.get(r[7].strip(), r[7].strip()),
+            r[8].strip(),
+            r[9].strip(),
+        )
         top = (
             None if xv not in ("Y", "N") else xv == "Y"
         )  # v0.551：未选 = 不计出货一致率
