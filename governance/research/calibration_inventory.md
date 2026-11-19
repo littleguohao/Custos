@@ -225,6 +225,8 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 - **一波流 v3 升版（v0.555，owner 2026-11-19「一波流可以只做提醒」）**：`b1_structure.detect` 加 `one_wave_v3`，`score_candidates` 命中记 `one_wave_v3`
   风险标记（候选表「一波流（提醒）」），不封顶、不改状态、不计分；`non_one_wave_revoked` 封顶同步关闭（只标记）。b1_structure 版本 v1 → v2（bump）。
   健康拉升不采用（两轮 owner 没标过、v3 判 16 次全错）；「非一波流确认 +5」仍按 v1。
+- **owner 自洽复测（v0.556，B 口径）**：`calib_probe.build_retest` 从 v1（labels3）/ v2（labels4）各抽 8 张，打乱、隐去代码 / 检测器读数，
+  图集 `trend_shape__retest_v1`（16 张）；读回 = owner 两次标注的形态整条 / 后段 / 两个附加项一致率。决定走势三态 v3 还值不值得往下磨。
 - 全部图集取值改正面中文（字段专属对照）：非一波流字段显示「健康拉升 / 疑似一波流或出货 / 判断不了」，MACD 区间与出货失效名单措辞同步改，不再出现双重否定。
 ## P0H 持仓大形态（v0.485 纳入，**排在 P0 之前**）
 

@@ -1669,6 +1669,27 @@ def ingest_shape(
                         "reason": why,
                     }
                 )
+    if summ.get("retest_of"):
+        rt = retest_agreement(summ, rows, head)
+        (d / "ingest.json").write_text(
+            json.dumps(rt, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+        L = [
+            "# 形态盲标复测：owner 自洽率",
+            "",
+            "| 项 | 一致 | 不一致 |",
+            "|---|---:|---:|",
+        ]
+        L += [
+            f"| {k} | {v['一致']} | {v['不一致']} |"
+            for k, v in rt["self_agreement"].items()
+        ]
+        L += ["", "## 形态改判", ""] + [
+            f"- #{x['id']}（{x['src']} #{x['src_id']}）：{x['old']} → {x['new']}"
+            for x in rt["shape_changed"]
+        ]
+        (d / "ingest.md").write_text("\n".join(L) + "\n", encoding="utf-8")
+        return {"mode": "retest", "n_labeled": n_labeled, **rt}
     out = {
         "module": summ["module"],
         "tag": summ.get("tag"),
@@ -1685,6 +1706,146 @@ def ingest_shape(
     )
     (d / "ingest.md").write_text(_ingest_shape_md(out), encoding="utf-8")
     return out
+
+
+def build_retest(
+    sources: list[tuple[Path, Path]], n_each: int, seed: int, out_dir: Path
+) -> Path:
+    """B 口径盲标复测（v0.556，校准清单第 6 条）：从已标形态图集各抽 ``n_each`` 张，打乱顺序、隐去代码 / 日期 /
+    检测器读数重出，owner 再标一遍；读回时与原标注比对 = owner 自洽率。只服务 label_mode=shape 的图集。"""
+    rng = random.Random(seed)
+    picked: list[dict[str, Any]] = []
+    for d, lab in sources:
+        summ = json.loads((d / "summary.json").read_text(encoding="utf-8-sig"))
+        cd = json.loads((d / "chart_data.json").read_text(encoding="utf-8"))
+        with lab.open(encoding="utf-8-sig", newline="") as fh:
+            allrows = list(csv.reader(fh))
+        head = allrows[0]
+        idx = {h.split("(")[0]: k for k, h in enumerate(head)}
+        flat = [r for rs in summ["samples"].values() for r in rs]
+        rows = [r for r in allrows[1:] if r and r[idx["形态"]].strip() and r[0] in cd]
+        for r in rng.sample(rows, min(n_each, len(rows))):
+            picked.append(
+                {
+                    "src": d.name,
+                    "src_id": r[0],
+                    "code": r[2],
+                    "date": r[3],
+                    "orig": {
+                        k: r[idx[k]]
+                        if idx.get(k) is not None and idx[k] < len(r)
+                        else ""
+                        for k in ("形态", *SHAPE_EXTRAS)
+                    },
+                    "readings": flat[int(r[0]) - 1].get("readings") or {},
+                    "chart": cd[r[0]],
+                }
+            )
+    rng.shuffle(picked)
+    out = out_dir
+    out.mkdir(parents=True, exist_ok=True)
+    csv_rows: list[list[Any]] = []
+    chart_data: dict[str, Any] = {}
+    parts = [
+        "<html><meta charset='utf-8'><title>形态盲标复测</title><body>",
+        f"<h1>前置走势形态 · 盲标复测（{len(picked)} 张，B 口径）</h1>",
+        "<p>这些图你之前标过；这次隐去代码、日期和检测器读数，顺序打乱，请按当下的判断重新标。</p>",
+    ]
+    for n, p in enumerate(picked, 1):
+        csv_rows.append(
+            [n, "trend_shape.retest", p["code"], p["date"], "retest", "", ""]
+        )
+        chart_data[str(n)] = {
+            **p["chart"],
+            "title": f"#{n}",
+            "code": f"复测{n}",
+            "marks": [],
+        }
+        parts.append(
+            f"<div class='s' data-id='{n}'>{shape_ask_html({}, blind=True)}"
+            f"<div class='t'>#{n}</div><div class='kc'></div></div>"
+        )
+    if kc_assets() is not None:
+        parts.append(kc_section(chart_data))
+    parts.append(label_ui(csv_rows, "shape", f"calib:{out.name}", hint=SHAPE_HINT))
+    parts.append("</body></html>")
+    (out / "gallery.html").write_text("".join(parts), encoding="utf-8")
+    (out / "chart_data.json").write_text(
+        json.dumps(chart_data, ensure_ascii=False), encoding="utf-8"
+    )
+    with (out / "labels.csv").open("w", encoding="utf-8-sig", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(CSV_HEAD + CSV_TAIL["shape"])
+        for row in csv_rows:
+            w.writerow([*row, *([""] * len(CSV_TAIL["shape"]))])
+    summ_out = {
+        "schema": "calib_probe/v1",
+        "module": "trend_shape",
+        "mode": "sample",
+        "label_mode": "shape",
+        "tag": out.name,
+        "blind": True,
+        "samples": {
+            "trend_shape.retest": [
+                {
+                    "key": [p["code"], 0],
+                    "class": "retest",
+                    "value": None,
+                    "flip_params": [],
+                    "readings": p["readings"],
+                }
+                for p in picked
+            ]
+        },
+        "retest_of": [
+            {k: p[k] for k in ("src", "src_id", "code", "date", "orig")} for p in picked
+        ],
+    }
+    (out / "summary.json").write_text(
+        json.dumps(summ_out, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    return out
+
+
+def retest_agreement(
+    summ: dict[str, Any], rows: list[list[str]], head: list[str]
+) -> dict[str, Any]:
+    """复测读回：owner 两次标注的一致率（形态整条 / 后段 / 各附加项），只描述。"""
+    idx = {h.split("(")[0]: k for k, h in enumerate(head)}
+    by_id = {r[0]: r for r in rows if r}
+    acc: dict[str, dict[str, int]] = {}
+    diff: list[dict[str, Any]] = []
+    for n, p in enumerate(summ["retest_of"], 1):
+        r = by_id.get(str(n))
+        if r is None or not r[idx["形态"]].strip():
+            continue
+        new = {
+            k: r[idx[k]].strip() if idx.get(k) is not None and idx[k] < len(r) else ""
+            for k in ("形态", *SHAPE_EXTRAS)
+        }
+        old = {k: SHAPE_LEGACY.get(v, v) for k, v in p["orig"].items()}
+        new["形态"] = SHAPE_LEGACY.get(new["形态"], new["形态"])
+        checks = {
+            "形态整条": (old["形态"], new["形态"]),
+            "形态后段": (shape_now(old["形态"]), shape_now(new["形态"])),
+            **{k: (old.get(k, ""), new.get(k, "")) for k in SHAPE_EXTRAS},
+        }
+        for k, (a, b) in checks.items():
+            if not a or not b or a == "不确定" or b == "不确定":
+                continue
+            st = acc.setdefault(k, {"一致": 0, "不一致": 0})
+            st["一致" if a == b else "不一致"] += 1
+        if old["形态"] != new["形态"]:
+            diff.append(
+                {
+                    "id": n,
+                    "src": p["src"],
+                    "src_id": p["src_id"],
+                    "old": old["形态"],
+                    "new": new["形态"],
+                }
+            )
+    return {"self_agreement": acc, "shape_changed": diff}
 
 
 def _ingest_shape_md(o: dict[str, Any]) -> str:

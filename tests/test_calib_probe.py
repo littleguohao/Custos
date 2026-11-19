@@ -709,3 +709,32 @@ def test_shape_blind_hides_readings_v0553():
     h = cp.shape_ask_html({"trend": "上涨"}, blind=True)
     assert "复验盲标" in h and "趋势三态" not in h and "一波流" in h
     assert "趋势三态" in cp.shape_ask_html({"trend": "上涨"})
+
+
+def test_retest_blind_and_self_agreement_v0556(tmp_path):
+    """B 口径盲标复测：抽样打乱、隐去代码与读数；读回与原标注比对。"""
+    import csv as _csv
+
+    t = TestTrendShapeV0548()
+    _rep, d = t._rep(tmp_path / "src")
+    rows = list(_csv.reader((d / "labels.csv").open(encoding="utf-8-sig")))
+    for k, r in enumerate(rows[1:]):
+        r[7], r[8], r[9] = ("横盘震荡" if k % 2 else "上涨转下跌"), "N", "N"
+    with (d / "labels.csv").open("w", encoding="utf-8-sig", newline="") as fh:
+        _csv.writer(fh).writerows(rows)
+    out = cp.build_retest([(d, d / "labels.csv")], 4, 1, tmp_path / "rt")
+    g = (out / "gallery.html").read_text(encoding="utf-8")
+    assert "复验盲标" in g and "检测器读数（只作参考）" not in g
+    summ = __import__("json").loads((out / "summary.json").read_text(encoding="utf-8"))
+    assert all(
+        p["code"] not in g.split("const KC")[0] for p in summ["retest_of"]
+    )  # 页面不露代码
+    rr = list(_csv.reader((out / "labels.csv").open(encoding="utf-8-sig")))
+    for n, r in enumerate(rr[1:]):
+        o = summ["retest_of"][n]["orig"]
+        r[7], r[8], r[9] = (o["形态"] if n else "震荡下跌"), "N", "N"
+    with (out / "labels.csv").open("w", encoding="utf-8-sig", newline="") as fh:
+        _csv.writer(fh).writerows(rr)
+    res = cp.ingest(out)
+    assert res["mode"] == "retest"
+    assert res["self_agreement"]["形态整条"] == {"一致": len(rr) - 2, "不一致": 1}
