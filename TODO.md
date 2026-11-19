@@ -26,7 +26,7 @@
 | 123 | 定义校准扩展批（A 类，owner 2026-11-16）：①macd_technics（最需对齐，mining_v1 已有 120 张）②阴阳量 + 红肥绿瘦合并为一个定义（窗口 / 底部判定 / 实体与量比较口径待 owner 定）后校准、拟进打分 ③RD、SB（live 保留的两项研究标注）定义校准 ④s_shape、perfect_b1_fit 重新校准 | P1 | owner | 图集已全部出完（v0.531~v0.535）：RD / SB / 红肥绿瘦 v2 / 沙漏后的 B1 / perfect_b1_fit + mining_v1 的 macd_technics；s_shape 原分不校准（B1 池恒「不买」）→ owner 标注 → ingest → 评判断正确率 → 定 v(n+1) | owner 2026-11-16 |
 | 129 | R52 owner 批语入场规则（等条件再进 / 风险过滤，8 臂）：工具 `remark_entry_study` 已落地 v0.536；开发机 200 票摸底 8 臂均未见正向（描述） | P2 | 生产机 | 第二批同排：`uv run python -m custos.research remark_entry_study --warm-procs <物理核数-2> --tag r52_v1`，回填 R52 | owner 2026-11-13；[R52](governance/research/R52_remark_entry_rules.md) |
 | 130 | 反转 K 判定偏严：b1_thresholds 标注 10 个「错」全为检测器判不成立，`VOL_RATIO_MAX ×1.2` 修正 7 条、误伤 1 条（线索，非证据） | P2 | owner | owner 补理由或盲标复测 → 定是否放宽 `VOL_RATIO_MAX`（改则 b1_thresholds 升版） | 校准清单 b1_thresholds 轮次 |
-| 131 | 已补过仓的持仓止损迁移：v0.547 起补仓后止损 = 摊薄成本 × 0.93，此前补过仓的计划仍存旧止损价 | P2 | owner | owner 定是否一次性迁移；要迁则写迁移（原值留 prev_stops）在生产机跑 `position_plans.json` | v0.547 |
+| 131 | 已补过仓的持仓止损迁移：v0.547 起补仓后止损 = 摊薄成本 × 0.93，此前补过仓的计划仍存旧止损价 | P2 | 生产机 | 工具已就绪（v0.550）：生产机先跑 `uv run python scripts/dev/restop_averaged_plans.py` 预览，owner 看过再加 `--apply` | v0.547 |
 | 132 | 1800 报告「⚡RD 说明」行过长且每日重复 | P3 | owner | owner 定是否压成「⚡RD = RSI 深水区，仅提示」，详细说明移到文末列含义 | 2026-11-18 1800 布局调整 |
 | 133 | 候选表 s_shape 展示替换为「沙漏后的 B1」 | P3 | 观察中 | 等 `hourglass_b1__mining_v1` 标注通过（#123）后替换证据标记列里的 S反转 | v0.535 |
 | 128 | 五日战法作持仓离场规则（收盘守 5 日线 7.5% 内持有，跌破减半）与现行 BBI 跌破 2 根止盈对照 | P3 | 挂起 | 第二批（R47 等出场研究）之后再议，届时预注册 | owner 2026-11-16 |
