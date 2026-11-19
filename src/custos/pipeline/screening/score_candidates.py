@@ -15,8 +15,8 @@ technical_score 只作展示与同状态内排序（未校准），capital_inten
 
 仍保留的**风控/回避硬否决**（与"板块弱"无关）：
 - 0AMV 空头 → 封顶 B 且 next_step=observe_price。
-- 冲刺波首个B1 → 封顶 B；非一波流撤销 → 封顶 C；主力出货 high → D；MACD 三打白骨精 → 封顶 C。
-- 只标记不否决：出货 watch（v0.530）、MACD 顶背离（v0.61，−8 分）、量能撤退（v0.60 封顶关）。
+- 冲刺波首个B1 → 封顶 B；主力出货 high → D；MACD 三打白骨精 → 封顶 C。
+- 只标记不否决：疑似一波流（owner 2026-11-17，封顶关）、出货 watch（v0.530）、MACD 顶背离（v0.61，−8 分）、量能撤退（v0.60 封顶关）。
 - 🔄 已删：无可定义止损位 → 封顶 B（v0.528）；CZ 回避方向名单 → D（v0.80）。
 
 CLI::
@@ -217,7 +217,8 @@ DEFAULT_CAP_RULES = {
     # v0.60（2026-08-14，owner）：量能撤退封顶去掉——与「缩量回调是 B1 健康形态」
     # 语义冲突（同一缩量事实一边加分一边封顶）。检出仍记录（cap_disabled 证据 flag）。
     "volume_retreat": False,  # 量能持续性=主力撤退 → 原封顶 C（CZ §14.6）
-    "non_one_wave_revoked": True,  # 非一波流撤销 → 封顶 C（待回测）
+    # owner 2026-11-17：一波流只标记提醒、不否决（同出货 watch）⇒ 封顶关；检出留 non_one_wave_revoked_cap_disabled
+    "non_one_wave_revoked": False,
     "distribution_cap": True,  # 主力出货五方式命中 → high 封 D / watch 封 C（B1 §七.3，待回测）
     "macd_divergence": True,  # MACD 顶背离/三打白骨精 → 封顶 C（macd十大技术，待回测）
     "liquidity_floor": False,  # 流动性(近20日均成交额)低于底线 → 封顶 C（默认关，仅flag；待回测后开）
@@ -672,7 +673,7 @@ def _cap_stop_loss_and_bear(
 
 
 def _cap_wave_rules(risk_flags: list, bucket: str, cand: dict, rules: dict):
-    """波浪/量能/一波流三条：冲刺波首个 B1 → 封顶 B；量能撤退、非一波流撤销 → 封顶 C。"""
+    """波浪/量能/一波流三条：冲刺波首个 B1 → 封顶 B；量能撤退、非一波流撤销开关开时封顶 C（两者默认关 = 只标记）。"""
     wave_type = (cand.get("wave") or {}).get("wave_type")
     if wave_type == "sprint":
         # B1 §四.0：冲刺波后首个 B1 禁止买入 → 最高 B
@@ -689,7 +690,7 @@ def _cap_wave_rules(risk_flags: list, bucket: str, cand: dict, rules: dict):
         else:
             risk_flags.append("main_force_retreat_cap_disabled")
     if (cand.get("non_one_wave") or {}).get("status") == "revoked":
-        # B1 §四：非一波流撤销（顶部放量大阴/回调放量破位）→ 最高 C
+        # B1 §四：非一波流撤销（顶部放量大阴/回调放量破位）；owner 2026-11-17 起默认只标记（开关关）
         if rules["non_one_wave_revoked"]:
             risk_flags.append("non_one_wave_revoked")
             bucket = cap_bucket(bucket, "C")

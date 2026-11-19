@@ -59,11 +59,23 @@ def test_volume_sustain_retreat_no_longer_caps():
     assert scored["bucket"] == "A"
 
 
-def test_non_one_wave_revoked_caps_at_c():
+def test_non_one_wave_revoked_marks_only():
+    """owner 2026-11-17：一波流只标记提醒，不否决（不封顶、状态不变受限）。"""
     scored = sc.score_candidate(
         _cand(non_one_wave={"status": "revoked", "available": True}),
         SECTOR_STRONG,
         "做多",
+    )
+    assert scored["bucket"] != "C" and scored["b1_status"] != "受限"
+    assert "non_one_wave_revoked_cap_disabled" in scored["risk_flags"]
+
+
+def test_non_one_wave_revoked_cap_still_switchable():
+    scored = sc.score_candidate(
+        _cand(non_one_wave={"status": "revoked", "available": True}),
+        SECTOR_STRONG,
+        "做多",
+        cap_rules={"non_one_wave_revoked": True},
     )
     assert scored["bucket"] == "C"
     assert "non_one_wave_revoked" in scored["risk_flags"]
