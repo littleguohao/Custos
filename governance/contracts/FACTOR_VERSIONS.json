@@ -57,8 +57,8 @@
       ]
     },
     "b1_structure": {
-      "version": 1,
-      "source_digest": "6a7b6c6d30543d25ac41",
+      "version": 2,
+      "source_digest": "8118fb756f3ce2f6fc58",
       "history": [
         {
           "version": 1,
@@ -94,6 +94,11 @@
           "version": 1,
           "date": "2026-11-17",
           "refactor": "一波流 v3：一波流加回调不缩量、健康拉升加 N 型结构不破（未接 live）"
+        },
+        {
+          "version": 2,
+          "date": "2026-11-19",
+          "change": "一波流 v3 进 live 只作提醒（risk_flags one_wave_v3）；非一波流撤销封顶关闭改只标记（owner 2026-11-19）"
         }
       ]
     },

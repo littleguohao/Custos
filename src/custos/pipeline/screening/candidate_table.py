@@ -479,6 +479,7 @@ RISK_ZH: dict[str, str] = {
     "macd_divergence_detected_cap_disabled": "MACD 背离（已检出，封顶关闭）",
     "non_one_wave_revoked": "疑似一波流 / 出货（否决）",
     "non_one_wave_revoked_cap_disabled": "疑似一波流 / 出货（提醒）",
+    "one_wave_v3": "一波流（提醒）",
     "sprint_wave_first_b1_forbidden": "冲刺波首个 B1（否决）",
     "sprint_wave_detected_cap_disabled": "冲刺波（已检出，封顶关闭）",
     "main_force_retreat": "量能退潮",

@@ -369,3 +369,21 @@ def test_score_all_records_cap_rules_and_sector_max():
     assert result["cap_rules"]["sprint_wave"] is False
     assert result["cap_rules"]["volume_retreat"] is False  # v0.60：默认关（owner）
     assert result["sector_score_max"] == 100.0
+
+
+def test_one_wave_v3_marks_only_v0555():
+    """owner 2026-11-19：一波流 v3 只作提醒——标记进 risk_flags，bucket / 状态 / 技术分不变。"""
+    base = sc.score_candidate(_cand(), SECTOR_STRONG, "做多")
+    scored = sc.score_candidate(
+        _cand(one_wave_v3={"status": "one_wave", "available": True}),
+        SECTOR_STRONG,
+        "做多",
+    )
+    assert "one_wave_v3" in scored["risk_flags"]
+    assert (
+        scored["bucket"] == base["bucket"] and scored["b1_status"] == base["b1_status"]
+    )
+    assert (
+        scored["score_detail"]["technical_score"]
+        == base["score_detail"]["technical_score"]
+    )

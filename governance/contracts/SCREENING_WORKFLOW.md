@@ -150,10 +150,10 @@ owner 拍板：无在链消费方）。
 
 - 0AMV 空头 → 封顶 B 且 next_step=observe_price（状态显示「待0AMV做多」）。
 - **风控否决（状态 = 受限）**：冲刺波首个 B1 → 封顶 B；主力出货 high → D；MACD 三打白骨精 → 封顶 C。
-- **只标记、不否决**：疑似一波流 / 非一波流撤销（owner 2026-11-17，`non_one_wave_revoked` 封顶关）；出货 watch（v0.530，技术分 −10 照旧）；MACD 顶背离（v0.61，技术分 −8）；MACD 过度伸展；
+- **只标记、不否决**：一波流 v3（v0.555，`one_wave_v3` 风险列「一波流（提醒）」）；疑似一波流 / 非一波流撤销（owner 2026-11-17，`non_one_wave_revoked` 封顶关）；出货 watch（v0.530，技术分 −10 照旧）；MACD 顶背离（v0.61，技术分 −8）；MACD 过度伸展；
   量能撤退（v0.60 起封顶关闭，留 `main_force_retreat_cap_disabled`）；流动性偏低（`liquidity_floor` 默认关）。
 - 🔄 已删：「无止损位 → 封顶 B」（v0.528，live 止损固定买入价 −7%）；CZ 回避名单 → D（v0.80）。
-- 封顶开关见 `scoring.cap_rules`。一波流定义 v3 待 trend_shape 校准定稿后替换（`calibration_inventory.md`）。
+- 封顶开关见 `scoring.cap_rules`。一波流 v3 v0.555 起进 live 只作提醒（两轮标注检出 8/9、准确约 44%，`calibration_inventory.md`）；健康拉升未采用，技术分「非一波流确认 +5」仍按 v1 口径。
 
 next_step（由封顶后的 bucket 定）：A→buy_review（v0.50：原 generate_buy_plan 是虚假承诺，BuyPlan 契约已删、
 无组件生成买入计划），B→observe_price，C→long_term_track，D→avoid

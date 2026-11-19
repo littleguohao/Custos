@@ -790,6 +790,7 @@ def _assemble_metrics(
         **{k: v for k, v in _wk.items() if k.startswith("weekly_")},
         "signals": ev["signals"],
         "non_one_wave": _b1s["non_one_wave"],
+        "one_wave_v3": _b1s["one_wave_v3"],  # v0.555 只作提醒
         "repair_signals": check_repair_signals(df, index_df, kdj_state=base["j"]),
         "five_day_entry": _b1s["five_day_entry"],
         "volume_sustain": _vol["volume_sustain"],
