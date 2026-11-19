@@ -212,6 +212,11 @@ TOOLS: dict[str, tuple[str, str]] = {
         "owner 批语规则机械化定义（v0.517 单一来源，买点练习复盘与 R52 共用）：状态陈述核实、等待条件触发、前向读数；"
         "CLI 打印归类与定义",
     ),
+    "swing_state": (
+        "diagnostic",
+        "走势三态 v2 候选（owner 2026-11-19）：近 10 根 ±8% 逐根三态 → 游程 → 最后两段「X 转 Y」；"
+        "只服务 calib_probe trend_shape 图集，不进 live（库模块，无 CLI）",
+    ),
     "calib_probe": (
         "diagnostic",
         "信号参数定义校准探针（TODO #121，A 类：检测器是否测出规则原文形态，不拿收益寻优）：挖掘段 as-of bar 池"

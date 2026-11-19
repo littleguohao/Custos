@@ -660,7 +660,7 @@ class TestTrendShapeV0548:
             and "检测器读数" in g
         )
         head = (d / "labels.csv").read_text(encoding="utf-8-sig").splitlines()[0]
-        assert head.endswith("形态,顶部放量出货(Y/N),备注")
+        assert head.endswith("形态,顶部放量出货(Y/N),一波流(Y/N),备注")
         assert "button.xb" in g or "'xb'" in g  # v0.551 有/无 按钮
 
     def test_ingest_maps_shape_to_detectors(self, tmp_path):
@@ -677,6 +677,7 @@ class TestTrendShapeV0548:
                 "横盘震荡": "上涨转横盘",
             }.get(tr, "不确定")
             r[8] = "Y" if k == 0 else ("N" if k == 1 else "")  # 其余未选 ⇒ 不计
+            r[9] = "N"
         with (d / "labels.csv").open("w", encoding="utf-8-sig", newline="") as fh:
             _csv.writer(fh).writerows(rows)
         o = cp.ingest(d)
@@ -686,7 +687,8 @@ class TestTrendShapeV0548:
 
     def test_uncertain_not_counted(self):
         chk = cp._shape_checks("不确定", True, {"one_wave_v3": "unclear"})
-        assert all(w is None for w, _g in chk.values())
+        assert chk["trend"][0] is None  # 形态不确定 ⇒ 形态类不计
+        assert chk["distribution"][0] == "有"  # v0.553 附加项与形态独立，照常计
 
     def test_unanswered_top_not_counted(self):
         chk = cp._shape_checks("横盘震荡", None, {"distribution": "watch"})
@@ -701,3 +703,9 @@ def test_shape_menu_three_states_and_legacy_v0552():
         and cp.shape_now("下跌中") == "震荡下跌"
     )
     assert cp.SHAPE_LEGACY["拉升后横盘震荡"] in cp.SHAPE_MENU
+
+
+def test_shape_blind_hides_readings_v0553():
+    h = cp.shape_ask_html({"trend": "上涨"}, blind=True)
+    assert "复验盲标" in h and "趋势三态" not in h and "一波流" in h
+    assert "趋势三态" in cp.shape_ask_html({"trend": "上涨"})
