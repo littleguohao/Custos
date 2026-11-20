@@ -58,7 +58,7 @@
     },
     "b1_structure": {
       "version": 2,
-      "source_digest": "8118fb756f3ce2f6fc58",
+      "source_digest": "9e79fd780d00b1603531",
       "history": [
         {
           "version": 1,
@@ -99,6 +99,11 @@
           "version": 2,
           "date": "2026-11-19",
           "change": "一波流 v3 进 live 只作提醒（risk_flags one_wave_v3）；非一波流撤销封顶关闭改只标记（owner 2026-11-19）"
+        },
+        {
+          "version": 2,
+          "date": "2026-11-20",
+          "refactor": "新增走势三态 v4 候选 check_swing_state（不进 detect，live 不变）"
         }
       ]
     },

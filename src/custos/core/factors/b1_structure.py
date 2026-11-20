@@ -656,6 +656,70 @@ def _stop_ref(df, lookback: int = STOP_LOOKBACK) -> Optional[float]:
     return round(float(df["low"].tail(lookback).min()), 4)
 
 
+# ---------------------------------------------------------------------------
+# 走势三态 v4 候选（owner 2026-11-20：用于选股侧提示；未进 detect / live）
+# ---------------------------------------------------------------------------
+SW4_BARS = 120  # 只看图上显示的 120 根（owner：显示多少根就看多少根）
+SW4_THR = 0.15  # 段内直线涨跌 ≥15% 上涨 / ≤−15% 下跌，其余横盘
+SW4_MIN_HEAD = 20  # 转折点（最高 / 最低点）距图左端至少 20 根
+SW4_MIN_TAIL = 5  # 转折点距当根至少 5 根（B1 前短回落也算一段）
+SW4_SPLIT_RATIO = 0.9  # 两段拟合误差和须 ≤ 整段 0.9 倍才算有转折
+
+_SW4_FULL = {"上涨": "震荡上涨", "横盘": "横盘震荡", "下跌": "震荡下跌"}
+
+
+def _sw4_line(y) -> tuple[float, float]:
+    import numpy as np  # noqa: PLC0415
+
+    x = np.arange(len(y), dtype=float)
+    slope, icpt = np.polyfit(x, y, 1)
+    return float(slope), float(((slope * x + icpt - y) ** 2).sum())
+
+
+def _sw4_cls(slope: float, n: int) -> str:
+    import math  # noqa: PLC0415
+
+    ch = math.exp(slope * n) - 1
+    return "上涨" if ch >= SW4_THR else ("下跌" if ch <= -SW4_THR else "横盘")
+
+
+def check_swing_state(df) -> dict[str, Any]:
+    """走势三态 v4（owner 2026-11-20「从整体到局部」）：只看末 ``SW4_BARS`` 根收盘（对数价）。
+
+    整体：转折点只取图上的最高点或最低点（距左端 ≥ ``SW4_MIN_HEAD``、距当根 ≥ ``SW4_MIN_TAIL``），
+    两段直线拟合误差和 ≤ 整段 × ``SW4_SPLIT_RATIO`` 才算转折，否则一段；局部：每段直线涨跌 ±``SW4_THR`` 分三态。
+    结论：一段 / 两段同态 ⇒ 震荡上涨 / 横盘震荡 / 震荡下跌；否则「X 转 Y」（上涨 / 横盘 / 下跌）。
+    参数来源：owner 两份 48 张交叉验证（整条 52/96、后段 72/96；owner 自洽 13/16、14/16）⇒ 候选，须新抽样复验。"""
+    import numpy as np  # noqa: PLC0415
+
+    if df is None or len(df) < SW4_MIN_HEAD + SW4_MIN_TAIL + 10:
+        return {"available": False, "state": None, "turn_bars_ago": None}
+    c = df["close"].astype(float).to_numpy()[-SW4_BARS:]
+    if not np.all(c > 0):
+        return {"available": False, "state": None, "turn_bars_ago": None}
+    y = np.log(c)
+    n = len(y)
+    s_all, e_all = _sw4_line(y)
+    best: Optional[tuple[float, int]] = None
+    for k in {int(np.argmax(c)), int(np.argmin(c))}:
+        if SW4_MIN_HEAD <= k <= n - 1 - SW4_MIN_TAIL:
+            e = _sw4_line(y[: k + 1])[1] + _sw4_line(y[k:])[1]
+            if best is None or e < best[0]:
+                best = (e, k)
+    if best is None or best[0] > SW4_SPLIT_RATIO * e_all:
+        return {
+            "available": True,
+            "state": _SW4_FULL[_sw4_cls(s_all, n)],
+            "turn_bars_ago": None,
+        }
+    k = best[1]
+    a = _sw4_cls(_sw4_line(y[: k + 1])[0], k + 1)
+    b = _sw4_cls(_sw4_line(y[k:])[0], n - k)
+    if a == b:
+        return {"available": True, "state": _SW4_FULL[a], "turn_bars_ago": None}
+    return {"available": True, "state": f"{a}转{b}", "turn_bars_ago": int(n - 1 - k)}
+
+
 def detect(df) -> dict[str, Any]:
     """规范入口（v0.223，TODO #67 B4）：结构三检测器打包门面。
 

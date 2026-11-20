@@ -214,7 +214,7 @@ TOOLS: dict[str, tuple[str, str]] = {
     ),
     "swing_state": (
         "diagnostic",
-        "走势三态候选 v3（owner 2026-11-19）：只看图上 120 根，两段直线拟合找至多一次转折，段内 ±10% 分三态 →「X 转 Y」；"
+        "走势三态候选研究入口（v4 实现在 b1_structure.check_swing_state：最高 / 最低点切段 + 段内直线 ±15%）；"
         "只服务 calib_probe trend_shape 图集，不进 live（库模块，无 CLI）",
     ),
     "calib_probe": (

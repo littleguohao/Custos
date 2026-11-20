@@ -464,7 +464,7 @@ def evaluate(
 SHAPE_READINGS: dict[str, str] = {
     "one_wave_v3": "一波流 v3",
     "one_wave_v3_distribution": "一波流 v3 顶部出货",
-    "swing_state": "走势三态 v3",
+    "swing_state": "走势三态 v4",
     "trend": "趋势三态",
     "wave_type": "前置拉升波",
     "distribution": "出货五方式",

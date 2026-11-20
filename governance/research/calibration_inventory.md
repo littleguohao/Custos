@@ -8,7 +8,7 @@
 
 ## 现状
 
-- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 79 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
+- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 84 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
   **P1 live 展示 99 个**（1800 证据标注，不进判定）、P2 研究 67 个。
 - **定义校准：0 / 233**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
 - **清单未覆盖**（需在逐因子校准时一并核）：①函数体内联常量（KDJ 9/3/3、BBI 周期、20 日相对强度窗口等）；
@@ -230,6 +230,11 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 - 复测读回 `labels5.csv`（owner 2026-11-20，16/16）：**owner 自洽 形态整条 13/16、后段 14/16、顶部放量出货 15/16、一波流 8/8**（v1 那 8 张原先没有一波流项）。
   改判 3 张：两张「横盘震荡 → 上涨转下跌」、一张「横盘转下跌 → 震荡下跌」。同 16 张上走势三态 v3 对新标注整条 7/16、后段 11/16 ⇒ 离 owner 自洽还有明显差距。
   试过末段最短根数单独设、阈值另取：v1 / v2 交叉验证的验证份没有提升（14~21/48）⇒ 两段直线这一族调参已到头，下一步要换判法，先请 owner 写出自己的判断规则（A 口径）。
+- **owner 判法（2026-11-20，A 口径）**：整体扫 120 根看 N 结构高低点抬高 / 降低，都在最高最低点内震荡算横盘；转折找最高 / 最低点看前后；从整体到局部、看大的波峰波谷。
+  原型对照（v1+v2 共 96 张，交叉验证）：转折只取最高 / 最低点 + 段内直线 ±15% 最好（整条 52/96、后段 72/96）；段内改用 N 结构分型（3 根）33~40、改用大波峰波谷（ZigZag 5%~20%）46；
+  加「末段破前低 / 前高」无提升。剩余错误分散（每类 ≤4 张）。
+- **走势三态 v4（v0.557，owner 定用于选股侧提示）**：`b1_structure.check_swing_state`（不进 detect、live 不变），参数 SW4_*（120 根 / ±15% / 左端 ≥20 / 当根 ≥5 / 0.9）。
+  复测 16 张对新标注整条 6/16、后段 10/16。复验图集 `trend_shape__mining_v3`（48 张新票，盲标，与已标重叠 1 只）；过了再接候选表「走势」提示列。
 - 全部图集取值改正面中文（字段专属对照）：非一波流字段显示「健康拉升 / 疑似一波流或出货 / 判断不了」，MACD 区间与出货失效名单措辞同步改，不再出现双重否定。
 ## P0H 持仓大形态（v0.485 纳入，**排在 P0 之前**）
 
@@ -294,7 +299,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `technical_monitor` | `TREND_MIN_BARS` | 60 | 趋势判定最少 K 线数 | - | 未校准 |
 | `technical_monitor` | `QFQ_LOAD_BARS` | 100000 | - | - | 未校准 |
 
-### P0（79 个参数）
+### P0（84 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -324,6 +329,11 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `b1_structure` | `OW3_FAST_BARS` | 20 | 「20 根左右」 | candidate | 候选（owner 2026-11-17 定稿，图集 `b1_structure_v3__mining_v3cand`） |
 | `b1_structure` | `OW3_HEAVY_PULLBACK` | 0.9 | - | candidate | 候选（owner 2026-11-17） |
 | `b1_structure` | `OW3_PIVOT` | 3 | N 型结构回踩低点：收盘分型左右各 3 根确认（同 technical_monitor.N_PIVOT_LEFT/RIGHT 口径） | candidate | 候选（owner 2026-11-17） |
+| `b1_structure` | `SW4_BARS` | 120 | 只看图上显示的 120 根（owner：显示多少根就看多少根） | candidate | 候选（owner 2026-11-20） |
+| `b1_structure` | `SW4_THR` | 0.15 | 段内直线涨跌 ≥15% 上涨 / ≤−15% 下跌，其余横盘 | candidate | 候选（owner 2026-11-20） |
+| `b1_structure` | `SW4_MIN_HEAD` | 20 | 转折点（最高 / 最低点）距图左端至少 20 根 | candidate | 候选（owner 2026-11-20） |
+| `b1_structure` | `SW4_MIN_TAIL` | 5 | 转折点距当根至少 5 根（B1 前短回落也算一段） | candidate | 候选（owner 2026-11-20） |
+| `b1_structure` | `SW4_SPLIT_RATIO` | 0.9 | 两段拟合误差和须 ≤ 整段 0.9 倍才算有转折 | candidate | 候选（owner 2026-11-20） |
 | `capital_intent` | `CAP_STRONG` | 5 | - | candidate | 未校准 |
 | `capital_intent` | `CAP_MID` | 2 | - | candidate | 未校准 |
 | `distribution` | `DIST_RECENT` | 5 | 待回测：出货形态观察最近N根 | active；R2 | 未校准 |
