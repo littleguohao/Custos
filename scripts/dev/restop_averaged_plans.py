@@ -2,7 +2,7 @@
 """#131 一次性迁移：v0.547 之前补过仓的持仓，止损改为摊薄成本 × 0.93（owner 2026-11-18 定 B）。
 
 默认只预览（列出每只持仓的旧止损 → 新止损），不写盘；``--apply`` 才写，写前把原文件复制为
-``position_plans.json.bak_restop_YYYYMMDD``。只在生产机跑（计划文件在那里）。幂等：已迁移的不再变。
+``position_plans.json.bak_restop_YYYYMMDD_HHMMSS_ffffff``（同名拒绝覆盖）。只在生产机跑（计划文件在那里）。幂等：已迁移的不再变。
 
     uv run python scripts/dev/restop_averaged_plans.py            # 预览
     uv run python scripts/dev/restop_averaged_plans.py --apply    # 写盘
@@ -17,6 +17,15 @@ from pathlib import Path
 from typing import Optional
 
 from custos.core.trades import position_plans as pp
+
+
+def _backup_path(path: Path) -> Path:
+    """同日多次迁移也不覆盖旧备份；微秒时间戳 + 存在即拒写。"""
+    stamp = pp.cn_now().strftime("%Y%m%d_%H%M%S_%f")
+    backup = path.with_name(path.name + ".bak_restop_" + stamp)
+    if backup.exists():
+        raise FileExistsError(f"备份已存在，拒绝覆盖：{backup}")
+    return backup
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -41,9 +50,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not args.apply:
         print(f"[PREVIEW] {len(changes)} 只待迁移；确认后加 --apply 写盘")
         return 0
-    bak = path.with_name(
-        path.name + ".bak_restop_" + pp.cn_now().date().strftime("%Y%m%d")
-    )
+    bak = _backup_path(path)
     shutil.copy2(path, bak)
     pp.save_plans(plans, path)
     print(f"[OK] 已迁移 {len(changes)} 只；原文件备份 {bak}")

@@ -2,7 +2,8 @@
 """Kimi Work 无聊天定时入口：直接运行确定性管线并按需投递飞书。
 
 BluePrint Python 以 ``run(ctx)`` 调用；也支持命令行 ``--dry-run`` 只检查命令
-计划。除 08:50 的消息语义研判外，定时编排本身不调用模型、不写聊天历史。
+计划。17:00 主管线前先以独立超时子进程补收一次飞书；除 08:50 的消息语义研判外，
+定时编排本身不调用模型、不写聊天历史。
 """
 
 from __future__ import annotations
@@ -138,7 +139,16 @@ def build_plan(pipeline: str, day: str, repo: Path = REPO) -> dict[str, Any]:
                     "timeout": 120,
                 }
             )
-    return {"commands": commands, "report": report}
+    preflight = None
+    if pipeline == "1700":
+        preflight = {
+            "name": "feishu_ingest",
+            "command": _python_command(
+                "scripts/automation/feishu_ingest_once.py", "--date", day
+            ),
+            "timeout": 420,
+        }
+    return {"commands": commands, "report": report, "preflight": preflight}
 
 
 def _load_json_object(path: Path, label: str) -> dict[str, Any]:
@@ -255,7 +265,11 @@ def execute(
 ) -> dict[str, Any]:
     """执行一条管线；非交易日跳过与脚本/投递失败均显式进入结果。"""
     plan = build_plan(pipeline, day, repo)
-    planned = [step["command"] for step in plan["commands"]]
+    preflight_step = plan.get("preflight")
+    planned = [
+        *([preflight_step["command"]] if preflight_step else []),
+        *[step["command"] for step in plan["commands"]],
+    ]
     artifact: dict[str, Any] = {
         "summary": "",
         "pipeline": pipeline,
@@ -269,6 +283,42 @@ def execute(
     if dry_run:
         artifact["summary"] = "命令计划校验完成，未执行、未刷新、未投递"
         return artifact
+
+    if preflight_step:
+        try:
+            preflight = runner(
+                preflight_step["command"],
+                cwd=repo,
+                timeout=preflight_step["timeout"],
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            artifact["steps"].append(
+                {
+                    "name": "feishu_ingest",
+                    "returncode": None,
+                    "error": str(exc)[:500],
+                }
+            )
+            artifact["preflight_warning"] = f"飞书预补收异常：{exc}"
+            print(f"[WARN] 飞书预补收异常：{exc}", file=sys.stderr)
+        else:
+            artifact["steps"].append(
+                {
+                    "name": "feishu_ingest",
+                    "returncode": preflight.returncode,
+                    "stdout_tail": _tail(preflight.stdout),
+                    "stderr_tail": _tail(preflight.stderr),
+                }
+            )
+            if preflight.returncode != 0:
+                detail = _tail(preflight.stderr) or _tail(preflight.stdout)
+                artifact["preflight_warning"] = (
+                    f"飞书预补收失败(exit={preflight.returncode})"
+                )
+                print(
+                    f"[WARN] {artifact['preflight_warning']}：{detail}",
+                    file=sys.stderr,
+                )
 
     pipeline_step = plan["commands"][0]
     result = runner(

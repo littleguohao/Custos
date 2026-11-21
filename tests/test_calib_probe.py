@@ -712,7 +712,7 @@ def test_shape_blind_hides_readings_v0553():
 
 
 def test_retest_blind_and_self_agreement_v0556(tmp_path):
-    """B 口径盲标复测：抽样打乱、隐去代码与读数；读回与原标注比对。"""
+    """B 口径盲标复测：抽样打乱、隐去代码 / 日期与读数；读回与原标注比对。"""
     import csv as _csv
 
     t = TestTrendShapeV0548()
@@ -727,9 +727,21 @@ def test_retest_blind_and_self_agreement_v0556(tmp_path):
     assert "复验盲标" in g and "检测器读数（只作参考）" not in g
     summ = __import__("json").loads((out / "summary.json").read_text(encoding="utf-8"))
     assert all(
-        p["code"] not in g.split("const KC")[0] for p in summ["retest_of"]
-    )  # 页面不露代码
+        p["code"] not in g and p["date"] not in g for p in summ["retest_of"]
+    )  # 整份页面（含 M.rows / KC）不露真实代码与日期
+    chart_data = __import__("json").loads(
+        (out / "chart_data.json").read_text(encoding="utf-8")
+    )
+    assert all(
+        set(item["dates"])
+        <= {
+            (cp.date(2000, 1, 3) + cp.timedelta(days=i)).isoformat()
+            for i in range(len(item["dates"]))
+        }
+        for item in chart_data.values()
+    )
     rr = list(_csv.reader((out / "labels.csv").open(encoding="utf-8-sig")))
+    assert all(r[2] == f"复测{n}" and r[3] == "" for n, r in enumerate(rr[1:], 1))
     for n, r in enumerate(rr[1:]):
         o = summ["retest_of"][n]["orig"]
         r[7], r[8], r[9] = (o["形态"] if n else "震荡下跌"), "N", "N"

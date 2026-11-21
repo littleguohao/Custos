@@ -140,6 +140,9 @@ uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 �
   改道 TDX_ROOT/DATA 读挖掘段镜像；判定窗台账/批次门拒写、live 五入口拒跑（exit 2/6）、
   加载器读到禁带日期报错（判定段/holdout 物理不在快照内，详见
   `governance/data/MINING_SNAPSHOT_DESIGN.md`）。
+- **17:00 飞书预补收**（v0.559）：主管线前独立超时子进程先查交易日再补收一次；补收异常只 WARN，
+  主链仍受 confirmed 0AMV 硬门控。合并回复「无/有交易」外仅剩一个纯数字可按 0AMV；
+  15:15 轮询阶段日志落 `artifacts/logs/feishu_postclose_reminder.log`，不得记凭据或聊天正文。
 
 ## 4. 治理纪律（全部有测试钉着，违反必红）
 

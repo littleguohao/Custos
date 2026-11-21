@@ -101,7 +101,7 @@ def test_missing_report_is_not_published(tmp_path: Path):
 
     with pytest.raises(pipeline.PipelineError, match="报告缺失或为空"):
         pipeline.execute("1700", DAY, repo=tmp_path, runner=runner)
-    assert len(calls) == 1
+    assert len(calls) == 2  # 一次性飞书预补收 + 主管线；报告缺失仍不得投递
 
 
 def test_publish_failure_is_not_success(tmp_path: Path):
@@ -115,6 +115,34 @@ def test_publish_failure_is_not_success(tmp_path: Path):
 
     with pytest.raises(pipeline.PipelineError, match="飞书投递失败"):
         pipeline.execute("1445", DAY, repo=tmp_path, runner=runner)
+
+
+def test_1700_preflight_failure_still_runs_main_pipeline(tmp_path: Path):
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append(command)
+        if any("feishu_ingest_once.py" in str(part) for part in command):
+            return _result(1, stderr="feishu offline")
+        if any("run_1700.py" in str(part) for part in command):
+            report = pipeline.build_plan("1700", DAY, tmp_path)["report"]
+            report.parent.mkdir(parents=True)
+            report.write_text("# 盘后复盘\n", encoding="utf-8")
+            return _result(0, "report ready")
+        return _result(0, '{"sent": true}')
+
+    artifact = pipeline.execute("1700", DAY, repo=tmp_path, runner=runner)
+
+    assert artifact["status"] == "completed"
+    assert artifact["sent"] is True
+    assert "飞书预补收失败" in artifact["preflight_warning"]
+    assert [step["name"] for step in artifact["steps"]] == [
+        "feishu_ingest",
+        "pipeline",
+        "publish",
+    ]
+    assert len(calls) == 3
+    assert len(artifact["planned_commands"]) == 3
 
 
 def test_calendar_does_not_publish(tmp_path: Path):

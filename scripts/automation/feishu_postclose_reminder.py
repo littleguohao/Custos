@@ -214,15 +214,61 @@ def _send_text(text: str) -> None:
     )
 
 
+LOG_FILE = REPO / "artifacts" / "logs" / "feishu_postclose_reminder.log"
+
+
+def _write_log(day: str, event: str, **fields) -> None:
+    """每阶段立即落盘：任务卡住时也能看到最后到达的步骤，不写凭据与聊天正文。"""
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "ts": datetime.now(CST).isoformat(timespec="seconds"),
+        "date": day,
+        "event": event,
+        **fields,
+    }
+    with LOG_FILE.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
 def _run_collection_day(
     day: str,
     ingest_fn,
     *,
     sleep_fn=None,
     max_polls: int = 11,
+    log_fn=None,
 ) -> dict:
     """15:15 先接收入站回复、再查台账；缺项提醒一次，随后每 10 分钟接收；收齐即停，11 轮后到 17:00 截止。"""
-    if not _is_trading_day(day):
+
+    def log(event: str, **fields) -> None:
+        if log_fn is not None:
+            log_fn(day, event, **fields)
+
+    def receive(stage: str) -> dict:
+        log(stage + "_start")
+        try:
+            payload = ingest_fn({})
+            artifact = payload.get("artifact") if isinstance(payload, dict) else None
+            if not isinstance(artifact, dict):
+                raise RuntimeError("入站桥返回缺少 artifact 对象")
+        except Exception as exc:  # 留痕后原样上抛，不把异常吞成「无消息」
+            log(
+                stage + "_error",
+                error_type=type(exc).__name__,
+                detail=str(exc)[:300],
+            )
+            raise
+        log(
+            stage + "_done",
+            new_messages=artifact.get("new_messages", 0),
+            receipt_sent=artifact.get("receipt_sent") is True,
+        )
+        return artifact
+
+    log("calendar_check_start")
+    trading_day = _is_trading_day(day)
+    log("calendar_check_done", trading_day=trading_day)
+    if not trading_day:
         return {
             "date": day,
             "trading_day": False,
@@ -234,10 +280,12 @@ def _run_collection_day(
         }
     # 先接收一次（v0.493 回修）：15:15 前已到的回复先落台账再查状态，
     # 否则已回复的 owner 会收到一条多余提醒，且回复要等 10 分钟后才被接收。
-    initial_ingest = ingest_fn({}).get("artifact", {})
+    initial_ingest = receive("initial_ingest")
     status = _record_status(day)
     initial_missing = [name for name in ("amv", "trades") if not status[name]]
+    log("initial_status", missing=initial_missing)
     if not initial_missing:
+        log("stopped", reason="already_complete")
         return {
             "date": day,
             "trading_day": True,
@@ -253,15 +301,20 @@ def _run_collection_day(
             "reason": "15:15 首次接收后两项已齐，未提醒、未启动轮询",
         }
 
+    log("reminder_send_start", missing=initial_missing)
     _send_text(_message(day, initial_missing))
+    log("reminder_send_done")
     sleep = sleep_fn or time.sleep
     last_ingest: dict = {}
     for poll_count in range(1, max_polls + 1):
+        log("poll_wait", poll=poll_count)
         sleep(600)
-        last_ingest = ingest_fn({}).get("artifact", {})
+        last_ingest = receive(f"poll_{poll_count}_ingest")
         status = _record_status(day)
         missing = [name for name in ("amv", "trades") if not status[name]]
+        log("poll_status", poll=poll_count, missing=missing)
         if not missing:
+            log("stopped", reason="received_complete", poll=poll_count)
             return {
                 "date": day,
                 "trading_day": True,
@@ -280,6 +333,7 @@ def _run_collection_day(
 
     labels = {"amv": "0AMV", "trades": "交易记录"}
     missing = [name for name in ("amv", "trades") if not status[name]]
+    log("stopped", reason="deadline", missing=missing)
     return {
         "date": day,
         "trading_day": True,
@@ -308,4 +362,4 @@ def run(ctx) -> dict:
     bridge = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(bridge)
     day = datetime.now(CST).date().isoformat()
-    return {"artifact": _run_collection_day(day, bridge.run)}
+    return {"artifact": _run_collection_day(day, bridge.run, log_fn=_write_log)}

@@ -1021,7 +1021,7 @@ def _b1_status(
 ) -> str:
     """v0.529（owner 2026-11-16）：可买 = 0AMV 做多 ∧ J<13 ∧ QSX>DKX ∧ 无风控否决；
     观察价位 = 同上但 QSX≤DKX；待0AMV做多 = 0AMV 非做多、其余都满足；受限 = B1 点但被风控否决。
-    风控否决 = 做多口径下从 A 起算被任何封顶规则压下（冲刺波 / 出货 high / MACD 三打白骨精 / 非一波流撤销等；顶背离、出货 watch 只留痕不否决）。"""
+    风控否决 = 做多口径下从 A 起算被任何封顶规则压下（冲刺波 / 出货 high / MACD 三打白骨精；疑似一波流、顶背离、出货 watch 只留痕不否决）。"""
     if not b1_point:
         return "-"
     _f, capped, _w, _d = apply_risk_downgrades(

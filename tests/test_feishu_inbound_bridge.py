@@ -147,6 +147,20 @@ def test_has_trade_classification_and_no_trade_precedence():
     assert bridge._classify("无交易 0AMV -0.87%") == ("both", -0.87)
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("无交易 -0.91%", ("both", -0.91)),
+        ("无交易，-0.91", ("both", -0.91)),
+        ("有交易，+1.2%", ("trade_amv", 1.2)),
+        ("无交易 2026-11-18", ("no_trade", None)),
+        ("无交易 仓位20%", ("no_trade", None)),
+    ],
+)
+def test_trade_reply_accepts_only_companion_pure_number(text, expected):
+    assert bridge._classify(text) == expected
+
+
 def test_has_trade_refreshes_tzzb_on_message_day(env, monkeypatch):
     ts = _ts_days_ago(0, 16)
     refreshed: list[str] = []

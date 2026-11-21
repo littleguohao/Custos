@@ -350,3 +350,24 @@ class TestRestopAveraged131:
             9.5 * 0.93
         )
         assert list(pp.PLANS_FILE.parent.glob("*.bak_restop_*"))
+
+    def test_backup_path_refuses_same_timestamp_collision(self, tmp_path, monkeypatch):
+        import importlib.util
+        from datetime import datetime
+
+        spec = importlib.util.spec_from_file_location(
+            "restop_backup",
+            pp.Path(__file__).resolve().parents[1]
+            / "scripts/dev/restop_averaged_plans.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        monkeypatch.setattr(
+            pp, "cn_now", lambda: datetime(2026, 11, 20, 9, 8, 7, 123456)
+        )
+        path = tmp_path / "position_plans.json"
+        backup = tmp_path / ("position_plans.json.bak_restop_20261120_090807_123456")
+        backup.write_text("original backup", encoding="utf-8")
+        with pytest.raises(FileExistsError, match="拒绝覆盖"):
+            module._backup_path(path)
+        assert backup.read_text(encoding="utf-8") == "original backup"

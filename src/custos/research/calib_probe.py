@@ -29,6 +29,7 @@ import json
 import random
 import sys
 from concurrent.futures import ProcessPoolExecutor
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional
 
@@ -1751,12 +1752,17 @@ def build_retest(
         f"<h1>前置走势形态 · 盲标复测（{len(picked)} 张，B 口径）</h1>",
         "<p>这些图你之前标过；这次隐去代码、日期和检测器读数，顺序打乱，请按当下的判断重新标。</p>",
     ]
+    blind_start = date(2000, 1, 3)
     for n, p in enumerate(picked, 1):
-        csv_rows.append(
-            [n, "trend_shape.retest", p["code"], p["date"], "retest", "", ""]
-        )
+        # 页面、导出 CSV 与图轴全部匿名；真实代码 / 日期只留在 summary 供读回映射。
+        csv_rows.append([n, "trend_shape.retest", f"复测{n}", "", "retest", "", ""])
+        blind_dates = [
+            (blind_start + timedelta(days=i)).isoformat()
+            for i in range(len(p["chart"]["dates"]))
+        ]
         chart_data[str(n)] = {
             **p["chart"],
+            "dates": blind_dates,
             "title": f"#{n}",
             "code": f"复测{n}",
             "marks": [],

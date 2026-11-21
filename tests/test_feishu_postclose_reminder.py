@@ -320,3 +320,41 @@ def test_collection_non_trading_day_does_not_remind_or_poll(
     assert artifact["stopped_reason"] == "non_trading_day"
     assert artifact["sent"] is False
     assert artifact["poll_count"] == 0
+
+
+def test_collection_stage_log_pinpoints_each_step(monkeypatch: pytest.MonkeyPatch):
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(reminder, "_is_trading_day", lambda _day: True)
+    monkeypatch.setattr(
+        reminder, "_record_status", lambda _day: {"amv": False, "trades": False}
+    )
+    monkeypatch.setattr(reminder, "_send_text", lambda _text: None)
+    reminder._run_collection_day(
+        DAY,
+        lambda _ctx: {"artifact": {"new_messages": 0, "receipt_sent": False}},
+        sleep_fn=lambda _seconds: None,
+        max_polls=1,
+        log_fn=lambda _day, event, **fields: events.append((event, fields)),
+    )
+    names = [event for event, _fields in events]
+    assert "initial_ingest_start" in names
+    assert "initial_ingest_done" in names
+    assert "reminder_send_done" in names
+    assert "poll_1_ingest_start" in names
+    assert "poll_1_ingest_done" in names
+    assert names[-1] == "stopped"
+    assert events[-1][1]["reason"] == "deadline"
+
+
+def test_write_log_persists_json_without_message_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    path = tmp_path / "reminder.log"
+    monkeypatch.setattr(reminder, "LOG_FILE", path)
+    reminder._write_log(DAY, "poll_status", poll=1, missing=["amv"])
+    record = json.loads(path.read_text(encoding="utf-8").strip())
+    assert record["date"] == DAY
+    assert record["event"] == "poll_status"
+    assert record["poll"] == 1
+    assert record["missing"] == ["amv"]
+    assert "text" not in record

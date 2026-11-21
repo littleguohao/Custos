@@ -9,7 +9,7 @@
    - 「有交易」→ `tzzb_trades.py` 以本地 OAuth 读取投资账本（PC 同步须覆盖当日
      15:00 收盘），标准 CSV 落 artifacts/cache/tzzb/，再走 incremental_ledger 唯一入口；
      同价同量多笔按多重集合处理，重复刷新只补新增；
-   - 0AMV 数值（文本含 amv 后取数字，或整条消息就是数字）→ 官方唯一写入口
+   - 0AMV 数值（文本含 amv 后取数字、整条消息就是数字，或「无/有交易」短语之外仅剩一个数字）→ 官方唯一写入口
      amv_state.append_observation（uv run 子进程，cwd=仓库根）；**极值守卫**：
      |值| > EXTREME_AMV_PCT（±15%）一律不自动登记，回执转人工 --confirm-extreme
      （owner 手滑发个大数不能直入方向主过滤器台账）；
@@ -522,6 +522,13 @@ def _classify(text: str) -> tuple[str, float | None]:
         amv = float(m.group(1))
     elif PURE_NUMBER_RE.match(text):  # 整条就一个数字：补数窗口里按 0AMV 理解
         amv = float(NUMBER_RE.search(text).group(0))  # type: ignore[union-attr]
+    elif no_trade or has_trade:
+        # 合并回复允许省略 0AMV 标签：「无交易 -0.91%」/「有交易 +1.2」。
+        # 只接受交易短语之外仍是唯一纯数字的文本；日期、仓位描述等多数字文本不误录。
+        remainder = (NO_TRADE_RE if no_trade else HAS_TRADE_RE).sub("", text)
+        remainder = remainder.strip(" \t\r\n，,。；;：:")
+        if PURE_NUMBER_RE.match(remainder):
+            amv = float(NUMBER_RE.search(remainder).group(0))  # type: ignore[union-attr]
     if no_trade:
         kind = "both" if amv is not None else "no_trade"
     elif has_trade:
