@@ -252,3 +252,58 @@ def test_wm_bar_grow_needs_long_history():
     r2 = ec.check_macd_technics(short, df_long=long_df)
     assert r2["wm_available"] is True
     assert r2["wm_bar_grow"] is True  # 末端加速：周/月柱均在增长
+
+
+def _ohlcv(closes):
+    import numpy as np
+
+    c = np.asarray(closes, float)
+    return pd.DataFrame(
+        {
+            "close": c,
+            "open": c,
+            "high": c * 1.01,
+            "low": c * 0.99,
+            "volume": np.full(len(c), 1e6),
+        }
+    )
+
+
+def test_bar_groups_merge_short_flip():
+    from custos.core.factors import macd_technics as mt
+
+    h = [-1, -2, -1, 0.1, -1, -2, 1, 2, 3, 1]  # 中间 1 根红柱并入绿组
+    g = mt.macd_bar_groups(h)
+    assert [c for c, _ in g] == [-1, 1] and len(g[0][1]) == 6
+
+
+def test_divergence_v2_requires_current_green_group():
+    """owner 2026-11-23：当根还是红柱 ⇒ 不判底背离。"""
+    import numpy as np
+    from custos.core.factors import macd_technics as mt
+
+    c = (
+        list(np.linspace(20, 12, 60))
+        + list(np.linspace(12, 14, 15))
+        + list(np.linspace(14, 11.5, 20))
+        + list(np.linspace(11.5, 13, 10))
+    )
+    r = mt.check_macd_divergence_v2(_ohlcv(c))
+    assert r["available"] and r["bottom_divergence"]["hit"] is False
+
+
+def test_divergence_v2_bottom_hit_shape():
+    import numpy as np
+    from custos.core.factors import macd_technics as mt
+
+    c = (
+        list(np.linspace(20, 12, 50))
+        + list(np.linspace(12, 14, 20))
+        + list(np.linspace(14, 11.6, 25))
+    )  # 第二段跌得慢、创新低
+    r = mt.check_macd_divergence_v2(_ohlcv(c))
+    bd = r["bottom_divergence"]
+    assert len(bd.get("groups", [])) == 2
+    if bd["hit"]:
+        a, b = bd["groups"]
+        assert b["price"] < a["price"] and abs(b["bar"]) <= abs(a["bar"]) * 0.9

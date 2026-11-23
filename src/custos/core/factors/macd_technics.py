@@ -161,6 +161,106 @@ def _macd_overextended(d, n: int, h0: float, dif_last: float) -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# 背离 v2 候选（owner 2026-11-23：「绿柱和绿柱比、红柱和红柱比」——同色柱组的最长柱比较；未接 live）
+# ---------------------------------------------------------------------------
+MACD2_MIN_GROUP = (
+    2  # 夹在两组之间、短于 2 根的异色柱并入两侧（避免一根翻色把一组拆成两组）
+)
+MACD2_MARGIN = 0.10  # 柱子「更短」须短 ≥10%（owner：两组差不多不算背离）
+
+
+def macd_bar_groups(hist) -> list[tuple[int, list[int]]]:
+    """MACD 柱按颜色分组 → [(±1, [下标...]), ...]（时间顺序；0 柱归绿）。"""
+    import itertools  # noqa: PLC0415
+
+    sign = [1 if float(x) > 0 else -1 for x in hist]
+    runs = [
+        [k, [i for i, _ in g]]
+        for k, g in itertools.groupby(enumerate(sign), key=lambda t: t[1])
+    ]
+    j = 1
+    while j < len(runs) - 1:
+        if len(runs[j][1]) < MACD2_MIN_GROUP:
+            runs[j - 1][1] += runs[j][1] + runs[j + 1][1]
+            del runs[j : j + 2]
+            j = max(1, j - 1)
+        else:
+            j += 1
+    return [(int(k), idx) for k, idx in runs]
+
+
+def _grp(close, hist, idx, color: int) -> dict[str, Any]:
+    ip = (
+        min(idx, key=lambda i: close[i])
+        if color < 0
+        else max(idx, key=lambda i: close[i])
+    )
+    ib = (
+        min(idx, key=lambda i: hist[i])
+        if color < 0
+        else max(idx, key=lambda i: hist[i])
+    )
+    return {
+        "start": idx[0],
+        "end": idx[-1],
+        "price_i": ip,
+        "price": float(close[ip]),
+        "bar": float(hist[ib]),
+    }
+
+
+def check_macd_divergence_v2(df) -> dict[str, Any]:
+    """背离 v2（同色柱组比较，owner 2026-11-23）：
+
+    - 底背离：当根处在绿柱组；本组最低收盘 < 上一组绿柱的最低收盘（股价创新低），而本组最长绿柱
+      比上一组最长绿柱短 ≥ ``MACD2_MARGIN``。当根还是红柱 ⇒ 不判（owner：「当前还没有绿柱」）。
+    - 顶背离：最近两组红柱，后一组最高收盘 > 前一组，而后一组最长红柱短 ≥ ``MACD2_MARGIN``（当根可在绿柱，B1 多在回调里）。
+    - 三打白骨精：最近三组红柱最高收盘逐组抬高、最长红柱逐组缩短（各短 ≥ ``MACD2_MARGIN``）。
+    返回各项 {hit, groups:[{start,end,price_i,price,bar}, ...]}（下标相对 df）。"""
+    from custos.core.indicators import macd_series  # noqa: PLC0415
+
+    if df is None or len(df) < 60:
+        return {"available": False}
+    close = df["close"].astype(float).to_numpy()
+    _dif, _dea, hist_s = macd_series(df["close"])
+    hist = hist_s.to_numpy()
+    G = macd_bar_groups(hist)
+    greens = [g for c, g in G if c < 0]
+    reds = [g for c, g in G if c > 0]
+    k = 1 - MACD2_MARGIN
+    out: dict[str, Any] = {"available": True}
+    bd: dict[str, Any] = {"hit": False}
+    if G and G[-1][0] < 0 and len(greens) >= 2:
+        a, b = _grp(close, hist, greens[-2], -1), _grp(close, hist, greens[-1], -1)
+        bd = {
+            "hit": bool(b["price"] < a["price"] and abs(b["bar"]) <= abs(a["bar"]) * k),
+            "groups": [a, b],
+        }
+    out["bottom_divergence"] = bd
+    td: dict[str, Any] = {"hit": False}
+    if len(reds) >= 2:
+        a, b = _grp(close, hist, reds[-2], 1), _grp(close, hist, reds[-1], 1)
+        td = {
+            "hit": bool(b["price"] > a["price"] and b["bar"] <= a["bar"] * k),
+            "groups": [a, b],
+        }
+    out["top_divergence"] = td
+    tp: dict[str, Any] = {"hit": False}
+    if len(reds) >= 3:
+        g3 = [_grp(close, hist, r, 1) for r in reds[-3:]]
+        tp = {
+            "hit": bool(
+                g3[0]["price"] < g3[1]["price"] < g3[2]["price"]
+                and g3[1]["bar"] <= g3[0]["bar"] * k
+                and g3[2]["bar"] <= g3[1]["bar"] * k
+            ),
+            "groups": g3,
+        }
+    out["three_peaks"] = tp
+    return out
+
+
 def _hist_growing(dfx) -> "bool | None":
     """重采样序列的 MACD 红柱是否增长（柱>0 且大于上一根）。
     历史不足/计算失败 → None（算不出，与「没增长」区分）。"""

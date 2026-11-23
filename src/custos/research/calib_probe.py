@@ -119,6 +119,18 @@ MODULES: dict[str, dict[str, Any]] = {
     # v0.548 前置走势形态合并校准（owner 2026-11-18）：一张图只问「B1 之前是什么走势」，owner 从固定菜单单选
     # + 附加勾「顶部放量出货」；同图并排一波流 v3 / 趋势三态 / wave_type / 出货 / N 结构读数，一份标注评估全部检测器。
     # 抽样按「一波流 v3 × 趋势三态」组合分层；无参数（不做边界翻转）。
+    # v0.565 MACD 背离 v2 候选（owner 2026-11-23：同色柱组比较）
+    "macd_technics_v2": {
+        "defmod": "custos.core.factors.macd_technics",
+        "eval": "macd_v2",
+        "fields": [
+            "macd_v2.bottom_divergence.hit",
+            "macd_v2.top_divergence.hit",
+            "macd_v2.three_peaks.hit",
+        ],
+        "params": ["MACD2_MIN_GROUP", "MACD2_MARGIN"],
+        "chart_panes": ["vol", "macd"],
+    },
     "trend_shape": {
         "defmod": "custos.core.factors.b1_structure",
         "eval": "trend_shape",
@@ -422,6 +434,12 @@ def evaluate(
                 for k in keys
             }
         }
+        return {f: field_value(an, f) for f in fields}
+    if spec is not None and spec["eval"] == "macd_v2":
+        from custos.core.factors import macd_technics as mtm  # noqa: PLC0415
+
+        with patched(defmod, overrides):
+            an = {"macd_v2": mtm.check_macd_divergence_v2(df.reset_index(drop=True))}
         return {f: field_value(an, f) for f in fields}
     if spec is not None and spec["eval"] == "trend_shape":
         rd = trend_shape_readings(frames)
@@ -1253,6 +1271,9 @@ def _csv_rows(rep: dict[str, Any], frames: dict) -> list[list[Any]]:
 #: 每个字段「检测器在测什么」的中文说明（v0.516，owner 2026-11-13：放在每张图最上方）。
 #: 只说定义，不说好坏；出处见各检测器 docstring。键 = summary 里的字段名。
 FIELD_DEF: dict[str, str] = {
+    "macd_v2.bottom_divergence.hit": "MACD 底背离 v2（绿柱和绿柱比）：当根在绿柱组，本组股价创新低（低于上一组绿柱时的最低收盘），本组最长绿柱比上一组短 ≥10%。图上紫线标两组的最低价",
+    "macd_v2.top_divergence.hit": "MACD 顶背离 v2（红柱和红柱比）：最近两组红柱，后一组股价创新高，最长红柱比前一组短 ≥10%。图上紫线标两组的最高价",
+    "macd_v2.three_peaks.hit": "三打白骨精 v2：最近三组红柱，股价高点逐组抬高，最长红柱逐组缩短（各短 ≥10%）。图上紫线标三组的最高价",
     "trend_shape.combo": "前置走势形态（合并校准）：B1 点之前的走势属于哪种形态；抽样按一波流 v3 结论分层（v0.553）",
     "n_structure.status": "上升 N 型结构（分型版）：前低 → 前高 → 回踩不破前低形成更高的低点；状态为成立 / 确认 / 破位等",
     "n_structure.fresh_breach": "上升 N 型结构是否刚刚被跌破（收盘跌破结构前低）",
@@ -2313,6 +2334,33 @@ def hourglass_marks(df: Any) -> list[dict[str, Any]]:
     return out
 
 
+def macd_v2_marks(df: Any, field: str) -> list[dict[str, Any]]:
+    """背离 v2 比较的柱组：每组一条紫线（价位 = 组内最低 / 最高收盘），标「前组 / 本组」。"""
+    from custos.core.factors import macd_technics as mtm  # noqa: PLC0415
+
+    key = field.split(".")[1] if field.startswith("macd_v2.") else ""
+    r = mtm.check_macd_divergence_v2(df.reset_index(drop=True))
+    gs = (r.get(key) or {}).get("groups") or []
+    ds = [str(x)[:10] for x in df["date"]]
+    first_i = max(0, len(df) - CHART_BARS)
+    names = (
+        ["前组", "本组"] if len(gs) == 2 else [f"第{i + 1}组" for i in range(len(gs))]
+    )
+    return [
+        {
+            "kind": "M",
+            "price": round(g["price"], 2),
+            "date": ds[g["price_i"]],
+            "start": ds[max(g["start"], first_i)],
+            "end": ds[g["end"]],
+            "label": nm,
+            "ongoing": False,
+        }
+        for g, nm in zip(gs, names)
+        if g["end"] >= first_i
+    ]
+
+
 def kc_assets() -> Optional[str]:
     """KLineChart 内联脚本（校验 sha256；缺失 / 不符 ⇒ None，图集退回静态 SVG）。"""
     import hashlib  # noqa: PLC0415
@@ -2412,7 +2460,11 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
                         else (
                             hourglass_marks(fr[1])
                             if rep["module"] == "hourglass_b1"
-                            else []
+                            else (
+                                macd_v2_marks(fr[1], f)
+                                if rep["module"] == "macd_technics_v2"
+                                else []
+                            )
                         ),
                     }
         (d / "chart_data.json").write_text(

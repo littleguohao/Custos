@@ -245,12 +245,17 @@
     },
     "macd_technics": {
       "version": 1,
-      "source_digest": "a360bcb62856d7867493",
+      "source_digest": "d4e5d284f4dda1b99749",
       "history": [
         {
           "version": 1,
           "date": "2026-11-03",
           "change": "初始版本（定义校准前基线，TODO #121）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-23",
+          "refactor": "新增背离 v2 候选 check_macd_divergence_v2（同色柱组比较，未接 live）"
         }
       ]
     },
