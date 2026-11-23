@@ -88,25 +88,25 @@ def _divergence_df(top: bool):
     return make_df(closes)
 
 
-def test_top_divergence_detected():
+def test_top_divergence_detected_v1():
     r = ec.check_macd_technics(_divergence_df(top=True))
     assert r["available"]
-    assert r["top_divergence"]["hit"] is True
-    assert r["top_divergence"]["close_b"] > r["top_divergence"]["close_a"]
-    assert r["top_divergence"]["dif_b"] < r["top_divergence"]["dif_a"]
-    assert r["bottom_divergence"]["hit"] is False
+    assert r["top_divergence_v1"]["hit"] is True
+    assert r["top_divergence_v1"]["close_b"] > r["top_divergence_v1"]["close_a"]
+    assert r["top_divergence_v1"]["dif_b"] < r["top_divergence_v1"]["dif_a"]
+    assert r["bottom_divergence_v1"]["hit"] is False
 
 
-def test_bottom_divergence_detected():
+def test_bottom_divergence_detected_v1():
     r = ec.check_macd_technics(_divergence_df(top=False))
     assert r["available"]
-    assert r["bottom_divergence"]["hit"] is True
-    assert r["bottom_divergence"]["close_b"] < r["bottom_divergence"]["close_a"]
-    assert r["bottom_divergence"]["dif_b"] > r["bottom_divergence"]["dif_a"]
-    assert r["top_divergence"]["hit"] is False
+    assert r["bottom_divergence_v1"]["hit"] is True
+    assert r["bottom_divergence_v1"]["close_b"] < r["bottom_divergence_v1"]["close_a"]
+    assert r["bottom_divergence_v1"]["dif_b"] > r["bottom_divergence_v1"]["dif_a"]
+    assert r["top_divergence_v1"]["hit"] is False
 
 
-def test_three_peaks_detected():
+def test_three_peaks_detected_v1():
     # 三打白骨精：三峰价格递增（13.0/13.3/13.5）、斜率递减（0.3/0.1/0.03）
     closes = (
         [10.0] * 30
@@ -118,8 +118,8 @@ def test_three_peaks_detected():
         + _seg(13.5, -0.1, 4)
     )
     r = ec.check_macd_technics(make_df(closes))
-    assert r["three_peaks"]["hit"] is True
-    d = r["three_peaks"]["dif_peaks"]
+    assert r["three_peaks_v1"]["hit"] is True
+    d = r["three_peaks_v1"]["dif_peaks"]
     assert d[0] > d[1] > d[2]
 
 
@@ -316,3 +316,15 @@ def test_bar_waves_split_group_with_two_peaks_v0566():
     h = [1, 1, -1, -3, -5, -3, -1, -2, -4, -2, -1, 1, 1]  # 一组绿柱，两个波峰（-5、-4）
     w = mt.macd_bar_waves(h, -1)
     assert len(w) == 2 and 4 in w[0] and 8 in w[1]
+
+
+def test_live_divergence_uses_v2_v0567():
+    """owner 2026-11-23：live 的底背离 / 顶背离 / 三打白骨精改用 v2（同色柱按波比较）。"""
+    from custos.core.factors import macd_technics as mt
+
+    df = make_df(_ramp_up(150))
+    r = mt.check_macd_technics(df)
+    v2 = mt.check_macd_divergence_v2(df)
+    for k in ("bottom_divergence", "top_divergence", "three_peaks"):
+        assert r[k] == v2[k]
+        assert f"{k}_v1" in r

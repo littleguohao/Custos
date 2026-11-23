@@ -248,7 +248,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
   `labels8.csv`（owner 11 张底背离）：对 6 / 错 4 / 不确定 1；错的理由都是「同组内有多个波峰，应在波之间比」。v2 改（v0.566）：同色柱组内按柱长波峰（左右各 2 根）再切成「波」，比较最近两个波；
   更短门槛 10% → 0（10% 会漏掉同组内略短的背离）。两份共 16 张（有对错）一致 15/16，剩 #1（owner 比 11-09 与 10-31，检测器判成立）待核。新图集 `macd_technics_v2__mining_v2`。
   复验 `labels9.csv`（owner 2026-11-23，36/36，新样本）：**对 35 / 错 0 / 不确定 1**——底背离 12/12、顶背离 12/12、三打白骨精 11/12（#34 不确定：owner 认为更早的两波已是顶背离，最近两波股价走低故检测器判否）。
-  ⇒ 背离 v2 定义校准通过，待 owner 定是否替换 live 的 v1（底背离 +8、顶背离 −8、三打白骨精否决）。
+  ⇒ 背离 v2 定义校准通过；**v0.567 替换 live**（owner 2026-11-23）：check_macd_technics 的底背离 / 顶背离 / 三打白骨精改由 v2 产出，分值与否决不变，v1 结果留 `*_v1`；macd_technics v2（bump）。
 - **纯数值判定退出人工校准（v0.563，owner 2026-11-23）**：MACD 区间（DIF / DEA 是否在 0 轴上 + 柱体放长 / 缩短 / 转绿）只是数值比较，看图只能核实现，改由钉测管四态；`macd_technics__mining_v1` 的 24 张区间图隐藏，MODULES 去掉该字段。
 - **owner 定（2026-11-23）**：一波流 = ①连续 ②快速（几个交易日内）③大幅（≥50%），之后 A 杀或震荡下跌 / 横盘都算，尽力识别；走势只识别买点前最近 1~2 段，尽力识别。
   落地（v0.561）：`b1_structure.check_one_wave_v4`（120 根内 ≤10 根、途中收盘回撤 <10%、最高价较起点最低价 ≥50%），live 提醒改用 v4（风险列「一波流（提醒）」，不否决不计分）；
@@ -347,15 +347,15 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `b1_structure` | `OW3_FAST_BARS` | 20 | 「20 根左右」 | candidate | 候选（owner 2026-11-17 定稿，图集 `b1_structure_v3__mining_v3cand`） |
 | `b1_structure` | `OW3_HEAVY_PULLBACK` | 0.9 | - | candidate | 候选（owner 2026-11-17） |
 | `b1_structure` | `OW3_PIVOT` | 3 | N 型结构回踩低点：收盘分型左右各 3 根确认（同 technical_monitor.N_PIVOT_LEFT/RIGHT 口径） | candidate | 候选（owner 2026-11-17） |
-| `b1_structure` | `SW4_BARS` | 120 | 只看图上显示的 120 根（owner：显示多少根就看多少根） | candidate | 候选（owner 2026-11-20） |
-| `b1_structure` | `SW4_THR` | 0.15 | 段内直线涨跌 ≥15% 上涨 / ≤−15% 下跌，其余横盘 | candidate | 候选（owner 2026-11-20） |
-| `b1_structure` | `SW4_MIN_HEAD` | 20 | 转折点（最高 / 最低点）距图左端至少 20 根 | candidate | 候选（owner 2026-11-20） |
-| `b1_structure` | `SW4_MIN_TAIL` | 5 | 转折点距当根至少 5 根（B1 前短回落也算一段） | candidate | 候选（owner 2026-11-20） |
-| `b1_structure` | `SW4_SPLIT_RATIO` | 0.9 | 两段拟合误差和须 ≤ 整段 0.9 倍才算有转折 | candidate | 候选（owner 2026-11-20） |
-| `b1_structure` | `OW4_BARS` | 120 | 只看图上显示的 120 根 | candidate | 候选（owner 2026-11-23） |
-| `b1_structure` | `OW4_FAST_BARS` | 10 | 快速：≤10 根（「几个交易日内」） | candidate | 候选（owner 2026-11-23） |
-| `b1_structure` | `OW4_RISE_PCT` | 50.0 | 大幅：最高价相对起点最低价涨 ≥50% | candidate | 候选（owner 2026-11-23） |
-| `b1_structure` | `OW4_MAX_PULLBACK` | 0.1 | 连续：拉升途中收盘较途中最高收盘回撤 <10%，否则视为断开 | candidate | 候选（owner 2026-11-23） |
+| `b1_structure` | `SW4_BARS` | 120 | 只看图上显示的 120 根（owner：显示多少根就看多少根） | candidate | 已标 · live 提示（v0.561） |
+| `b1_structure` | `SW4_THR` | 0.15 | 段内直线涨跌 ≥15% 上涨 / ≤−15% 下跌，其余横盘 | candidate | 已标 · live 提示（v0.561） |
+| `b1_structure` | `SW4_MIN_HEAD` | 20 | 转折点（最高 / 最低点）距图左端至少 20 根 | candidate | 已标 · live 提示（v0.561） |
+| `b1_structure` | `SW4_MIN_TAIL` | 5 | 转折点距当根至少 5 根（B1 前短回落也算一段） | candidate | 已标 · live 提示（v0.561） |
+| `b1_structure` | `SW4_SPLIT_RATIO` | 0.9 | 两段拟合误差和须 ≤ 整段 0.9 倍才算有转折 | candidate | 已标 · live 提示（v0.561） |
+| `b1_structure` | `OW4_BARS` | 120 | 只看图上显示的 120 根 | candidate | 已标 · live 提示（v0.561） |
+| `b1_structure` | `OW4_FAST_BARS` | 10 | 快速：≤10 根（「几个交易日内」） | candidate | 已标 · live 提示（v0.561） |
+| `b1_structure` | `OW4_RISE_PCT` | 50.0 | 大幅：最高价相对起点最低价涨 ≥50% | candidate | 已标 · live 提示（v0.561） |
+| `b1_structure` | `OW4_MAX_PULLBACK` | 0.1 | 连续：拉升途中收盘较途中最高收盘回撤 <10%，否则视为断开 | candidate | 已标 · live 提示（v0.561） |
 | `capital_intent` | `CAP_STRONG` | 5 | - | candidate | 未校准 |
 | `capital_intent` | `CAP_MID` | 2 | - | candidate | 未校准 |
 | `distribution` | `DIST_RECENT` | 5 | 待回测：出货形态观察最近N根 | active；R2 | 未校准 |
@@ -387,9 +387,9 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `macd_technics` | `MACD_DIV_LOOKBACK` | 60 | 背离观察窗口（日） | candidate | 未校准 |
 | `macd_technics` | `MACD_OVEREXT_PCTL` | 0.9 | 开口/空间拐离：DIF 分位与柱体比较；已恢复抽检 | candidate | 进行中（owner 2026-11-15 恢复） |
 | `macd_technics` | `MACD_OVEREXT_WIN` | 120 | 拐离分位窗口；已恢复抽检 | candidate | 进行中（owner 2026-11-15 恢复） |
-| `macd_technics` | `MACD2_MIN_GROUP` | 2 | - | candidate | 候选（owner 2026-11-23） |
-| `macd_technics` | `MACD2_MARGIN` | 0.0 | 柱子「更短」的门槛：v0.566 起 0（owner 18 张标注上 10% 会漏掉同组内略短的背离） | candidate | 候选（owner 2026-11-23） |
-| `macd_technics` | `MACD2_WAVE_FRACTAL` | 2 | 同一组柱子里按柱长再切「波」：柱长局部峰（左右各 2 根）各算一个波（owner：同组有多个波峰就在波之间比） | candidate | 候选（owner 2026-11-23） |
+| `macd_technics` | `MACD2_MIN_GROUP` | 2 | - | candidate | 已标 · live（v0.567） |
+| `macd_technics` | `MACD2_MARGIN` | 0.0 | 柱子「更短」的门槛：v0.566 起 0（owner 18 张标注上 10% 会漏掉同组内略短的背离） | candidate | 已标 · live（v0.567） |
+| `macd_technics` | `MACD2_WAVE_FRACTAL` | 2 | 同一组柱子里按柱长再切「波」：柱长局部峰（左右各 2 根）各算一个波（owner：同组有多个波峰就在波之间比） | candidate | 已标 · live（v0.567） |
 | `volume_detectors` | `VOLUME_SUSTAIN_WINDOW` | 13 | 量能持续性窗口（CZ §14.6：7-13日） | candidate | 未校准 |
 | `volume_detectors` | `VOLUME_SUSTAIN_MIN_POST_DAYS` | 7 | 待回测参数：峰值日后确认主线最少观察日数 | candidate | 未校准 |
 | `volume_detectors` | `VOLUME_SUSTAIN_RATIO` | 0.55 | 峰值55%（CZ §14.6） | candidate | 未校准 |

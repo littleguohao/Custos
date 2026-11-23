@@ -244,8 +244,8 @@
       ]
     },
     "macd_technics": {
-      "version": 1,
-      "source_digest": "ed6e323087dd17767202",
+      "version": 2,
+      "source_digest": "3e88ebc02db8760b12ea",
       "history": [
         {
           "version": 1,
@@ -261,6 +261,11 @@
           "version": 1,
           "date": "2026-11-23",
           "refactor": "背离 v2 候选比较单位改为波（同组多波峰），门槛 0（未接 live）"
+        },
+        {
+          "version": 2,
+          "date": "2026-11-23",
+          "change": "live 底背离 / 顶背离 / 三打白骨精改用 v2（同色柱按波比较；owner 复验 35/35）"
         }
       ]
     },

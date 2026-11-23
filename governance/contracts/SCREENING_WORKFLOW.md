@@ -216,8 +216,8 @@ next_step（由封顶后的 bucket 定）：A→buy_review（v0.50：原 generat
 | zone 三区间 | DIF/DEA 零轴上+红柱扩张=第一区间（+3）；红柱脱离 DIF=第二；脱离 DEA（≤0）=第三 | 打分 |
 | zone1_restart | 昨日 hist≤0、今日重新扩张且 DIF>0——"3/5 浪的第一区间"（+5） | 打分 |
 | bottom_divergence | 窗口内收盘摆低 L2<L1 但 DIF 低点抬高（+5，B1 修复确认） | 打分 |
-| top_divergence | 收盘摆高 B>A 但 DIF/hist 低于前峰 | 封顶 C（cap_rules.macd_divergence） |
-| three_peaks 三打白骨精 | 连续 3 摆高递增 + DIF 连续 3 峰递减 | 封顶 C（同开关） |
+| top_divergence | v0.567 起 v2：最近两波红柱，后一波股价创新高、最长红柱更短（🔄 v1 收盘摆高 + DIF 停用） | 技术分 −8，只标记 |
+| three_peaks 三打白骨精 | v0.567 起 v2：最近三波红柱股价高点逐波抬高、最长红柱逐波缩短 | 封顶 C（同开关，否决） |
 | overextended 开口/空间拐离 | \|DIF\| 近 120 日 ≥90% 分位且柱体仍在 | 仅 risk_flag，不降档 |
 
 背离用左右各 2 根收盘分型定位摆点（右确认，无未来函数）；浪形（3/5 浪精确计数）

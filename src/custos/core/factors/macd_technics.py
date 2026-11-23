@@ -342,10 +342,9 @@ def check_macd_technics(df, df_long=None) -> dict[str, Any]:
       （强势）；红柱脱离 DIF（收缩）=第二区间；红柱脱离 DEA（≤0）=第三区间。
       zone1_restart：昨日 hist≤0（或收缩后）今日重新扩张且 DIF>0——"3浪/5浪
       的第一区间"，回调后再启动的强信号。
-    - bottom_divergence 底背离：窗口内两个收盘价摆低 L2<L1，但 DIF 低点抬高。
-    - top_divergence 顶背离（高度/线型）：两个收盘摆高 B>A，但 DIF_B<DIF_A
-      或 hist_B<hist_A。
-    - three_peaks 三打白骨精：连续 3 个摆高递增 + DIF 连续 3 峰递减。
+    - bottom_divergence / top_divergence / three_peaks：v0.567（owner 2026-11-23）起用 v2
+      （``check_macd_divergence_v2``：同色柱按波比较，绿柱和绿柱比、红柱和红柱比）；🔄 原 v1（收盘 2 根分型摆点 + DIF 比较）
+      owner 标注 7 张错 5 张已停用，结果只留在 ``*_v1`` 字段备查。
     - overextended 开口/空间拐离：|DIF| 处于近 120 日 90%+ 分位且柱体仍在。
 
     ``df_long``（v0.60 修复，2026-08-16 review 发现）：周/月红柱（wm_bar_grow）
@@ -373,9 +372,13 @@ def check_macd_technics(df, df_long=None) -> dict[str, Any]:
     # 摆动高/低点
     swing_hi, swing_lo = _macd_swings(close, n)
 
-    top_div = _macd_top_divergence(close, d, h, swing_hi, n)
-    three_peaks = _macd_three_peaks(close, d, swing_hi, n)
-    bottom_div = _macd_bottom_divergence(close, d, swing_lo, n)
+    top_div_v1 = _macd_top_divergence(close, d, h, swing_hi, n)
+    three_peaks_v1 = _macd_three_peaks(close, d, swing_hi, n)
+    bottom_div_v1 = _macd_bottom_divergence(close, d, swing_lo, n)
+    v2 = check_macd_divergence_v2(df)  # v0.567 live 口径
+    top_div = v2.get("top_divergence") or {"hit": False}
+    three_peaks = v2.get("three_peaks") or {"hit": False}
+    bottom_div = v2.get("bottom_divergence") or {"hit": False}
 
     # 开口/空间拐离：|DIF| 分位 + 柱体仍在
     overextended = _macd_overextended(d, n, h0, dif_last)
@@ -400,6 +403,9 @@ def check_macd_technics(df, df_long=None) -> dict[str, Any]:
         "bottom_divergence": bottom_div,
         "top_divergence": top_div,
         "three_peaks": three_peaks,
+        "bottom_divergence_v1": bottom_div_v1,
+        "top_divergence_v1": top_div_v1,
+        "three_peaks_v1": three_peaks_v1,
         "overextended": overextended,
     }
 
