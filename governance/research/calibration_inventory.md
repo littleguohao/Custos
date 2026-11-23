@@ -8,7 +8,7 @@
 
 ## 现状
 
-- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 90 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
+- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 91 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
   **P1 live 展示 99 个**（1800 证据标注，不进判定）、P2 研究 67 个。
 - **定义校准：0 / 233**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
 - **清单未覆盖**（需在逐因子校准时一并核）：①函数体内联常量（KDJ 9/3/3、BBI 周期、20 日相对强度窗口等）；
@@ -245,6 +245,8 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
   「绿柱和绿柱比、红柱和红柱比」——比的是一组绿柱里最长那根和上一组绿柱里最长那根；当根还在红柱时不算；两组差不多不算；股价没创新低不算。
   现行判法（收盘 2 根分型摆低 + DIF 比较）与此不符。候选 v2（v0.565）：`macd_technics.check_macd_divergence_v2`（同色柱组；夹在中间 <2 根的异色柱并入；更短须 ≥10%），
   顶背离 / 三打白骨精同理用红柱组。这 7 张上 v2 与 owner 全一致（不确定那张判不成立）。新图集 `macd_technics_v2__mining_v1`（53 张，图上紫线标比较的两组）。未接 live。
+  `labels8.csv`（owner 11 张底背离）：对 6 / 错 4 / 不确定 1；错的理由都是「同组内有多个波峰，应在波之间比」。v2 改（v0.566）：同色柱组内按柱长波峰（左右各 2 根）再切成「波」，比较最近两个波；
+  更短门槛 10% → 0（10% 会漏掉同组内略短的背离）。两份共 16 张（有对错）一致 15/16，剩 #1（owner 比 11-09 与 10-31，检测器判成立）待核。新图集 `macd_technics_v2__mining_v2`。
 - **纯数值判定退出人工校准（v0.563，owner 2026-11-23）**：MACD 区间（DIF / DEA 是否在 0 轴上 + 柱体放长 / 缩短 / 转绿）只是数值比较，看图只能核实现，改由钉测管四态；`macd_technics__mining_v1` 的 24 张区间图隐藏，MODULES 去掉该字段。
 - **owner 定（2026-11-23）**：一波流 = ①连续 ②快速（几个交易日内）③大幅（≥50%），之后 A 杀或震荡下跌 / 横盘都算，尽力识别；走势只识别买点前最近 1~2 段，尽力识别。
   落地（v0.561）：`b1_structure.check_one_wave_v4`（120 根内 ≤10 根、途中收盘回撤 <10%、最高价较起点最低价 ≥50%），live 提醒改用 v4（风险列「一波流（提醒）」，不否决不计分）；
@@ -313,7 +315,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `technical_monitor` | `TREND_MIN_BARS` | 60 | 趋势判定最少 K 线数 | - | 未校准 |
 | `technical_monitor` | `QFQ_LOAD_BARS` | 100000 | - | - | 未校准 |
 
-### P0（90 个参数）
+### P0（91 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -384,7 +386,8 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `macd_technics` | `MACD_OVEREXT_PCTL` | 0.9 | 开口/空间拐离：DIF 分位与柱体比较；已恢复抽检 | candidate | 进行中（owner 2026-11-15 恢复） |
 | `macd_technics` | `MACD_OVEREXT_WIN` | 120 | 拐离分位窗口；已恢复抽检 | candidate | 进行中（owner 2026-11-15 恢复） |
 | `macd_technics` | `MACD2_MIN_GROUP` | 2 | - | candidate | 候选（owner 2026-11-23） |
-| `macd_technics` | `MACD2_MARGIN` | 0.1 | 柱子「更短」须短 ≥10%（owner：两组差不多不算背离） | candidate | 候选（owner 2026-11-23） |
+| `macd_technics` | `MACD2_MARGIN` | 0.0 | 柱子「更短」的门槛：v0.566 起 0（owner 18 张标注上 10% 会漏掉同组内略短的背离） | candidate | 候选（owner 2026-11-23） |
+| `macd_technics` | `MACD2_WAVE_FRACTAL` | 2 | 同一组柱子里按柱长再切「波」：柱长局部峰（左右各 2 根）各算一个波（owner：同组有多个波峰就在波之间比） | candidate | 候选（owner 2026-11-23） |
 | `volume_detectors` | `VOLUME_SUSTAIN_WINDOW` | 13 | 量能持续性窗口（CZ §14.6：7-13日） | candidate | 未校准 |
 | `volume_detectors` | `VOLUME_SUSTAIN_MIN_POST_DAYS` | 7 | 待回测参数：峰值日后确认主线最少观察日数 | candidate | 未校准 |
 | `volume_detectors` | `VOLUME_SUSTAIN_RATIO` | 0.55 | 峰值55%（CZ §14.6） | candidate | 未校准 |

@@ -571,6 +571,7 @@
 | 2026-11-23 | v0.563 | MACD 区间退出人工校准（owner：纯数值判定）：calib 模块 macd_technics 去掉 zone 字段，现有图集 24 张隐藏，四态改由钉测 test_zone_four_states_by_value 管。判定不变 | owner 2026-11-23 | TODO #123 |
 | 2026-11-23 | v0.564 | MACD 校准图集不显示 J 副图（owner）：calib 模块 macd_technics chart_panes = 量 + MACD；现有 macd_technics__mining_v1 原地改，样本不变 | owner 2026-11-23 | TODO #123 |
 | 2026-11-23 | v0.565 | MACD 背离 v2 候选（owner：同色柱组的最长柱比较，当根须在绿柱组才判底背离）：check_macd_divergence_v2 + calib 模块 macd_technics_v2，图上标比较的柱组；owner 7 张标注上一致 7/7。未接 live | owner 2026-11-23 | TODO #123 |
+| 2026-11-23 | v0.566 | MACD 背离 v2 比较单位改为「波」（owner：同组绿柱有多个波峰就在波之间比）：macd_bar_waves，更短门槛 0；owner 16 张一致 15/16；新图集 macd_technics_v2__mining_v2。未接 live | owner 2026-11-23 | TODO #123 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

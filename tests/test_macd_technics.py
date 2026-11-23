@@ -307,3 +307,12 @@ def test_divergence_v2_bottom_hit_shape():
     if bd["hit"]:
         a, b = bd["groups"]
         assert b["price"] < a["price"] and abs(b["bar"]) <= abs(a["bar"]) * 0.9
+
+
+def test_bar_waves_split_group_with_two_peaks_v0566():
+    """owner 2026-11-23：同一组绿柱里有多个波峰，就在波之间比较。"""
+    from custos.core.factors import macd_technics as mt
+
+    h = [1, 1, -1, -3, -5, -3, -1, -2, -4, -2, -1, 1, 1]  # 一组绿柱，两个波峰（-5、-4）
+    w = mt.macd_bar_waves(h, -1)
+    assert len(w) == 2 and 4 in w[0] and 8 in w[1]

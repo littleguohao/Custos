@@ -245,7 +245,7 @@
     },
     "macd_technics": {
       "version": 1,
-      "source_digest": "d4e5d284f4dda1b99749",
+      "source_digest": "ed6e323087dd17767202",
       "history": [
         {
           "version": 1,
@@ -256,6 +256,11 @@
           "version": 1,
           "date": "2026-11-23",
           "refactor": "新增背离 v2 候选 check_macd_divergence_v2（同色柱组比较，未接 live）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-23",
+          "refactor": "背离 v2 候选比较单位改为波（同组多波峰），门槛 0（未接 live）"
         }
       ]
     },

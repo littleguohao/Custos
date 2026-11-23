@@ -167,7 +167,50 @@ def _macd_overextended(d, n: int, h0: float, dif_last: float) -> dict[str, Any]:
 MACD2_MIN_GROUP = (
     2  # 夹在两组之间、短于 2 根的异色柱并入两侧（避免一根翻色把一组拆成两组）
 )
-MACD2_MARGIN = 0.10  # 柱子「更短」须短 ≥10%（owner：两组差不多不算背离）
+MACD2_MARGIN = 0.0  # 柱子「更短」的门槛：v0.566 起 0（owner 18 张标注上 10% 会漏掉同组内略短的背离）
+MACD2_WAVE_FRACTAL = 2  # 同一组柱子里按柱长再切「波」：柱长局部峰（左右各 2 根）各算一个波（owner：同组有多个波峰就在波之间比）
+
+
+def macd_bar_waves(hist, color: int) -> list[list[int]]:
+    """同色柱组内按柱长波峰再切成「波」（时间顺序，跨组排列）；``color`` = −1 绿 / +1 红。
+    相邻两峰之间的柱长谷底作为分界。"""
+    import numpy as np  # noqa: PLC0415
+
+    h = np.asarray(hist, float)
+    f = MACD2_WAVE_FRACTAL
+    out: list[list[int]] = []
+    for col, idx in macd_bar_groups(h):
+        if col != color:
+            continue
+        a = np.abs(h[idx])
+        m = len(a)
+        pk = [
+            k
+            for k in range(m)
+            if a[k] > 0 and a[k] == a[max(0, k - f) : k + f + 1].max()
+        ]
+        merged: list[int] = []
+        for k in pk:  # 平台上相邻的同值峰只留一个
+            if merged and k - merged[-1] <= f:
+                if a[k] > a[merged[-1]]:
+                    merged[-1] = k
+                continue
+            merged.append(k)
+        if len(merged) <= 1:
+            out.append(list(idx))
+            continue
+        cuts = [
+            merged[j] + int(np.argmin(a[merged[j] : merged[j + 1] + 1]))
+            for j in range(len(merged) - 1)
+        ]
+        bounds = [0, *cuts, m - 1]
+        for j in range(len(merged)):
+            out.append(
+                list(
+                    idx[bounds[j] : bounds[j + 1] + (1 if j == len(merged) - 1 else 0)]
+                )
+            )
+    return out
 
 
 def macd_bar_groups(hist) -> list[tuple[int, list[int]]]:
@@ -211,7 +254,7 @@ def _grp(close, hist, idx, color: int) -> dict[str, Any]:
 
 
 def check_macd_divergence_v2(df) -> dict[str, Any]:
-    """背离 v2（同色柱组比较，owner 2026-11-23）：
+    """背离 v2（同色柱比较，owner 2026-11-23；v0.566 比较单位细化为「波」：同色柱组内柱长每个波峰算一波）：
 
     - 底背离：当根处在绿柱组；本组最低收盘 < 上一组绿柱的最低收盘（股价创新低），而本组最长绿柱
       比上一组最长绿柱短 ≥ ``MACD2_MARGIN``。当根还是红柱 ⇒ 不判（owner：「当前还没有绿柱」）。
@@ -225,13 +268,14 @@ def check_macd_divergence_v2(df) -> dict[str, Any]:
     close = df["close"].astype(float).to_numpy()
     _dif, _dea, hist_s = macd_series(df["close"])
     hist = hist_s.to_numpy()
-    G = macd_bar_groups(hist)
-    greens = [g for c, g in G if c < 0]
-    reds = [g for c, g in G if c > 0]
+    greens = macd_bar_waves(
+        hist, -1
+    )  # v0.566：比较单位由「组」改为「波」（同组多个波峰时在波之间比）
+    reds = macd_bar_waves(hist, 1)
     k = 1 - MACD2_MARGIN
     out: dict[str, Any] = {"available": True}
     bd: dict[str, Any] = {"hit": False}
-    if G and G[-1][0] < 0 and len(greens) >= 2:
+    if hist[-1] < 0 and len(greens) >= 2:
         a, b = _grp(close, hist, greens[-2], -1), _grp(close, hist, greens[-1], -1)
         bd = {
             "hit": bool(b["price"] < a["price"] and abs(b["bar"]) <= abs(a["bar"]) * k),
