@@ -172,9 +172,8 @@ MODULES: dict[str, dict[str, Any]] = {
     },
     "macd_technics": {
         "defmod": "custos.core.factors.macd_technics",
-        # owner 2026-11-15：zone / overextended 恢复抽检，供 owner 逐项复核。
+        # owner 2026-11-15：overextended 恢复抽检；owner 2026-11-23：zone 是 DIF/DEA/柱体纯数值判定，退出人工校准（钉测管）
         "fields": [
-            "macd_technics.zone",
             "macd_technics.bottom_divergence.hit",
             "macd_technics.top_divergence.hit",
             "macd_technics.three_peaks.hit",

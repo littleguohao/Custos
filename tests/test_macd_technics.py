@@ -36,6 +36,25 @@ def test_zone1_restart():
     assert r["dif"] > 0 and r["hist"] > 0
 
 
+@pytest.mark.parametrize(
+    "dif,dea,h0,h1,zone",
+    [
+        (0.5, 0.3, 0.2, 0.1, 1),  # 水上、红柱放长（本根 ≥ 上根）
+        (0.5, 0.3, 0.2, 0.2, 1),
+        (0.5, 0.3, 0.1, 0.2, 2),  # 水上、红柱缩短
+        (0.5, 0.3, 0.0, 0.1, 3),  # 水上、柱体为 0
+        (0.5, 0.3, -0.1, 0.1, 3),  # 水上、柱体转绿
+        (0.5, -0.1, 0.3, 0.1, 0),  # DEA 在水下
+        (-0.1, 0.3, 0.3, 0.1, 0),  # DIF 在水下
+    ],
+)
+def test_zone_four_states_by_value(dif, dea, h0, h1, zone):
+    """owner 2026-11-23：区间是纯数值判定，退出人工校准，四态由本钉测管。"""
+    from custos.core.factors import macd_technics as mt
+
+    assert mt._macd_zone_state(dif, dea, h0, h1)[0] == zone
+
+
 def test_zone_unavailable_short_df():
     assert ec.check_macd_technics(make_df([10.0] * 30))["available"] is False
 
