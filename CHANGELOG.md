@@ -569,6 +569,7 @@
 | 2026-11-23 | v0.561 | 一波流 v4（owner：连续 / 几日内 / ≥50%，之后不限）：check_one_wave_v4，live 提醒改用 v4，检出 12/19（v3 7/19）；走势三态 v4 进 detect，候选表证据列显示「走势：X」，只展示。b1_structure v3（bump），判定与技术分不变 | owner 2026-11-23 | TODO #121 |
 | 2026-11-23 | v0.562 | 候选表证据列走势去掉「走势：」前缀，只显示形态（如「上涨转下跌」）（owner）。只改展示 | owner 2026-11-23 | — |
 | 2026-11-23 | v0.563 | MACD 区间退出人工校准（owner：纯数值判定）：calib 模块 macd_technics 去掉 zone 字段，现有图集 24 张隐藏，四态改由钉测 test_zone_four_states_by_value 管。判定不变 | owner 2026-11-23 | TODO #123 |
+| 2026-11-23 | v0.564 | MACD 校准图集不显示 J 副图（owner）：calib 模块 macd_technics chart_panes = 量 + MACD；现有 macd_technics__mining_v1 原地改，样本不变 | owner 2026-11-23 | TODO #123 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

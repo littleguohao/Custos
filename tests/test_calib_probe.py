@@ -759,3 +759,8 @@ def test_trend_shape_chart_only_kline_and_volume(tmp_path):
     assert all(v.get("panes") == ["vol"] for v in cd.values())
     g = (d / "gallery.html").read_text(encoding="utf-8")
     assert "want('macd')" in g or "kc" not in g
+
+
+def test_macd_gallery_hides_j_pane():
+    """owner 2026-11-23：MACD 图集只画 K 线 / 量 / MACD。"""
+    assert cp.MODULES["macd_technics"]["chart_panes"] == ["vol", "macd"]

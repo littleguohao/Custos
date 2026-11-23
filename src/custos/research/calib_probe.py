@@ -172,6 +172,7 @@ MODULES: dict[str, dict[str, Any]] = {
     },
     "macd_technics": {
         "defmod": "custos.core.factors.macd_technics",
+        "chart_panes": ["vol", "macd"],  # owner 2026-11-23：MACD 图集不显示 J
         # owner 2026-11-15：overextended 恢复抽检；owner 2026-11-23：zone 是 DIF/DEA/柱体纯数值判定，退出人工校准（钉测管）
         "fields": [
             "macd_technics.bottom_divergence.hit",
