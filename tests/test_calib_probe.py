@@ -42,7 +42,6 @@ def test_simple_numeric_fields_and_their_sensitivity_params_removed():
             "bottom_volume.hit",
         ],
         "macd_technics": [
-            "macd_technics.zone",
             "macd_technics.bottom_divergence.hit",
             "macd_technics.top_divergence.hit",
             "macd_technics.three_peaks.hit",
