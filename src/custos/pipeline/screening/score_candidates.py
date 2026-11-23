@@ -689,9 +689,9 @@ def _cap_wave_rules(risk_flags: list, bucket: str, cand: dict, rules: dict):
             bucket = cap_bucket(bucket, "C")
         else:
             risk_flags.append("main_force_retreat_cap_disabled")
-    if (cand.get("one_wave_v3") or {}).get("status") == "one_wave":
-        # v0.555（owner 2026-11-19）：一波流 v3 只作提醒——不封顶、不改状态、不计分
-        risk_flags.append("one_wave_v3")
+    if (cand.get("one_wave_v4") or {}).get("hit"):
+        # v0.561（owner 2026-11-23）：一波流 = 连续、快速、大幅（v4）；只作提醒——不封顶、不改状态、不计分
+        risk_flags.append("one_wave")
     if (cand.get("non_one_wave") or {}).get("status") == "revoked":
         # B1 §四：非一波流撤销（顶部放量大阴/回调放量破位）；owner 2026-11-17 起默认只标记（开关关）
         if rules["non_one_wave_revoked"]:
@@ -1063,6 +1063,8 @@ def _b1cz_passthrough(cand: dict) -> dict:
         "weekly_j_low": bool(cand.get("weekly_j_low")),
         "non_one_wave": cand.get("non_one_wave") or {},
         "one_wave_v3": cand.get("one_wave_v3") or {},
+        "one_wave_v4": cand.get("one_wave_v4") or {},
+        "swing_state": cand.get("swing_state") or {},
         "repair_signals": cand.get("repair_signals") or {},
         "five_day_entry": cand.get("five_day_entry") or {},
         "volume_sustain": cand.get("volume_sustain") or {},

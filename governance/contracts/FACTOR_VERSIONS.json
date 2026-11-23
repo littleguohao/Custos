@@ -57,8 +57,8 @@
       ]
     },
     "b1_structure": {
-      "version": 2,
-      "source_digest": "9e79fd780d00b1603531",
+      "version": 3,
+      "source_digest": "adb88bde9c72930bf7fb",
       "history": [
         {
           "version": 1,
@@ -104,6 +104,11 @@
           "version": 2,
           "date": "2026-11-20",
           "refactor": "新增走势三态 v4 候选 check_swing_state（不进 detect，live 不变）"
+        },
+        {
+          "version": 3,
+          "date": "2026-11-23",
+          "change": "一波流提醒改用 v4（连续 / ≤10 根 / ≥50%）；detect 加 swing_state，候选表证据列显示走势（owner 2026-11-23）"
         }
       ]
     },

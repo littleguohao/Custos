@@ -721,7 +721,7 @@ class TestCharacterizationSnapshot:
         "alpha_pvcorr": "effcb178ff26",
         "b1_dual_factor": "2be88ca4242c",  # v0.226 更新（score 规范槽上移接管）
         "b1_pullback_fit": "c73516b95663",  # v0.226 更新（score 规范槽上移接管）
-        "b1_structure": "23d2275aba97",  # v0.555 detect 加 one_wave_v3（一波流只作提醒，owner 2026-11-19）
+        "b1_structure": "92f62d80644a",  # v0.561 detect 加 one_wave_v4 / swing_state（owner 2026-11-23）
         "b2_surge_factor": "9f3b7bcdc8e1",
         "baseline": "2bd7dd114d5c",
         "bottom_patterns": "76cf78a9d5be",  # v0.218…B2 更新（新增 detect 打包入口槽）

@@ -420,7 +420,9 @@ def _evidence_cell(c: dict) -> str:
     fit = detail.get("factor_contrib", {}).get("perfect_b1_fit")
     sr = (c.get("s_reversal") or {}).get("s_reversal")
     pp = (c.get("platform_pullback") or {}).get("platform_high")
+    sw = (c.get("swing_state") or {}).get("state")
     tags = [
+        f"走势：{sw}" if sw else "",  # v0.561 走势三态 v4（只展示，后段约 2/3 准确）
         f"贴合{fit}" if fit else "",
         "ADX25" if c.get("adx25") else "",
         f"S反转{sr}" if sr is not None else "",
@@ -455,7 +457,7 @@ COLUMN_LEGEND = [
     ),
     (
         "证据标记",
-        "只标注不进判定：贴合=完美 B1 贴合分；ADX25；S反转=S 型反转分；W底；红肥绿瘦；平台回踩✓@平台高（平台高即自然止损位）",
+        "只标注不进判定：走势=B1 前 120 根最近 1~2 段（震荡上涨 / 横盘震荡 / 震荡下跌，有转折记 X转Y；未校准完，约 2/3 准确）；贴合=完美 B1 贴合分；ADX25；S反转=S 型反转分；W底；红肥绿瘦；平台回踩✓@平台高（平台高即自然止损位）",
     ),
     (
         "研究标注",
@@ -479,7 +481,8 @@ RISK_ZH: dict[str, str] = {
     "macd_divergence_detected_cap_disabled": "MACD 背离（已检出，封顶关闭）",
     "non_one_wave_revoked": "疑似一波流 / 出货（否决）",
     "non_one_wave_revoked_cap_disabled": "疑似一波流 / 出货（提醒）",
-    "one_wave_v3": "一波流（提醒）",
+    "one_wave": "一波流（提醒）",
+    "one_wave_v3": "一波流（提醒，v3 旧口径）",
     "sprint_wave_first_b1_forbidden": "冲刺波首个 B1（否决）",
     "sprint_wave_detected_cap_disabled": "冲刺波（已检出，封顶关闭）",
     "main_force_retreat": "量能退潮",

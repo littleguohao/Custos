@@ -8,7 +8,7 @@
 
 ## 现状
 
-- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 84 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
+- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 88 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
   **P1 live 展示 99 个**（1800 证据标注，不进判定）、P2 研究 67 个。
 - **定义校准：0 / 233**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
 - **清单未覆盖**（需在逐因子校准时一并核）：①函数体内联常量（KDJ 9/3/3、BBI 周期、20 日相对强度窗口等）；
@@ -241,6 +241,9 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
   - 试「整体到局部」递归切成 ≤3~4 段：三份留一交叉验证每次都选回 2 段，3 段不比 2 段好。
   - 一波流 v3（live 提醒）：owner 有 15 张、检出 4；v3 判 8 次对 4 次。三轮合计检出 12/24、准确 12/26 ⇒ 本轮 owner 标的一波流明显多于前两轮（15/48 vs 9/96），口径待确认。
   - 出货五方式：owner 有 21 检出 13；标出货 29 对 13。区分力仍弱。只描述。
+- **owner 定（2026-11-23）**：一波流 = ①连续 ②快速（几个交易日内）③大幅（≥50%），之后 A 杀或震荡下跌 / 横盘都算，尽力识别；走势只识别买点前最近 1~2 段，尽力识别。
+  落地（v0.561）：`b1_structure.check_one_wave_v4`（120 根内 ≤10 根、途中收盘回撤 <10%、最高价较起点最低价 ≥50%），live 提醒改用 v4（风险列「一波流（提醒）」，不否决不计分）；
+  owner 一波流标注 96 张（有 19）：v4 检出 12/19、准确 12/29（v3 7/19、7/16）。走势三态 v4 进 detect，候选表证据列显示「走势：X」（只展示）。b1_structure v3（bump）。
 - 全部图集取值改正面中文（字段专属对照）：非一波流字段显示「健康拉升 / 疑似一波流或出货 / 判断不了」，MACD 区间与出货失效名单措辞同步改，不再出现双重否定。
 ## P0H 持仓大形态（v0.485 纳入，**排在 P0 之前**）
 
@@ -305,7 +308,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `technical_monitor` | `TREND_MIN_BARS` | 60 | 趋势判定最少 K 线数 | - | 未校准 |
 | `technical_monitor` | `QFQ_LOAD_BARS` | 100000 | - | - | 未校准 |
 
-### P0（84 个参数）
+### P0（88 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -340,6 +343,10 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `b1_structure` | `SW4_MIN_HEAD` | 20 | 转折点（最高 / 最低点）距图左端至少 20 根 | candidate | 候选（owner 2026-11-20） |
 | `b1_structure` | `SW4_MIN_TAIL` | 5 | 转折点距当根至少 5 根（B1 前短回落也算一段） | candidate | 候选（owner 2026-11-20） |
 | `b1_structure` | `SW4_SPLIT_RATIO` | 0.9 | 两段拟合误差和须 ≤ 整段 0.9 倍才算有转折 | candidate | 候选（owner 2026-11-20） |
+| `b1_structure` | `OW4_BARS` | 120 | 只看图上显示的 120 根 | candidate | 候选（owner 2026-11-23） |
+| `b1_structure` | `OW4_FAST_BARS` | 10 | 快速：≤10 根（「几个交易日内」） | candidate | 候选（owner 2026-11-23） |
+| `b1_structure` | `OW4_RISE_PCT` | 50.0 | 大幅：最高价相对起点最低价涨 ≥50% | candidate | 候选（owner 2026-11-23） |
+| `b1_structure` | `OW4_MAX_PULLBACK` | 0.1 | 连续：拉升途中收盘较途中最高收盘回撤 <10%，否则视为断开 | candidate | 候选（owner 2026-11-23） |
 | `capital_intent` | `CAP_STRONG` | 5 | - | candidate | 未校准 |
 | `capital_intent` | `CAP_MID` | 2 | - | candidate | 未校准 |
 | `distribution` | `DIST_RECENT` | 5 | 待回测：出货形态观察最近N根 | active；R2 | 未校准 |

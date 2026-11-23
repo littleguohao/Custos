@@ -464,6 +464,7 @@ def evaluate(
 
 #: 合并图集并排展示的检测器读数（键 → 中文名）
 SHAPE_READINGS: dict[str, str] = {
+    "one_wave_v4": "一波流 v4",
     "one_wave_v3": "一波流 v3",
     "one_wave_v3_distribution": "一波流 v3 顶部出货",
     "swing_state": "走势三态 v4",
@@ -493,6 +494,7 @@ def trend_shape_readings(frames: tuple) -> dict[str, Any]:
     return {
         "_readings": {
             "swing_state": sws.swing_state(df_long.reset_index(drop=True))["state"],
+            "one_wave_v4": bsm.check_one_wave_v4(d).get("hit"),
             "one_wave_v3": ow.get("status") if ow.get("available") else None,
             "one_wave_v3_distribution": ow.get("distribution"),
             "trend": (an.get("trend") or {}).get("state"),
@@ -1584,11 +1586,18 @@ def _shape_checks(
         want,
         "有" if rd.get("one_wave_v3_distribution") else "无",
     )
-    if ow is not None:  # v0.553 一波流附加项 ⇔ 一波流 v3 判 one_wave
+    if (
+        ow is not None
+    ):  # v0.553 一波流附加项 ⇔ 一波流 v3 判 one_wave；v0.561 加 v4（live 提醒口径）
         out["one_wave_v3"] = (
             "有" if ow else "无",
             "有" if rd.get("one_wave_v3") == "one_wave" else "无",
         )
+        if "one_wave_v4" in rd:
+            out["one_wave_v4"] = (
+                "有" if ow else "无",
+                "有" if rd.get("one_wave_v4") else "无",
+            )
     if "swing_state" in rd:  # v0.553 走势三态 v2：整条标签（含转折）精确比对
         out["swing_state"] = (
             None if shape == "不确定" else shape,

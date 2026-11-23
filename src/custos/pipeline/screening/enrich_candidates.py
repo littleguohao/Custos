@@ -790,7 +790,11 @@ def _assemble_metrics(
         **{k: v for k, v in _wk.items() if k.startswith("weekly_")},
         "signals": ev["signals"],
         "non_one_wave": _b1s["non_one_wave"],
-        "one_wave_v3": _b1s["one_wave_v3"],  # v0.555 只作提醒
+        "one_wave_v3": _b1s[
+            "one_wave_v3"
+        ],  # v0.555 只作提醒（v0.561 起提醒改用 v4，v3 只落盘）
+        "one_wave_v4": _b1s["one_wave_v4"],
+        "swing_state": _b1s["swing_state"],  # v0.561 走势三态 v4，候选表证据列只展示
         "repair_signals": check_repair_signals(df, index_df, kdj_state=base["j"]),
         "five_day_entry": _b1s["five_day_entry"],
         "volume_sustain": _vol["volume_sustain"],

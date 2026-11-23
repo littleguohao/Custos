@@ -566,6 +566,7 @@
 | 2026-11-21 | v0.558 | review 修正：盲标复测图轴改合成日期、页面与 CSV 匿名（真实映射仅 summary）；止损迁移备份加微秒时间戳且同名拒覆盖；一波流 / 出货 watch 旧说明同步。研究工具与文档，live 判定不变 | review 2026-11-20 | TODO #121 / #131 |
 | 2026-11-21 | v0.559 | 1700 补数兜底：主管线前以 420 秒超时子进程先查交易日并补收一次飞书（失败记 WARN 仍跑主链）；「无/有交易 -0.91%」免 0AMV 标签；15:15 轮询各阶段落 feishu_postclose_reminder.log。live 零 LLM | owner 2026-11-21 | — |
 | 2026-11-23 | v0.560 | 校准图集可按模块只画指定副图（MODULES.chart_panes）；trend_shape 只显示 K 线和量（owner）。trend_shape__mining_v3 同参数重出，样本不变 | owner 2026-11-23 | TODO #121 |
+| 2026-11-23 | v0.561 | 一波流 v4（owner：连续 / 几日内 / ≥50%，之后不限）：check_one_wave_v4，live 提醒改用 v4，检出 12/19（v3 7/19）；走势三态 v4 进 detect，候选表证据列显示「走势：X」，只展示。b1_structure v3（bump），判定与技术分不变 | owner 2026-11-23 | TODO #121 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

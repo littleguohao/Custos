@@ -657,6 +657,43 @@ def _stop_ref(df, lookback: int = STOP_LOOKBACK) -> Optional[float]:
 
 
 # ---------------------------------------------------------------------------
+# 一波流 v4（owner 2026-11-23：连续、快速、大幅即一波流；之后 A 杀 / 震荡下跌 / 横盘都可能，不看回调）
+# ---------------------------------------------------------------------------
+OW4_BARS = 120  # 只看图上显示的 120 根
+OW4_FAST_BARS = 10  # 快速：≤10 根（「几个交易日内」）
+OW4_RISE_PCT = 50.0  # 大幅：最高价相对起点最低价涨 ≥50%
+OW4_MAX_PULLBACK = 0.10  # 连续：拉升途中收盘较途中最高收盘回撤 <10%，否则视为断开
+
+
+def check_one_wave_v4(df) -> dict[str, Any]:
+    """一波流 v4：末 ``OW4_BARS`` 根里存在一段 ≤``OW4_FAST_BARS`` 根、途中收盘回撤 <``OW4_MAX_PULLBACK``、
+    最高价较起点最低价涨 ≥``OW4_RISE_PCT``% 的拉升 ⇒ hit。只作提醒（live 风险列「一波流（提醒）」），尽力识别。
+    参数来源：owner 两份「一波流 有 / 无」标注 96 张（有 19）：检出 12/19、准确 12/29（v3 为 7/19、7/16）。"""
+    if df is None or len(df) < OW4_FAST_BARS + 1:
+        return {"available": False, "hit": False}
+    t = df.tail(OW4_BARS)
+    c, hi, lo = (t[k].astype(float).to_numpy() for k in ("close", "high", "low"))
+    n = len(c)
+    best: tuple[float, Optional[int], Optional[int]] = (0.0, None, None)
+    for i in range(n):
+        run = c[i]
+        for j in range(i + 1, min(n, i + OW4_FAST_BARS + 1)):
+            run = max(run, c[j])
+            if c[j] < run * (1 - OW4_MAX_PULLBACK):
+                break
+            if lo[i] > 0 and (g := (hi[j] / lo[i] - 1) * 100) > best[0]:
+                best = (g, i, j)
+    g, i0, j0 = best
+    return {
+        "available": True,
+        "hit": bool(g >= OW4_RISE_PCT),
+        "rise_pct": round(float(g), 2),
+        "start_bars_ago": None if i0 is None else int(n - 1 - i0),
+        "peak_bars_ago": None if j0 is None else int(n - 1 - j0),
+    }
+
+
+# ---------------------------------------------------------------------------
 # 走势三态 v4 候选（owner 2026-11-20：用于选股侧提示；未进 detect / live）
 # ---------------------------------------------------------------------------
 SW4_BARS = 120  # 只看图上显示的 120 根（owner：显示多少根就看多少根）
@@ -723,7 +760,8 @@ def check_swing_state(df) -> dict[str, Any]:
 def detect(df) -> dict[str, Any]:
     """规范入口（v0.223，TODO #67 B4）：结构三检测器打包门面。
 
-    返回 {non_one_wave, five_day_entry, liquidity, one_wave_v3} —— 同函数同输入逐位一致。
+    返回 {non_one_wave, five_day_entry, liquidity, one_wave_v3, one_wave_v4, swing_state} —— 同函数同输入逐位一致。
+    v0.561（owner 2026-11-23）：一波流提醒改用 v4；走势三态 v4 进候选表证据列（只展示）。
     v0.555（owner 2026-11-19）：one_wave_v3 进 live，**只作提醒**（候选表风险列标「一波流（提醒）」，不否决、不加减分）。
     repair_signals 吃 index_df/kdj_state 上下文，不进门面（设计稿勘误）；
     enrich_candidates 改为一次 detect 读字段。
@@ -733,4 +771,6 @@ def detect(df) -> dict[str, Any]:
         "five_day_entry": check_five_day_entry(df),
         "liquidity": check_liquidity(df),
         "one_wave_v3": check_one_wave_v3(df),
+        "one_wave_v4": check_one_wave_v4(df),
+        "swing_state": check_swing_state(df),
     }
