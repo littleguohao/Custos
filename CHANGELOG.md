@@ -565,6 +565,7 @@
 | 2026-11-20 | v0.557 | 走势三态 v4 候选（owner 判法：从整体到局部、转折看最高 / 最低点）：`b1_structure.check_swing_state`，段内直线 ±15%；交叉验证整条 52/96、后段 72/96。不进 detect、live 不变；🔄 v3 作废；复验图集 trend_shape__mining_v3 | owner 2026-11-20 | TODO #121 |
 | 2026-11-21 | v0.558 | review 修正：盲标复测图轴改合成日期、页面与 CSV 匿名（真实映射仅 summary）；止损迁移备份加微秒时间戳且同名拒覆盖；一波流 / 出货 watch 旧说明同步。研究工具与文档，live 判定不变 | review 2026-11-20 | TODO #121 / #131 |
 | 2026-11-21 | v0.559 | 1700 补数兜底：主管线前以 420 秒超时子进程先查交易日并补收一次飞书（失败记 WARN 仍跑主链）；「无/有交易 -0.91%」免 0AMV 标签；15:15 轮询各阶段落 feishu_postclose_reminder.log。live 零 LLM | owner 2026-11-21 | — |
+| 2026-11-23 | v0.560 | 校准图集可按模块只画指定副图（MODULES.chart_panes）；trend_shape 只显示 K 线和量（owner）。trend_shape__mining_v3 同参数重出，样本不变 | owner 2026-11-23 | TODO #121 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

@@ -125,6 +125,7 @@ MODULES: dict[str, dict[str, Any]] = {
         "fields": ["trend_shape.combo"],
         "params": [],
         "label_mode": "shape",
+        "chart_panes": ["vol"],  # owner 2026-11-23：只看 K 线和量
     },
     "b1_structure_v3": {  # 一波流 v3 候选（owner 2026-11-17）
         "defmod": "custos.core.factors.b1_structure",
@@ -2218,9 +2219,11 @@ function kcDraw(el) {
   el._kcBars = bars;
   ch.setDataLoader({ getBars: ({ callback }) => callback(bars, false) });
   ch.createIndicator({ name: 'CVOL', paneId: 'p_vol' });
-  ch.createIndicator({ name: 'CJ', paneId: 'p_j' });
-  ch.createIndicator({ name: 'CMACD', paneId: 'p_macd' });
-  if (p.rsi) ch.createIndicator({ name: 'CRSI', paneId: 'p_rsi' });  // v0.531：RD 校准用
+  const PN = p.panes;  // v0.560：按模块只画指定副图（缺省 = 全画）
+  const want = k => !PN || PN.includes(k);
+  if (want('j')) ch.createIndicator({ name: 'CJ', paneId: 'p_j' });
+  if (want('macd')) ch.createIndicator({ name: 'CMACD', paneId: 'p_macd' });
+  if (p.rsi && want('rsi')) ch.createIndicator({ name: 'CRSI', paneId: 'p_rsi' });  // v0.531：RD 校准用
   const ts = d => Date.parse(d + 'T15:00:00+08:00');
   const first = bars[0].timestamp;
   (p.marks || []).forEach(m => {
@@ -2390,6 +2393,11 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
                     chart_data[str(row[0])] = {
                         **chart_payload(fr[1], title),
                         "code": row[2],
+                        **(
+                            {"panes": MODULES[rep["module"]]["chart_panes"]}
+                            if MODULES.get(rep["module"], {}).get("chart_panes")
+                            else {}
+                        ),
                         "marks": platform_marks(fr[1])
                         if rep["module"] in _MARK_MODULES
                         else (

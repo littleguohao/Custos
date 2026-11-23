@@ -750,3 +750,13 @@ def test_retest_blind_and_self_agreement_v0556(tmp_path):
     res = cp.ingest(out)
     assert res["mode"] == "retest"
     assert res["self_agreement"]["形态整条"] == {"一致": len(rr) - 2, "不一致": 1}
+
+
+def test_trend_shape_chart_only_kline_and_volume(tmp_path):
+    """owner 2026-11-23：形态图集只画 K 线和量（不画 J / MACD / RSI）。"""
+    t = TestTrendShapeV0548()
+    _rep, d = t._rep(tmp_path)
+    cd = __import__("json").loads((d / "chart_data.json").read_text(encoding="utf-8"))
+    assert all(v.get("panes") == ["vol"] for v in cd.values())
+    g = (d / "gallery.html").read_text(encoding="utf-8")
+    assert "want('macd')" in g or "kc" not in g
