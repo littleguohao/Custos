@@ -344,6 +344,7 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 - 09:05：复用08:50采集结果，执行质量门、决策、渲染、校验和投递（每日执行；非交易日出休市版：跳过门控/决策链，沿用最近交易日口径，省略 §4）
 - 14:45：采集尾盘行情，运行严格持仓检查并投递尾盘报告
 - 15:15：单个补数任务先接收入站回复（按**消息发送日**归属登记，|0AMV|>±15% 拒自动登记转人工；「无/有交易」短语外仅剩一个纯数字时按 0AMV），再检查当天 confirmed 且未 superseded 的 0AMV 与成交/no_trades 记录；「有交易」由纯 Python OAuth 直连投资账本 MCP，PC `lastSyncTime` 须覆盖当日 15:00，标准 CSV 缓存后经 `incremental_ledger` 幂等入库，同日不得与券商表格混用；已齐则不提醒不轮询，缺项只提醒一次，随后每 10 分钟接收入站回复并复查，两项收齐立即停止本轮，最多 11 轮至 17:00 截止并留痕。各阶段即时追加 `artifacts/logs/feishu_postclose_reminder.log`，异常留最后步骤。无常驻轮询（0AMV 录入：`market_timing_collector --amv <值>`，录入即确认；超 ±15% 需 `--confirm-extreme` 二次确认）
+- 16:50：投资账本自动同步（`tzzb_auto_ingest.py`，无聊天、无看板）：先检查交易日，再要求 lastSyncTime 覆盖当日 15:00；有成交才写标准 CSV 并经 incremental_ledger 幂等入库，零成交不写无交易确认，未覆盖收盘只返回 waiting_sync；不能触发 PC 同步，每日插件调用消耗 credits
 - 17:00：主管线前先以独立 420 秒超时子进程检查交易日并补收一次飞书；补收异常记 WARN 和 artifact step，主链仍运行并由既有硬门控判定。随后运行确定性盘后流水线和最终复盘；18:00 独立运行每日选股链
 - 周六 10:07：周度复盘
 - 月末最后一个交易日数据确认后：月度复盘
@@ -352,12 +353,13 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 
 ### Kimi Work 无聊天执行（v0.489）
 
-以下任务直接运行 `scripts/automation/deterministic_pipeline.py`，不再以 Agent 聊天包装确定性命令；无聊天窗口、无模型编排 token、无逐日历史上下文，运行日志与结构化结果仍保留：
+以下报告管线直接运行 `scripts/automation/deterministic_pipeline.py`，16:50 同步任务直接运行 `tzzb_auto_ingest.py`；均不再以 Agent 聊天包装确定性命令，无聊天窗口、无模型编排 token、无逐日历史上下文，运行日志与结构化结果仍保留：
 
 | 时点 | 活动任务 ID | 行为 |
 |---|---|---|
 | 每日 09:05 | `automation_f4000a0c-673e-4fe9-9fa9-471ed632a45e` | `run_0905` + 盘前日报飞书投递 |
 | 交易日 14:45 | `automation_4b658250-ee41-405b-a78e-b032d0f8e78f` | `run_1445` + 尾盘报告飞书投递；日历门退出码 3 静默跳过 |
+| 交易日 16:50 | `automation_214f37e1-33f2-417f-8919-82a7f6b7c79e` | `tzzb_auto_ingest` 投资账本成交幂等入库；日历与 lastSyncTime 双门，无聊天、无看板 |
 | 交易日 17:00 | `automation_44f0790b-93f4-48f4-a7ec-1e366bb8fdde` | `run_1700` + 最终复盘飞书投递；日历门退出码 3 静默跳过 |
 | 交易日 18:00 | `automation_d5f253a6-5b04-4195-8149-6c81d214d317` | `run_1800` + 当日日志/候选表验收；输出 A/B/C/D 与降级/告警，不推飞书 |
 | 每周五 14:35 | `automation_a0d643ef-60f3-4fa0-a042-b9f20a01d9ea` | 本地通达信交易日历 `--require-refresh` |

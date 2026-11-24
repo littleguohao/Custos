@@ -143,6 +143,9 @@ uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 �
 - **17:00 飞书预补收**（v0.559）：主管线前独立超时子进程先查交易日再补收一次；补收异常只 WARN，
   主链仍受 confirmed 0AMV 硬门控。合并回复「无/有交易」外仅剩一个纯数字可按 0AMV；
   15:15 轮询阶段日志落 `artifacts/logs/feishu_postclose_reminder.log`，不得记凭据或聊天正文。
+- **16:50 投资账本自动同步**（v0.579）：`automation_214f37e1-33f2-417f-8919-82a7f6b7c79e`
+  交易日检查 lastSyncTime，覆盖 15:00 且有成交才走 `incremental_ledger`；零成交不写 no_trades，
+  未覆盖仅 waiting_sync。不能触发 PC 同步；每个交易日调用插件消耗 credits，无聊天、无看板。
 
 ## 4. 治理纪律（全部有测试钉着，违反必红）
 
