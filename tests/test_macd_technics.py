@@ -304,9 +304,9 @@ def test_divergence_v2_bottom_hit_shape():
     r = mt.check_macd_divergence_v2(_ohlcv(c))
     bd = r["bottom_divergence"]
     assert len(bd.get("groups", [])) == 2
-    if bd["hit"]:
-        a, b = bd["groups"]
-        assert b["price"] < a["price"] and abs(b["bar"]) <= abs(a["bar"]) * 0.9
+    assert bd["hit"] is True
+    a, b = bd["groups"]
+    assert b["price"] < a["price"] and abs(b["bar"]) <= abs(a["bar"]) * 0.9
 
 
 def test_bar_waves_split_group_with_two_peaks_v0566():
@@ -316,6 +316,70 @@ def test_bar_waves_split_group_with_two_peaks_v0566():
     h = [1, 1, -1, -3, -5, -3, -1, -2, -4, -2, -1, 1, 1]  # 一组绿柱，两个波峰（-5、-4）
     w = mt.macd_bar_waves(h, -1)
     assert len(w) == 2 and 4 in w[0] and 8 in w[1]
+
+
+def test_bar_waves_keep_near_peaks_separated_by_valley():
+    """峰距 ≤2 但峰间已有明显谷底，仍是两波；不得因距离近而误并。"""
+    from custos.core.factors import macd_technics as mt
+
+    waves = mt.macd_bar_waves([-1, -5, -1, -4, -1], -1)
+    assert len(waves) == 2 and 1 in waves[0] and 3 in waves[1]
+
+
+def test_bar_waves_merge_only_contiguous_equal_plateau():
+    from custos.core.factors import macd_technics as mt
+
+    waves = mt.macd_bar_waves([-1, -5, -5, -1], -1)
+    assert len(waves) == 1 and waves[0] == [0, 1, 2, 3]
+
+
+def _v2_with_controlled_hist(monkeypatch, hist, close):
+    """固定 MACD 柱序列，单独钉住 v2 的波比较，不依赖价格序列碰巧生成某形态。"""
+    import numpy as np
+    from custos.core.factors import macd_technics as mt
+
+    assert len(hist) == len(close) == 60
+
+    def fake_macd(_close):
+        zeros = pd.Series(np.zeros(60))
+        return zeros, zeros, pd.Series(hist, dtype=float)
+
+    monkeypatch.setattr("custos.core.indicators.macd_series", fake_macd)
+    return mt.check_macd_divergence_v2(_ohlcv(close))
+
+
+def test_v2_bottom_divergence_positive_controlled_waves(monkeypatch):
+    hist = [1.0] * 44 + [-1, -3, -2] + [1.0] * 10 + [-1, -2, -1]
+    close = [20.0] * 60
+    close[45], close[58] = 10.0, 9.0  # 后绿波价更低、最长柱更短
+    result = _v2_with_controlled_hist(monkeypatch, hist, close)
+    assert result["bottom_divergence"]["hit"] is True
+
+
+def test_v2_top_divergence_positive_controlled_waves(monkeypatch):
+    hist = [-1.0] * 34 + [1, 3, 2] + [-1.0] * 10 + [1, 2, 1] + [-1.0] * 10
+    close = [20.0] * 60
+    close[35], close[48] = 30.0, 31.0  # 后红波价更高、最长柱更短
+    result = _v2_with_controlled_hist(monkeypatch, hist, close)
+    assert result["top_divergence"]["hit"] is True
+
+
+def test_v2_three_peaks_positive_controlled_waves(monkeypatch):
+    hist = (
+        [-1.0] * 20
+        + [1, 3, 1]
+        + [-1.0] * 8
+        + [1, 2, 1]
+        + [-1.0] * 8
+        + [1, 1, 1]
+        + [-1.0] * 15
+    )
+    close = [20.0] * 60
+    close[21], close[32], close[42] = 30.0, 31.0, 32.0
+    result = _v2_with_controlled_hist(monkeypatch, hist, close)
+    three = result["three_peaks"]
+    assert three["hit"] is True
+    assert [group["price"] for group in three["groups"]] == [30.0, 31.0, 32.0]
 
 
 def test_live_divergence_uses_v2_v0567():

@@ -244,8 +244,8 @@
       ]
     },
     "macd_technics": {
-      "version": 2,
-      "source_digest": "3e88ebc02db8760b12ea",
+      "version": 3,
+      "source_digest": "ed2596af3ff274744865",
       "history": [
         {
           "version": 1,
@@ -266,6 +266,11 @@
           "version": 2,
           "date": "2026-11-23",
           "change": "live 底背离 / 顶背离 / 三打白骨精改用 v2（同色柱按波比较；owner 复验 35/35）"
+        },
+        {
+          "version": 3,
+          "date": "2026-11-24",
+          "change": "MACD v2 近距双峰有谷底时保留，连续同值平台峰才合并"
         }
       ]
     },

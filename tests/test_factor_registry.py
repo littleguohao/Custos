@@ -733,7 +733,7 @@ class TestCharacterizationSnapshot:
         "j_low_gate": "fa66b2d075d5",  # v0.227 更新（ctx 双形态入口接管）
         "kdj_j": "fc95f211968d",
         "low_vol": "28cd5e0cd2b8",
-        "macd_technics": "01e95bd39188",  # v0.567 背离三项改 v2（owner 2026-11-23）
+        "macd_technics": "d398364c570b",  # v0.568 近距双峰谷底切分修复（owner 2026-11-24）
         "main_rally_factor": "75fdb6c812e8",
         "mcap": "75fe0399258d",  # 2026-09-13 改 hermetic 夹具快照（股本钉死 300亿，见下方 test 内注释）
         "momentum": "841b02900b08",

@@ -573,6 +573,7 @@
 | 2026-11-23 | v0.565 | MACD 背离 v2 候选（owner：同色柱组的最长柱比较，当根须在绿柱组才判底背离）：check_macd_divergence_v2 + calib 模块 macd_technics_v2，图上标比较的柱组；owner 7 张标注上一致 7/7。未接 live | owner 2026-11-23 | TODO #123 |
 | 2026-11-23 | v0.566 | MACD 背离 v2 比较单位改为「波」（owner：同组绿柱有多个波峰就在波之间比）：macd_bar_waves，更短门槛 0；owner 16 张一致 15/16；新图集 macd_technics_v2__mining_v2。未接 live | owner 2026-11-23 | TODO #123 |
 | 2026-11-23 | v0.567 | MACD 底背离 / 顶背离 / 三打白骨精 live 改用 v2（owner：绿柱和绿柱比、红柱和红柱比，同组多波峰按波比；复验 35/35）；分值 +8 / −8 与三打白骨精否决不变，v1 留 *_v1 备查。macd_technics v2（bump），技术分与受限名单会变 | owner 2026-11-23 | TODO #123 |
+| 2026-11-24 | v0.568 | MACD v2 切波边界修复（review）：峰距 ≤2 且峰间有更低谷底的矮峰不再被大峰吞掉；仅连续同值平台峰合并；补底/顶背离、三打白骨精受控正例与双峰/平台钉测。macd_technics v3（bump），背离名单会变 | review 2026-11-24 | TODO #123 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

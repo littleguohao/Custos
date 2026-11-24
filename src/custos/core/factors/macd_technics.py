@@ -184,17 +184,36 @@ def macd_bar_waves(hist, color: int) -> list[list[int]]:
             continue
         a = np.abs(h[idx])
         m = len(a)
-        pk = [
+        pk_set = {
             k
             for k in range(m)
             if a[k] > 0 and a[k] == a[max(0, k - f) : k + f + 1].max()
-        ]
-        merged: list[int] = []
-        for k in pk:  # 平台上相邻的同值峰只留一个
-            if merged and k - merged[-1] <= f:
-                if a[k] > a[merged[-1]]:
-                    merged[-1] = k
+        }
+        # 左右 2 根窗会吞掉靠近大峰的矮峰；若相邻局部峰之间已有更低谷底，补回候选。
+        for k in range(1, m - 1):
+            if k in pk_set or a[k] <= 0:
                 continue
+            if not (
+                a[k] >= a[k - 1]
+                and a[k] >= a[k + 1]
+                and (a[k] > a[k - 1] or a[k] > a[k + 1])
+            ):
+                continue
+            for prev in tuple(pk_set):
+                lo, hi = sorted((prev, k))
+                if not 2 <= hi - lo <= f:
+                    continue
+                if a[lo + 1 : hi].min() < min(a[lo], a[hi]):
+                    pk_set.add(k)
+                    break
+        pk = sorted(pk_set)
+        merged: list[int] = []
+        for k in pk:
+            # 只合并连续同值平台峰；近距两峰之间已有谷底时必须保留，否则会把两波并成一波。
+            if merged:
+                prev = merged[-1]
+                if a[k] == a[prev] and np.all(a[prev : k + 1] == a[k]):
+                    continue
             merged.append(k)
         if len(merged) <= 1:
             out.append(list(idx))
