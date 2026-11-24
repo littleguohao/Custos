@@ -168,7 +168,7 @@
     },
     "distribution": {
       "version": 1,
-      "source_digest": "65236fb0c9e6a75dc42c",
+      "source_digest": "86a11be8f78b15d9a298",
       "history": [
         {
           "version": 1,
@@ -184,6 +184,11 @@
           "version": 1,
           "date": "2026-11-24",
           "refactor": "①② v2 候选次高点口径"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-24",
+          "refactor": "候选口径调整（owner 2026-11-24，未接 live）"
         }
       ]
     },
@@ -575,7 +580,7 @@
     },
     "volume_detectors": {
       "version": 1,
-      "source_digest": "4b09ec990f067d9fbd91",
+      "source_digest": "5e523305f254fe7f85ea",
       "history": [
         {
           "version": 1,
@@ -586,6 +591,11 @@
           "version": 1,
           "date": "2026-11-24",
           "refactor": "新增底部放量合并候选 check_base_volume（未接 live）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-24",
+          "refactor": "候选口径调整（owner 2026-11-24，未接 live）"
         }
       ]
     },

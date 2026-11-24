@@ -274,6 +274,7 @@ DIST2_LOOKBACK = (
 )
 DIST2_PREV_YANG = 5  # 阴线量须大于前 5 根里最大的阳线量（owner：只跟前面的阳线比；一字板收 = 开也算阳线）
 DIST2_VOL_MA = 1.5  # 且 ≥ 前 20 日均量 1.5 倍（过滤缩量区的小阴线）
+DIST2_MAX60 = 0.6  # 且 ≥ 前 60 根最大量 × 0.6（owner 2026-11-24：温和放量不算；owner 认的放量都在 0.84~0.96，存疑的在 0.20~0.40）
 DIST2_PIVOT = 2  # 高点 = 最高价分型（左右各 2 根）
 DIST2_NEAR_HIGH = 2  # 阴线距该高点 ≤2 根（顶部 / 次高点当天或前后）
 DIST2_POS = 0.7  # 次高点 ≥ 近 60 根最高 × 0.7（更低的反弹高点不算）
@@ -292,7 +293,7 @@ def _top_or_second_high(h, low, q: int) -> Optional[str]:
 def check_top_bear_volume(df) -> dict[str, Any]:
     """顶部 / 次高点放量阴线（①② v2 候选，owner 2026-11-24；未接 live）。
 
-    近 DIST2_LOOKBACK 根内任一根 t：阴线（收 < 开），量 > 前 DIST2_PREV_YANG 根阳线（收 ≥ 开）的最大量且 ≥ 20 日均量 × DIST2_VOL_MA，
+    近 DIST2_LOOKBACK 根内任一根 t：阴线（收 < 开），量 > 前 DIST2_PREV_YANG 根阳线（收 ≥ 开）的最大量、≥ 20 日均量 × DIST2_VOL_MA、≥ 前 60 根最大量 × DIST2_MAX60，
     t 前后 DIST2_NEAR_HIGH 根内有最高价分型高点，且它是本轮顶部或次高点（见 _top_or_second_high）。
     假阴真阳（收 < 开但收 > 前收）：顶部区间算阴量、底部区间算阳量（owner）。顶部区间 = 该高点是次高点（低于它之前 60 根最高），
     或走势三态（截至 t）最后一段是上涨（owner：走势三态与 N 型结构位置配合）。不要求跌幅、不要求阴线前加速（🔄 原 ①② 的大阴 / 加速 / 前日缩量）。"""
@@ -306,6 +307,8 @@ def check_top_bear_volume(df) -> dict[str, Any]:
     bars: list[dict[str, Any]] = []
     for t in range(max(61, n - DIST2_LOOKBACK), n):
         if c[t] >= o[t] or v[t] < v[t - 20 : t].mean() * DIST2_VOL_MA:
+            continue
+        if v[t] < v[max(0, t - 60) : t].max() * DIST2_MAX60:
             continue
         yang = [v[j] for j in range(t - DIST2_PREV_YANG, t) if c[j] >= o[j]]
         if yang and v[t] <= max(yang):
