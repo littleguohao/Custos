@@ -8,7 +8,7 @@
 
 ## 现状
 
-- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 92 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
+- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 96 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
   **P1 live 展示 99 个**（1800 证据标注，不进判定）、P2 研究 67 个。
 - **定义校准：0 / 233**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
 - **清单未覆盖**（需在逐因子校准时一并核）：①函数体内联常量（KDJ 9/3/3、BBI 周期、20 日相对强度窗口等）；
@@ -251,6 +251,10 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
   ⇒ 背离 v2 定义校准通过；**v0.567 替换 live**（owner 2026-11-23）：check_macd_technics 的底背离 / 顶背离 / 三打白骨精改由 v2 产出，分值与否决不变，v1 结果留 `*_v1`；macd_technics v2（bump）。
 - **v0.568 review 边界修复**：原左右 2 根窗会吞掉靠近大峰的矮峰，峰距 ≤2 且峰间已有更低谷底时补回候选；只合并连续同值平台峰。补底 / 顶背离、三打白骨精受控正例及近距双峰 / 平台钉测；原 35/35 未覆盖此边界。macd_technics v3（bump）。
   🔄 v0.569 复核：v0.568 补回矮峰不看谷底深度，5% 小抖动也切波，owner 标注 51 张一致 50 → 47（#13 / #16 顶背离、#27 三打白骨精变错）。加 `MACD2_WAVE_VALLEY=0.7`（峰间谷底 ≤0.7×较矮峰才补回）：回到 50/51，近距深谷双峰仍切开（0.5 / 0.8 同为 50/51）。macd_technics v4（bump）。
+- **底部放量合并（owner 2026-11-24）**：`ignition__mining_v1` labels10.csv 的点火 36 张作废——图集问的是「出现放量收阳的启动 K」，没说检测器在近 10 根里找、也没标放量 K，owner 按当根判（错 13 张都是点火 K 在 3~9 根前）。
+  owner 定义：放量点火 / 龙头量能 / 底部巨量说的都是「底部放量」，评价放量之后回调的量能状态，与当根无关；N 取 10~15 根；底部 = N 型结构的阶段低点；按程度用 1~3 星。
+  候选（v0.570）：`volume_detectors.check_base_volume`，近 15 根内、从阶段低点（前 20 根最低收盘）起 5 根内的放量：⭐ 单根放量阳线 / ⭐⭐ 连续 3 根 ≥ 地量 1.7 倍 / ⭐⭐⭐ 单根 ≥ 250 根均量 2 倍，取最高档。挖掘 B 样本点：⭐ 2.7%、⭐⭐ 17.4%、⭐⭐⭐ 9.2%。
+  未接 live（live 仍是三项叠加 +4 / +6 / +10）。图集 `base_volume__mining_v1`；旧图集隐藏点火与 B1 点火（依赖点火，合并后重定），只留回调缩量。
 - **纯数值判定退出人工校准（v0.563，owner 2026-11-23）**：MACD 区间（DIF / DEA 是否在 0 轴上 + 柱体放长 / 缩短 / 转绿）只是数值比较，看图只能核实现，改由钉测管四态；`macd_technics__mining_v1` 的 24 张区间图隐藏，MODULES 去掉该字段。
 - **owner 定（2026-11-23）**：一波流 = ①连续 ②快速（几个交易日内）③大幅（≥50%），之后 A 杀或震荡下跌 / 横盘都算，尽力识别；走势只识别买点前最近 1~2 段，尽力识别。
   落地（v0.561）：`b1_structure.check_one_wave_v4`（120 根内 ≤10 根、途中收盘回撤 <10%、最高价较起点最低价 ≥50%），live 提醒改用 v4（风险列「一波流（提醒）」，不否决不计分）；
@@ -319,7 +323,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `technical_monitor` | `TREND_MIN_BARS` | 60 | 趋势判定最少 K 线数 | - | 未校准 |
 | `technical_monitor` | `QFQ_LOAD_BARS` | 100000 | - | - | 未校准 |
 
-### P0（92 个参数）
+### P0（96 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -403,6 +407,10 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `volume_detectors` | `BOTTOM_VOL_RATIO` | 2.0 | 待回测参数：底部巨量（≥250日均量×2，CZ §14.6） | candidate | 未校准 |
 | `volume_detectors` | `BOTTOM_NO_NEW_LOW_DAYS` | 20 | 待回测参数：不再创新低观察窗口 | candidate | 未校准 |
 | `volume_detectors` | `CZ_MIN_BARS` | 250 | CZ 三低/底部巨量最少K线数（不足→available=false） | candidate | 未校准 |
+| `volume_detectors` | `BV_WINDOW` | 15 | - | candidate | 候选（owner 2026-11-24） |
+| `volume_detectors` | `BV_PIVOT` | 3 | 阶段低点 = 收盘分型低点（左右各 3 根，同 N 结构 / OW3_PIVOT 口径；右侧不足 3 根时用已有的） | candidate | 候选（owner 2026-11-24） |
+| `volume_detectors` | `BV_NEAR_LOW` | 5 | 放量起点距阶段低点 ≤5 根（放量从 N 型结构的低点起来） | candidate | 候选（owner 2026-11-24） |
+| `volume_detectors` | `BV_STAGE_LOOKBACK` | 20 | 阶段低点 = 前 20 根内最低收盘（且右侧 BV_PIVOT 根不更低）；只用左右 3 根时近七成样本点都算「底部」 | candidate | 候选（owner 2026-11-24） |
 | `wave_type` | `WAVE_LOOKBACK` | 60 | 拉升波分析窗口（日） | active；R2 | 未校准 |
 | `wave_type` | `WAVE_MIN_BARS` | 40 | 拉升波分类最少K线数 | active；R2 | 未校准 |
 | `wave_type` | `WAVE_LIMIT_UP_PCT` | 9.8 | 待回测参数：涨停/接近涨停判定（单日涨幅%） | active；R2 | 未校准 |

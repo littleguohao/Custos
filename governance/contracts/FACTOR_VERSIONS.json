@@ -560,12 +560,17 @@
     },
     "volume_detectors": {
       "version": 1,
-      "source_digest": "a1b10bb0b54484412d09",
+      "source_digest": "4b09ec990f067d9fbd91",
       "history": [
         {
           "version": 1,
           "date": "2026-11-03",
           "change": "初始版本（定义校准前基线，TODO #121）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-24",
+          "refactor": "新增底部放量合并候选 check_base_volume（未接 live）"
         }
       ]
     },

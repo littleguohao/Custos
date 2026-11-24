@@ -178,6 +178,19 @@ MODULES: dict[str, dict[str, Any]] = {
             "CZ_MIN_BARS",
         ],
     },
+    "base_volume": {  # 底部放量合并候选（owner 2026-11-24：点火 / 龙头量能 / 底部巨量合并，按程度 1~3 星）
+        "defmod": "custos.core.factors.volume_detectors",
+        "eval": "base_volume",
+        "chart_panes": ["vol"],
+        "fields": ["base_volume.l1", "base_volume.l2", "base_volume.l3"],
+        "params": [
+            "BV_WINDOW",
+            "BV_NEAR_LOW",
+            "BV_STAGE_LOOKBACK",
+            "LEADER_VOL_RATIO",
+            "BOTTOM_VOL_RATIO",
+        ],
+    },
     "ignition": {
         "defmod": "custos.core.factors.ignition",
         "fields": ["ignition.hit", "pullback_shrink.hit", "b1_ignition.hit"],
@@ -441,6 +454,13 @@ def evaluate(
         with patched(defmod, overrides):
             an = {"macd_v2": mtm.check_macd_divergence_v2(df.reset_index(drop=True))}
         return {f: field_value(an, f) for f in fields}
+    if spec is not None and spec["eval"] == "base_volume":
+        from custos.core.factors import volume_detectors as vdm  # noqa: PLC0415
+
+        with patched(defmod, overrides):
+            r = vdm.check_base_volume(df.reset_index(drop=True))
+        lv = int(r.get("level") or 0) if r.get("available") else None
+        return {f: (None if lv is None else lv == int(f[-1])) for f in fields}
     if spec is not None and spec["eval"] == "trend_shape":
         rd = trend_shape_readings(frames)
         return {"trend_shape.combo": _shape_combo(rd), **rd}
@@ -1271,6 +1291,9 @@ def _csv_rows(rep: dict[str, Any], frames: dict) -> list[list[Any]]:
 #: 每个字段「检测器在测什么」的中文说明（v0.516，owner 2026-11-13：放在每张图最上方）。
 #: 只说定义，不说好坏；出处见各检测器 docstring。键 = summary 里的字段名。
 FIELD_DEF: dict[str, str] = {
+    "base_volume.l1": "底部放量 ⭐（单根放量阳线）：近 15 根内，从阶段低点（前 20 根最低收盘）起 5 根内出现一根放量阳线（量 ≥ 前 5 日均量 1.5 倍、涨 ≥3%），且没有更强的放量。评价的是量能状态，当根形态不管。图上标阶段低点与放量 K",
+    "base_volume.l2": "底部放量 ⭐⭐（连续放量）：近 15 根内，从阶段低点起 5 根内连续 3 根量都 ≥ 之前 20 根最低日量 1.7 倍，且没有巨量。当根形态不管。图上标阶段低点与放量 K",
+    "base_volume.l3": "底部放量 ⭐⭐⭐（巨量）：近 15 根内，从阶段低点起 5 根内出现一根量 ≥ 近 250 根均量 2 倍的巨量。当根形态不管。图上标阶段低点与放量 K",
     "macd_v2.bottom_divergence.hit": "MACD 底背离 v2（绿柱和绿柱比）：当根在绿柱组，本组股价创新低（低于上一组绿柱时的最低收盘），本波最长绿柱比上一波短（同一组绿柱里有多个柱长波峰时按波比）。图上紫线标两波的最低价",
     "macd_v2.top_divergence.hit": "MACD 顶背离 v2（红柱和红柱比）：最近两组红柱，后一波股价创新高，最长红柱比前一波短（同组多波峰按波比）。图上紫线标两波的最高价",
     "macd_v2.three_peaks.hit": "三打白骨精 v2：最近三波红柱，股价高点逐波抬高，最长红柱逐波缩短。图上紫线标三波的最高价",
@@ -2361,6 +2384,38 @@ def macd_v2_marks(df: Any, field: str) -> list[dict[str, Any]]:
     ]
 
 
+def base_volume_marks(df: Any) -> list[dict[str, Any]]:
+    """底部放量：阶段低点一条线 + 放量 K（起止）一条线，标星级。"""
+    from custos.core.factors import volume_detectors as vdm  # noqa: PLC0415
+
+    r = vdm.check_base_volume(df.reset_index(drop=True))
+    if not r.get("hit"):
+        return []
+    ds = [str(x)[:10] for x in df["date"]]
+    hi = df["high"].astype(float).to_numpy()
+    p, st, en = r["stage_low_i"], r["start"], r["end"]
+    return [
+        {
+            "kind": "M",
+            "price": round(r["stage_low"], 2),
+            "date": ds[p],
+            "start": ds[p],
+            "end": ds[en],
+            "label": "阶段低点",
+            "ongoing": False,
+        },
+        {
+            "kind": "M",
+            "price": round(float(hi[st : en + 1].max()), 2),
+            "date": ds[en],
+            "start": ds[st],
+            "end": ds[en],
+            "label": f"放量{r['stars']}",
+            "ongoing": False,
+        },
+    ]
+
+
 def kc_assets() -> Optional[str]:
     """KLineChart 内联脚本（校验 sha256；缺失 / 不符 ⇒ None，图集退回静态 SVG）。"""
     import hashlib  # noqa: PLC0415
@@ -2463,7 +2518,11 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
                             else (
                                 macd_v2_marks(fr[1], f)
                                 if rep["module"] == "macd_technics_v2"
-                                else []
+                                else (
+                                    base_volume_marks(fr[1])
+                                    if rep["module"] == "base_volume"
+                                    else []
+                                )
                             )
                         ),
                     }
