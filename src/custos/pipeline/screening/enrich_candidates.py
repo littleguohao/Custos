@@ -293,7 +293,7 @@ J_GATE_REQUIRED_DEFAULT = (
 # 排除了做多区间的突破赢家)。故仅作**描述性证据**落盘、绝不作买入依据、不驱动分层。参数下方保留。
 
 # --- MACD 十大技术（macd十大技术精讲）待回测参数 ---
-# v0.86（因子化批 A）：MACD_SWING_FRACTAL / MACD_DIV_LOOKBACK / MACD_OVEREXT_PCTL /
+# v0.86（因子化批 A）：MACD_SWING_FRACTAL / MACD_DIV_LOOKBACK / MACD_OVEREXT_PCTL（v0.571 删）/
 # MACD_OVEREXT_WIN 随 check_macd_technics 迁入 factors/macd_technics.py（常量跟因子走）。
 
 # --- 正交因子（非量价形态）待回测参数 ---

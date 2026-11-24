@@ -48,8 +48,6 @@ FACTOR: dict[str, Any] = {
 # --- MACD 十大技术（macd十大技术精讲）待回测参数 ---
 MACD_SWING_FRACTAL = 2  # 摆动高/低点分型：左右各 N 根确认
 MACD_DIV_LOOKBACK = 60  # 背离观察窗口（日）
-MACD_OVEREXT_PCTL = 0.9  # 开口/空间拐离：|DIF| 近 120 日分位上限
-MACD_OVEREXT_WIN = 120  # 拐离分位窗口（日）
 
 
 def _macd_zone_state(dif_last: float, dea_last: float, h0: float, h1: float):
@@ -144,20 +142,24 @@ def _macd_bottom_divergence(close, d, swing_lo, n: int) -> dict[str, Any]:
     return bottom_div
 
 
-def _macd_overextended(d, n: int, h0: float, dif_last: float) -> dict[str, Any]:
-    """开口/空间拐离：|DIF| 分位 + 柱体仍在。"""
-    win = min(MACD_OVEREXT_WIN, n)
-    abs_dif = [abs(float(x)) for x in d[-win:]]
-    pctl = (
-        float(sum(1 for x in abs_dif if x <= abs_dif[-1]) / len(abs_dif))
-        if win >= 20
-        else None
+def _macd_overextended(d, e, h) -> dict[str, Any]:
+    """乖离过大（qn/01_general.md §二「乖离过大 = 失去支撑力量，追高易站岗」；owner 2026-11-24 定义）：
+    MACD 双线还在上涨（DIF、DEA 都比昨天高），但红柱开始滞涨或下降（当根红柱 ≤ 昨天），
+    且双线已经超过红柱范围（DEA 高于当根红柱顶端；DIF > DEA，故两线都在柱顶之上）。纯数值判定，钉测管。
+    🔄 v0.571 前是「|DIF| 近 120 根分位 ≥90% 且柱体与 DIF 同号」，绿柱也会命中，与原文不符，已停用。"""
+    if len(h) < 2:
+        return {"hit": False}
+    d0, d1, e0, e1, h0, h1 = (
+        float(x) for x in (d[-1], d[-2], e[-1], e[-2], h[-1], h[-2])
     )
+    lines_up = d0 > d1 and e0 > e1
+    bar_stall = 0 < h0 <= h1
+    lines_above_bar = e0 > h0
     return {
-        "hit": bool(
-            pctl is not None and pctl >= MACD_OVEREXT_PCTL and h0 * dif_last > 0
-        ),  # “下面还有柱体”＝柱体与 DIF 同号
-        "dif_abs_percentile": round(pctl, 3) if pctl is not None else None,
+        "hit": bool(lines_up and bar_stall and lines_above_bar),
+        "lines_up": bool(lines_up),
+        "bar_stall": bool(bar_stall),
+        "lines_above_bar": bool(lines_above_bar),
     }
 
 
@@ -365,7 +367,7 @@ def check_macd_technics(df, df_long=None) -> dict[str, Any]:
     - bottom_divergence / top_divergence / three_peaks：v0.567（owner 2026-11-23）起用 v2
       （``check_macd_divergence_v2``：同色柱按波比较，绿柱和绿柱比、红柱和红柱比）；🔄 原 v1（收盘 2 根分型摆点 + DIF 比较）
       owner 标注 7 张错 5 张已停用，结果只留在 ``*_v1`` 字段备查。
-    - overextended 开口/空间拐离：|DIF| 处于近 120 日 90%+ 分位且柱体仍在。
+    - overextended 乖离过大（v0.571 owner 定义）：双线还在上涨，红柱滞涨或下降，且双线已超过红柱范围。
 
     ``df_long``（v0.60 修复，2026-08-16 review 发现）：周/月红柱（wm_bar_grow）
     的 EMA26 需要 ≥40 根月线 ⇒ ~800 根日线，而生产 df 恒为 260 根（~13 根月线）
@@ -400,8 +402,8 @@ def check_macd_technics(df, df_long=None) -> dict[str, Any]:
     three_peaks = v2.get("three_peaks") or {"hit": False}
     bottom_div = v2.get("bottom_divergence") or {"hit": False}
 
-    # 开口/空间拐离：|DIF| 分位 + 柱体仍在
-    overextended = _macd_overextended(d, n, h0, dif_last)
+    # 乖离过大（owner 2026-11-24）：双线上涨 + 红柱滞涨 / 下降 + 双线超过红柱
+    overextended = _macd_overextended(d, dea.to_numpy(), h)
 
     # v0.60（2026-08-14，owner）：MACD 位置/柱体加分项的判定字段。
     # above_water=白黄线水上（DIF>0 且 DEA>0，即 zone≠0 的条件）；bar_grow=

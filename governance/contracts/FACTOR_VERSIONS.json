@@ -244,8 +244,8 @@
       ]
     },
     "macd_technics": {
-      "version": 4,
-      "source_digest": "19a569061aa79624e703",
+      "version": 5,
+      "source_digest": "61af0a31dee409d769b0",
       "history": [
         {
           "version": 1,
@@ -276,6 +276,11 @@
           "version": 4,
           "date": "2026-11-24",
           "change": "近距矮峰补回加谷底深度 MACD2_WAVE_VALLEY=0.7（小抖动不切波）"
+        },
+        {
+          "version": 5,
+          "date": "2026-11-24",
+          "change": "乖离过大按 owner 定义：双线上涨 + 红柱滞涨或下降 + 双线超过红柱（原 |DIF| 分位口径停用）"
         }
       ]
     },

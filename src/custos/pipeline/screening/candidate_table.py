@@ -477,7 +477,7 @@ RISK_ZH: dict[str, str] = {
     "distribution_detected_cap_disabled": "出货（已检出，封顶关闭）",
     "macd_three_peaks": "MACD 三打白骨精（否决）",
     "macd_top_divergence": "MACD 顶背离（减分）",
-    "macd_overextended": "MACD 过度伸展",
+    "macd_overextended": "MACD 乖离过大",
     "macd_divergence_detected_cap_disabled": "MACD 背离（已检出，封顶关闭）",
     "non_one_wave_revoked": "疑似一波流 / 出货（否决）",
     "non_one_wave_revoked_cap_disabled": "疑似一波流 / 出货（提醒）",

@@ -8,7 +8,7 @@
 
 ## 现状
 
-- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 96 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
+- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 94 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
   **P1 live 展示 99 个**（1800 证据标注，不进判定）、P2 研究 67 个。
 - **定义校准：0 / 233**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
 - **清单未覆盖**（需在逐因子校准时一并核）：①函数体内联常量（KDJ 9/3/3、BBI 周期、20 日相对强度窗口等）；
@@ -255,6 +255,8 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
   owner 定义：放量点火 / 龙头量能 / 底部巨量说的都是「底部放量」，评价放量之后回调的量能状态，与当根无关；N 取 10~15 根；底部 = N 型结构的阶段低点；按程度用 1~3 星。
   候选（v0.570）：`volume_detectors.check_base_volume`，近 15 根内、从阶段低点（前 20 根最低收盘）起 5 根内的放量：⭐ 单根放量阳线 / ⭐⭐ 连续 3 根 ≥ 地量 1.7 倍 / ⭐⭐⭐ 单根 ≥ 250 根均量 2 倍，取最高档。挖掘 B 样本点：⭐ 2.7%、⭐⭐ 17.4%、⭐⭐⭐ 9.2%。
   未接 live（live 仍是三项叠加 +4 / +6 / +10）。图集 `base_volume__mining_v1`；旧图集隐藏点火与 B1 点火（依赖点火，合并后重定），只留回调缩量。
+- **乖离过大（owner 2026-11-24）**：原名「过度伸展」是 agent 对字段 `overextended` 的直译，原文（qn/01_general.md §二）是「乖离过大 = 失去支撑力量，追高易站岗」。原判法 |DIF| 近 120 根分位 ≥90% 且柱体与 DIF 同号，绿柱也命中；`macd_technics__mining_v1` 的 24 张里 23 张绿柱、0 张水上红柱，不对题，已隐藏。
+  owner 定义：MACD 双线还在上涨，但红柱开始滞涨或下降，且双线已经超过红柱范围。v0.571 落地：DIF、DEA 都比昨天高 ∧ 0 < 当根红柱 ≤ 昨天 ∧ DEA > 当根红柱；纯数值判定，退出人工校准（钉测）。删 MACD_OVEREXT_PCTL / WIN。挖掘 B 样本点命中 2.9%。live 仍只作风险标记「MACD 乖离过大」。
 - **纯数值判定退出人工校准（v0.563，owner 2026-11-23）**：MACD 区间（DIF / DEA 是否在 0 轴上 + 柱体放长 / 缩短 / 转绿）只是数值比较，看图只能核实现，改由钉测管四态；`macd_technics__mining_v1` 的 24 张区间图隐藏，MODULES 去掉该字段。
 - **owner 定（2026-11-23）**：一波流 = ①连续 ②快速（几个交易日内）③大幅（≥50%），之后 A 杀或震荡下跌 / 横盘都算，尽力识别；走势只识别买点前最近 1~2 段，尽力识别。
   落地（v0.561）：`b1_structure.check_one_wave_v4`（120 根内 ≤10 根、途中收盘回撤 <10%、最高价较起点最低价 ≥50%），live 提醒改用 v4（风险列「一波流（提醒）」，不否决不计分）；
@@ -323,7 +325,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `technical_monitor` | `TREND_MIN_BARS` | 60 | 趋势判定最少 K 线数 | - | 未校准 |
 | `technical_monitor` | `QFQ_LOAD_BARS` | 100000 | - | - | 未校准 |
 
-### P0（96 个参数）
+### P0（94 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -391,8 +393,6 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `ignition` | `PULLBACK_VOL_RATIO` | 0.85 | 待回测：回调段/上涨段均量上限 | candidate | 未校准 |
 | `macd_technics` | `MACD_SWING_FRACTAL` | 2 | 摆动高/低点分型：左右各 N 根确认 | candidate | 未校准 |
 | `macd_technics` | `MACD_DIV_LOOKBACK` | 60 | 背离观察窗口（日） | candidate | 未校准 |
-| `macd_technics` | `MACD_OVEREXT_PCTL` | 0.9 | 开口/空间拐离：DIF 分位与柱体比较；已恢复抽检 | candidate | 进行中（owner 2026-11-15 恢复） |
-| `macd_technics` | `MACD_OVEREXT_WIN` | 120 | 拐离分位窗口；已恢复抽检 | candidate | 进行中（owner 2026-11-15 恢复） |
 | `macd_technics` | `MACD2_MIN_GROUP` | 2 | - | candidate | 已标 · live（v0.567） |
 | `macd_technics` | `MACD2_MARGIN` | 0.0 | 柱子「更短」的门槛：v0.566 起 0（owner 18 张标注上 10% 会漏掉同组内略短的背离） | candidate | 已标 · live（v0.567） |
 | `macd_technics` | `MACD2_WAVE_FRACTAL` | 2 | 同一组柱子里按柱长再切「波」：柱长局部峰（左右各 2 根）各算一个波（owner：同组有多个波峰就在波之间比） | candidate | 已标 · live（v0.567） |

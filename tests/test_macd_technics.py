@@ -402,3 +402,18 @@ def test_bar_waves_small_wiggle_not_split_v0569():
         [-1, 0.5, 1.012, 1.02, 1.415, 1.344, 1.466, 0.987, 0.1, -1], 1
     )
     assert len(waves) == 1
+
+
+def test_overextended_owner_definition_v0571():
+    """owner 2026-11-24：乖离过大 = 双线还在上涨 + 红柱滞涨或下降 + 双线已超过红柱范围（DEA > 红柱）。"""
+    from custos.core.factors import macd_technics as mt
+
+    f = mt._macd_overextended
+    assert (
+        f([1.0, 1.2], [0.8, 0.9], [0.30, 0.25])["hit"] is True
+    )  # 双线涨、柱缩、DEA 0.9 > 柱 0.25
+    assert f([1.0, 1.2], [0.8, 0.9], [0.25, 0.25])["hit"] is True  # 柱滞涨
+    assert f([1.0, 1.2], [0.8, 0.9], [0.20, 0.25])["hit"] is False  # 柱还在长
+    assert f([1.2, 1.1], [0.8, 0.9], [0.30, 0.25])["hit"] is False  # DIF 拐头
+    assert f([1.0, 1.2], [0.1, 0.2], [0.30, 0.25])["hit"] is False  # 柱顶仍高于 DEA
+    assert f([-1.2, -1.0], [-1.3, -1.1], [-0.3, -0.2])["hit"] is False  # 绿柱一律不算

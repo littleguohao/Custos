@@ -198,18 +198,15 @@ MODULES: dict[str, dict[str, Any]] = {
     "macd_technics": {
         "defmod": "custos.core.factors.macd_technics",
         "chart_panes": ["vol", "macd"],  # owner 2026-11-23：MACD 图集不显示 J
-        # owner 2026-11-15：overextended 恢复抽检；owner 2026-11-23：zone 是 DIF/DEA/柱体纯数值判定，退出人工校准（钉测管）
+        # owner 2026-11-24：乖离过大（overextended）按 owner 定义改为纯数值判定，退出人工校准；owner 2026-11-23：zone 是 DIF/DEA/柱体纯数值判定，退出人工校准（钉测管）
         "fields": [
             "macd_technics.bottom_divergence.hit",
             "macd_technics.top_divergence.hit",
             "macd_technics.three_peaks.hit",
-            "macd_technics.overextended.hit",
         ],
         "params": [
             "MACD_SWING_FRACTAL",
             "MACD_DIV_LOOKBACK",
-            "MACD_OVEREXT_PCTL",
-            "MACD_OVEREXT_WIN",
         ],
     },
     "distribution": {
@@ -1338,7 +1335,6 @@ FIELD_DEF: dict[str, str] = {
     "macd_technics.bottom_divergence.hit": "MACD 底背离：价格创新低而 MACD 没有创新低",
     "macd_technics.top_divergence.hit": "MACD 顶背离：价格创新高而 MACD 没有创新高",
     "macd_technics.three_peaks.hit": "MACD 三峰形态是否出现",
-    "macd_technics.overextended.hit": "MACD 过度伸展：|DIF| 近 120 根分位 ≥90%，且当根柱体与 DIF 同号（至少 20 根）",
     "distribution.risk_level": "主力出货风险等级（B1 §七.3）：none=无命中；watch=至少 1 腿但未达 high；high=命中①/②任一或同时 ≥2 腿",
     "distribution_confirm.revoked": "出货信号失效名单：之前命中 ① / ② 出货、后来被走势否定的信号；名单为空表示没有失效的信号",
     "wave.wave_type": "拉升波三分类（B1 §四.0）：冲刺波 sprint / 拉升波 rally / 建仓波 buildup，冲突时取保守",

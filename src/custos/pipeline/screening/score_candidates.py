@@ -737,7 +737,7 @@ def _cap_macd_risks(risk_flags: list, bucket: str, cand: dict, rules: dict) -> s
         else:
             risk_flags.append("macd_divergence_detected_cap_disabled")
     if mt_cap.get("available") and (mt_cap.get("overextended") or {}).get("hit"):
-        risk_flags.append("macd_overextended")  # 开口/空间拐离：仅记录，不降档
+        risk_flags.append("macd_overextended")  # 乖离过大：仅记录，不降档
     return bucket
 
 
