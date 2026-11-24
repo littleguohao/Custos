@@ -31,12 +31,12 @@ TdxW 未运行或任一阶段失败时整链干净降级（status=unavailable / 
   已存在的公式名**（系统公式或用户预建公式），不能跑任意表达式（实测
   ErrorId=9）。当前启用：KDJ_J_LOW（用户自建 `J小于13`，B1 回调型初筛，
   2026-07-22 接入；同日用户决策停用 UPN_3/MA_BUY 等非 B1 动量/趋势公式）。
-- **自选池通道**（`manual_pools`）：用户在通达信客户端手工维护的备选池
-  （如"震荡"），经 `src/custos/pipeline/screening/manual_pools.py` 读取
-  `T0002/blocknew/*.blk`（本地文件，TdxW 离线也可用），以
-  `category=manual_pool` 伪公式条目与公式命中并集进入 [2]。池子增删股票
-  只需在客户端操作，次日自动生效；新增池子在注册表 `manual_pools` 加一条
-  （block_name 为客户端板块中文名）。
+- **自选池通道**（`manual_pools`）：用户在通达信客户端手工维护的备选池，经
+  `src/custos/pipeline/screening/manual_pools.py` 读取 `T0002/blocknew/*.blk`
+  （本地文件，TdxW 离线也可用），以 `category=manual_pool` 伪公式条目与公式命中并集进入 [2]。
+  当前启用老登（`POOL_LAODENG`）、科技（`POOL_KEJI`）、医药（`POOL_YIYAO`）三池（v0.581），
+  旧震荡池不再启用。池子增删股票只需在客户端操作，次日自动生效；新增池子在注册表
+  `manual_pools` 加一条（block_name 为客户端板块中文名）。
 - 股票池：全 A 含北交所（2026-09-19 v0.257 owner 拍板放开；exclude_bj 开关关闭；ST、上市天数在 [2] 过滤）。
 - 单公式超时 15s；连续 2 个公式失败熔断，剩余标记 `circuit_open_skipped`。
 - 命中判定：返回的按股按日 0/1 序列，最后一个元素（最新交易日）为 '1'。
@@ -246,8 +246,8 @@ next_step（由封顶后的 bucket 定）：A→buy_review（v0.50：原 generat
   主表 S反转 列）。成本与 compute_s_shape 同阶（纯内存 O(n)），不设开关。
 - **门内提醒**（v0.89，owner；取代 v0.51 的门槛外观察区）：J<13 硬门槛
   （R1 框架）**不动**；被挡的票只进 `excluded` 留痕、不再单列。候选表
-  「📌 门内提醒」一节列**震荡池内**（POOL_ZHENDANG，v0.91 显式收回）票：
-  日 J≤13（v0.160 起**不再要求异动强**，异动判据列降级为展示信息），
+  「📌 门内提醒」一节读取注册表当前启用的 `manual_pools`，列老登 / 科技 / 医药池内
+  日 J≤13 的票（v0.581；旧震荡池撤销；v0.160 起**不再要求异动强**，异动判据列降级为展示信息），
   按日 J 从小到大最多前 20 只（v0.90）——仅提醒，不改分层/排序。
 
 ### 知行量价 + 出货识别（B1 §四.5 / §七.3）

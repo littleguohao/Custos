@@ -91,10 +91,22 @@
   },
   "manual_pools": [
     {
-      "id": "POOL_ZHENDANG",
-      "block_name": "震荡",
+      "id": "POOL_LAODENG",
+      "block_name": "老登",
       "enabled": true,
-      "note": "用户自维护备选池（T0002/blocknew/ZD.blk，2026-07-22 接入）。每日随公式命中一并进入充实/打分；本地文件读取，TdxW 离线时仍可用。"
+      "note": "用户自维护备选池（2026-11-24 接入，替代已撤销的震荡池）。每日随公式命中一并进入充实/打分；本地文件读取，TdxW 离线时仍可用。"
+    },
+    {
+      "id": "POOL_KEJI",
+      "block_name": "科技",
+      "enabled": true,
+      "note": "用户自维护备选池（2026-11-24 接入）。每日随公式命中一并进入充实/打分；本地文件读取，TdxW 离线时仍可用。"
+    },
+    {
+      "id": "POOL_YIYAO",
+      "block_name": "医药",
+      "enabled": true,
+      "note": "用户自维护备选池（2026-11-24 接入）。每日随公式命中一并进入充实/打分；本地文件读取，TdxW 离线时仍可用。"
     }
   ],
   "formulas": [

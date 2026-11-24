@@ -27,6 +27,18 @@ def test_universe_filters():
     assert int(u["min_list_days"]) >= 60
 
 
+def test_current_manual_pools():
+    """v0.581（owner）：震荡池撤销，live 只接入老登、科技、医药三个自选池。"""
+    pools = _load()["manual_pools"]
+    enabled = [(p["id"], p["block_name"]) for p in pools if p.get("enabled")]
+    assert enabled == [
+        ("POOL_LAODENG", "老登"),
+        ("POOL_KEJI", "科技"),
+        ("POOL_YIYAO", "医药"),
+    ]
+    assert len({p["id"] for p in pools}) == len(pools)
+
+
 def test_enabled_formulas_well_formed():
     formulas = _load()["formulas"]
     enabled = [f for f in formulas if f.get("enabled")]

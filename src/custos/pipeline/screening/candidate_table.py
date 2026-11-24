@@ -23,7 +23,13 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-from custos.core.paths import PLANS, QUALITY_DIR, STOCK_POOL_DIR, daily_report_dir  # noqa: E402
+from custos.core.paths import (  # noqa: E402
+    PLANS,
+    QUALITY_DIR,
+    SCREEN_FORMULA_REGISTRY_FILE,
+    STOCK_POOL_DIR,
+    daily_report_dir,
+)
 from custos.core.runtime_guards import normalize_regime  # noqa: E402
 from custos.core import report_audit  # noqa: E402
 from custos.pipeline.market_timing import amv_context  # noqa: E402  L3 同层，只描述
@@ -506,18 +512,28 @@ def render_table(
 _IN_GATE_REMINDER_TOP_N = 20
 
 
-def _in_gate_reminder_section(candidates: list) -> list[str]:
-    """门内提醒（v0.160，owner）：震荡池（POOL_ZHENDANG）内 J≤13 的票——
-    **不再强制异动强**（v0.89-0.91 的底部巨量/放量点火条件撤除）。
+def _enabled_manual_pools() -> dict[str, str]:
+    """门内提醒与初筛共用注册表口径：只取当前启用的自选池。"""
+    registry = _load_json(SCREEN_FORMULA_REGISTRY_FILE, {})
+    return {
+        str(p["id"]): str(p.get("block_name") or p["id"])
+        for p in registry.get("manual_pools") or []
+        if p.get("enabled", True) and p.get("id")
+    }
 
-    沿革：v0.89 替代「门槛外观察区」（门外票只进 excluded 留痕）；v0.90 改日 J
-    升序；v0.91 作用域收回震荡池（POOL_ZHENDANG 显式过滤）。v0.160 owner：
-    异动条件把大多数震荡池成员挡在提醒外，撤除——异动判据列保留作展示信息。
+
+def _in_gate_reminder_section(candidates: list) -> list[str]:
+    """已启用自选池内 J≤13 的票，仅提醒，不改变判定与排序。
+
+    v0.160 起不再要求异动强；v0.581 起池清单直接读注册表 ``manual_pools``，
+    当前为老登 / 科技 / 医药，不再绑定已撤销的震荡池。
     """
+    pools = _enabled_manual_pools()
+    pool_names = " / ".join(pools.values()) or "未配置自选池"
     out = [
-        "## 📌 门内提醒（震荡池 · J≤13）",
+        f"## 📌 门内提醒（{pool_names} · J≤13）",
         "",
-        "> 震荡池（POOL_ZHENDANG）内、J≤13 的票（v0.160 起不再要求异动强）。"
+        f"> 已启用自选池（{pool_names}）内、J≤13 的票（不再要求异动强）。"
         "**仅提醒**，不改变判定与排序；按日 J 从小到大最多列前 "
         f"{_IN_GATE_REMINDER_TOP_N} 只。",
         "",
@@ -525,7 +541,7 @@ def _in_gate_reminder_section(candidates: list) -> list[str]:
     hits = [
         c
         for c in candidates
-        if "POOL_ZHENDANG" in (c.get("formula_hits") or [])
+        if set(c.get("formula_hits") or []) & pools.keys()
         and (c.get("daily_j") is not None and c.get("daily_j") <= 13)
     ]
     if not hits:

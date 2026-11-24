@@ -53,15 +53,23 @@ def _cand(
 
 
 def _move_cand(
-    code, name, *, j=5.0, tech=55.0, bucket="B", bottom=False, ign=False, zd=True
+    code,
+    name,
+    *,
+    j=5.0,
+    tech=55.0,
+    bucket="B",
+    bottom=False,
+    ign=False,
+    pool_id="POOL_LAODENG",
 ):
-    """门内提醒测试用候选：震荡池成员（默认）+ 池内票（默认 J<13）+ 异动字段。"""
+    """门内提醒测试用候选：默认属于老登池，且日 J<13。"""
     c = _cand(code, name, "半导体", bucket, "优", 4, True, tech=tech)
     c.update(
         {
             "daily_j": j,
             "change_pct": 3.0,
-            "formula_hits": ["POOL_ZHENDANG"] if zd else ["KDJ_J_LOW"],
+            "formula_hits": [pool_id] if pool_id else ["KDJ_J_LOW"],
             "bottom_volume": {"hit": bottom},
             "ignition": {"hit": ign},
         }
@@ -70,8 +78,7 @@ def _move_cand(
 
 
 def test_in_gate_reminder_section():
-    """v0.160（owner）：门内提醒——震荡池内 J≤13 即入节，**不再强制异动强**；
-    异动判据列降级为展示信息。"""
+    """v0.160（owner）：自选池内 J≤13 即入节，不再强制异动强。"""
     pool = {
         "status": "ok",
         "amv_state": "做多",
@@ -85,26 +92,29 @@ def test_in_gate_reminder_section():
     sec = md.split("## 📌 门内提醒")[1].split("\n## ")[0]
     assert "600100" in sec and "底部巨量" in sec
     assert "600101" in sec and "放量点火" in sec
-    assert "600102" in sec, "无异动的震荡池 J≤13 票 v0.160 起也要进提醒"
+    assert "600102" in sec, "无异动的自选池 J≤13 票 v0.160 起也要进提醒"
     assert "仅提醒" in sec
 
 
-def test_in_gate_reminder_only_zhendang_pool():
-    """v0.91（owner）：只列震荡池（POOL_ZHENDANG）——旧观察区的事实口径
-    （KDJ_J_LOW 公式命中自带 J<13 几乎不会被挡，门外票实际全是震荡池成员），
-    改门内后显式补回；纯公式命中票即便 J≤13 且异动强也不进提醒。"""
+def test_in_gate_reminder_only_current_manual_pools():
+    """v0.581（owner）：只列老登 / 科技 / 医药；纯公式与旧震荡池均不进提醒。"""
     pool = {
         "status": "ok",
         "amv_state": "做多",
         "candidates": [
-            _move_cand("600100", "甲", bottom=True, zd=False),  # 纯 KDJ_J_LOW
-            _move_cand("600101", "乙", bottom=True),  # 震荡池
+            _move_cand("600100", "老", pool_id="POOL_LAODENG"),
+            _move_cand("600101", "科", pool_id="POOL_KEJI"),
+            _move_cand("600102", "医", pool_id="POOL_YIYAO"),
+            _move_cand("600103", "外", pool_id=None),
+            _move_cand("600104", "旧", pool_id="POOL_ZHENGDANG"),
         ],
     }
-    md = ct.render_table(pool, "2026-08-20")
+    md = ct.render_table(pool, "2026-11-24")
     sec = md.split("## 📌 门内提醒")[1].split("\n## ")[0]
-    assert "600100" not in sec and "600101" in sec
-    assert "震荡池" in sec
+    assert all(code in sec for code in ("600100", "600101", "600102"))
+    assert "600103" not in sec and "600104" not in sec
+    assert "老登 / 科技 / 医药" in sec
+    assert "震荡池" not in sec
 
 
 def test_in_gate_reminder_excludes_j_above_13():
