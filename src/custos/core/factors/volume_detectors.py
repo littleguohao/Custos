@@ -232,15 +232,13 @@ def _bv_stage_low(close, start: int) -> Optional[int]:
 
 
 def check_base_volume(df) -> dict[str, Any]:
-    """底部放量（合并候选，owner 2026-11-24）：近 BV_WINDOW 根内，从 N 型结构的阶段低点起来的放量，按程度分 1~3 星。
+    """底部放量（合并候选，owner 2026-11-24）：近 BV_WINDOW 根内，从 N 型结构的阶段低点起来的放量，按程度分 2~3 星。
 
-    - ⭐（单根放量阳线，原放量点火）：量 ≥ 前 5 日均量 × IGNITION_VOL_RATIO，涨幅 ≥ IGNITION_MIN_GAIN%（阳线或假阴真阳），前 5 日不比更早 5 日放量；
+    - 🔄 ⭐（单根放量阳线，原放量点火）v0.574 起去掉：owner 2026-11-24「一星的放量没有实质意义，不再提醒和加分」；
     - ⭐⭐（连续放量，原龙头量能）：连续 3 根量都 ≥ 之前 20 根最低日量 × LEADER_VOL_RATIO；
     - ⭐⭐⭐（巨量，原底部巨量）：单根量 ≥ 近 250 根（不足时用已有的，至少 120 根）均量 × BOTTOM_VOL_RATIO。
-    三档都要求放量起点距阶段低点（收盘分型低点）≤ BV_NEAR_LOW 根，且放量结束时收盘高于该低点；同时满足几档取最高档。
+    两档都要求放量起点距阶段低点（收盘分型低点）≤ BV_NEAR_LOW 根，且放量结束时收盘高于该低点；同时满足几档取最高档。
     当根是什么形态不影响结论（owner：评价的是放量之后回调的量能状态）。🔄 原「底部巨量」的回撤 ≥40% / 不创新低改由阶段低点表达。"""
-    from custos.core.factors.ignition import IGNITION_MIN_GAIN, IGNITION_VOL_RATIO  # noqa: PLC0415
-
     close, _, _, vol = _ohlcv_arrays(df)
     n = len(df)
     if n < LEADER_VOL_BASE_DAYS + 3 + BV_WINDOW:
@@ -248,16 +246,6 @@ def check_base_volume(df) -> dict[str, Any]:
     best: dict[str, Any] = {"level": 0}
     for t in range(n - BV_WINDOW, n):
         cands: list[tuple[int, int]] = []  # (档, 放量起点)
-        base5, prev5 = vol[t - 5 : t].mean(), vol[t - 10 : t - 5].mean()
-        chg = (close[t] / close[t - 1] - 1) * 100 if close[t - 1] else 0.0
-        if (
-            base5
-            and vol[t] >= base5 * IGNITION_VOL_RATIO
-            and chg
-            >= IGNITION_MIN_GAIN  # 涨 ≥3%：阳线或假阴真阳（底部区间算阳量，owner 2026-11-24）
-            and base5 <= prev5
-        ):
-            cands.append((1, t))
         s3 = t - 2
         if s3 >= n - BV_WINDOW and s3 - LEADER_VOL_BASE_DAYS >= 0:
             floor = float(vol[s3 - LEADER_VOL_BASE_DAYS : s3].min())

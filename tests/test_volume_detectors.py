@@ -25,8 +25,8 @@ def test_base_volume_levels_from_stage_low_v0570():
     )
     assert vd.check_base_volume(df(vol))["level"] == 0
     v1 = vol.copy()
-    v1[n - 10] = 1600  # 单根放量阳线（+5.9%）
-    assert vd.check_base_volume(df(v1))["level"] == 1
+    v1[n - 10] = 1600  # 单根放量阳线：v0.574 起不算（owner：一星没有实质意义）
+    assert vd.check_base_volume(df(v1))["level"] == 0
     v2 = vol.copy()
     v2[n - 11 : n - 8] = 1800  # 连续 3 根 ≥ 地量 1.7 倍
     assert vd.check_base_volume(df(v2))["level"] == 2

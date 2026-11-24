@@ -580,7 +580,7 @@
     },
     "volume_detectors": {
       "version": 1,
-      "source_digest": "5e523305f254fe7f85ea",
+      "source_digest": "1a7b0e20cd827b7c2f33",
       "history": [
         {
           "version": 1,
@@ -596,6 +596,11 @@
           "version": 1,
           "date": "2026-11-24",
           "refactor": "候选口径调整（owner 2026-11-24，未接 live）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-24",
+          "refactor": "底部放量候选去掉一星档（owner，未接 live）"
         }
       ]
     },

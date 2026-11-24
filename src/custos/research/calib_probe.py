@@ -196,7 +196,7 @@ MODULES: dict[str, dict[str, Any]] = {
         "defmod": "custos.core.factors.volume_detectors",
         "eval": "base_volume",
         "chart_panes": ["vol"],
-        "fields": ["base_volume.l1", "base_volume.l2", "base_volume.l3"],
+        "fields": ["base_volume.l2", "base_volume.l3"],  # v0.574 去 ⭐（owner）
         "params": [
             "BV_WINDOW",
             "BV_NEAR_LOW",
