@@ -67,111 +67,6 @@ def _sig_nm(c: dict) -> str:
     return f"{c.get('code')} {c.get('name') or ''}".strip()
 
 
-def _signal_label_row(key: str, meta: tuple, with_sig: list[dict]) -> Optional[str]:
-    """单因子行：命中/可评 + 盈亏比/胜率（R27 读数）+ 命中名单（按技术分降序，全列不截断）。无可评估且无命中返回 None。"""
-    from custos.pipeline.screening import signal_labels as sl  # noqa: PLC0415
-
-    label, abbr, direction = meta
-    hits, evaluable = [], 0
-    for c in with_sig:
-        st = (c["signals"].get(key) or {}).get("state")
-        if st in ("hit", "miss"):
-            evaluable += 1
-        if st == "hit":
-            hits.append(c)
-    if not evaluable and not hits:
-        return None
-    mark = "⚠️ " if direction < 0 else ""
-    # 2026-08-16（owner）：改表格 + 标技术分——命中名单按技术分降序，
-    # 括号内是该票当日技术分（总分=技术分），一眼看出「命中的是强票还是弱票」。
-    # v0.169（owner）：命中名单完整列出，不再截断前 12。
-    top_hits = sorted(hits, key=lambda c: (-(c.get("score") or 0), str(c.get("code"))))
-    names = "、".join(f"{_sig_nm(c)}({int(c.get('score') or 0)})" for c in top_hits)
-    stats = sl.SIGNAL_STATS.get(key)
-    # 格内空格换 &nbsp;：整格不换行（换行会让该列被压到最窄），顺带把列撑宽。
-    stat_cell = (
-        f"{stats[0][0]:.2f}&nbsp;/&nbsp;{stats[0][1] * 100:.0f}%&nbsp;｜&nbsp;"
-        f"{stats[1][0]:.2f}&nbsp;/&nbsp;{stats[1][1] * 100:.0f}%"
-        if stats
-        else "—"
-    )
-    return (
-        f"| {mark}**{label}** `{abbr}` | {len(hits)}/{evaluable} | {stat_cell} "
-        f"| {names or '无'} |"
-    )
-
-
-def _signal_labels_section(candidates: list[dict]) -> list[str]:
-    """信号标注一览：**逐个标注列出命中的票**（而不是只报几只）。
-
-    设计边界：这些研究因子（QSX共振、RSI 区间、B2、底部异动…）**只标注，
-    不参与打分分层**，上方候选池的分层与 next_step 完全未被改写。
-
-    ⚠️ 它们**已在跨窗终审中被否决**（治理文档「H1/H2 终审」）：edge 只存在于 2025-2026
-    单一 regime。所以这个区块是**观察记录，不是交易依据**，尤其不得据命中数定仓位。
-
-    分母是**可评估数**（排除数据不足的票）：`min_list_days=60` 而 `qsx_resonance_v2` 需
-    ≥114 根（DKS 成形）、`surge_then_b1` 需 200 根，大量候选算不出来。把"算不出来"
-    混进分母会让"数据不足"被误读成"不符合条件"。
-    （v0.169 owner：⚠出货行不列、解释文字不列、命中名单全列不截断；
-    v0.185 owner：撤 MR（主升始发点）行；新增「盈亏比/胜率」列（R27 交易层双窗读数），
-    行序改按跨窗盈亏比降序，无同口径数据的行垫底显示 "—"。）
-    """
-    try:
-        # 包式导入失败（如模块损坏）此前被外层 except 吞掉，
-        # 整个区块静默消失。降级必须留一行说明，不能无声。
-        from custos.pipeline.screening import signal_labels as sl  # noqa: PLC0415
-    except Exception as exc:  # noqa: BLE001
-        print(
-            f"[WARN] 信号标注区块不可用（signal_labels 导入失败: "
-            f"{type(exc).__name__}: {exc}），跳过该区块",
-            file=sys.stderr,
-        )
-        return []
-    with_sig = [c for c in candidates if isinstance(c.get("signals"), dict)]
-    if not with_sig:
-        return []
-
-    lines = [
-        "## 🏷️ 信号标注一览（研究因子·只标注，不影响判定）",
-        "",
-        "> 盈亏比/胜率列是 R27 交易层双窗读数（trade-sim：0AMV做多+J<13 基底、s3000、"
-        "pct12+分批止盈+BBI跌破2根出场；跨窗 2022-2024｜主窗 2024-08~2026-09），"
-        "供相对参考，非 live 统计；无同口径数据的显示 —。",
-        "",
-        # 前三列表头用 &nbsp; 连成不可断行单元：Markdown 表格没有列宽语法，渲染器
-        # 会把宽度让给末列长名单，把这三列挤到逐字换行；&nbsp; 是各渲染器（VS Code
-        # 预览/Typora/GitHub）都生效的最小列宽手段。digest 侧 md_to_digest 已剥掉。
-        "| &nbsp;&nbsp;&nbsp;&nbsp;因&nbsp;子&nbsp;&nbsp;&nbsp;&nbsp; "
-        "| &nbsp;&nbsp;命&nbsp;中&nbsp;/&nbsp;可&nbsp;评&nbsp;&nbsp; "
-        "| 盈&nbsp;亏&nbsp;比&nbsp;/&nbsp;胜&nbsp;率&nbsp;（&nbsp;跨&nbsp;窗&nbsp;｜&nbsp;主&nbsp;窗&nbsp;） "
-        "| 命中候选（按技术分降序；括号内为技术分） |",
-        "|---|---:|---:|---|",
-    ]
-    # v0.185（owner）：行序按跨窗盈亏比降序（无读数的垫底），不再是 SIGNAL_META 序。
-    rows = []
-    for key, meta in (
-        (k, sl.SIGNAL_META[k]) for k in sl.LIVE_SIGNALS
-    ):  # v0.529：只列 live 保留项
-        # SG（底部异动）不单列（2026-08-14 owner 反馈两行名单每次完全相同）：
-        # SB = SG ∧ 当日 J<13，而本池已过 J<13 硬门槛 ⇒ 池内 SG 与 SB 恒重合，
-        # 单列只是噪声。两者算法**不同**（见 b2_surge_factor），重合是本池结构使然。
-        if key == "bottom_surge":
-            continue
-        # ⚠出货（主力出货形态）一览行不列（v0.169 owner 撤）——主表单元格 ⚠️ 负向标记保留。
-        if key == "distribution_risk":
-            continue
-        row = _signal_label_row(key, meta, with_sig)
-        if row is not None:
-            stats = sl.SIGNAL_STATS.get(key)
-            sort_key = -stats[0][0] if stats else 0.0
-            rows.append((sort_key, key, row))
-    rows.sort(key=lambda r: (r[0], r[1]))
-    lines.extend(r[2] for r in rows)
-    lines.append("")
-    return lines
-
-
 def _signal_cell(cand: dict) -> str:
     """主表「标注」单元：`4/9 QG·RS·B2` + 负向 ⚠️（分母 = 正向标注总数）。"""
     sig = cand.get("signals")
@@ -594,14 +489,14 @@ def render_table(
     # ⭐ 置顶:今日信号一览——可买/观察价位/待0AMV做多 三档,一眼看清"今天哪些是真信号"
     _signal_overview(lines, is_bear, candidates)
     # v0.478（owner 2026-11-03）：去掉 A/B/C/D 分池、Top5 与 🐂/🔍/📡 三个子区，全部候选并成一张总表，
-    # 判定结果收进「状态」列；信号标注一览与门内提醒保留；文末列含义。
+    # 判定结果收进「状态」列；门内提醒保留；文末列含义。
     if hot is not None:  # v0.529（TODO #125）：热门细分行业，只作标注
         from custos.pipeline.screening import hot_sectors  # noqa: PLC0415
 
         lines += hot_sectors.render_lines(hot)
     hot_hits = {h["industry"]: h["hits"] for h in (hot or {}).get("hot") or []}
     _unified_table(lines, candidates, is_bear, hot_hits)
-    lines += _signal_labels_section(candidates)
+    # v0.580（owner）：RD / SB 已在总表「研究标注」列展示，撤去重复的信号标注一览。
     lines += _in_gate_reminder_section(candidates)
     lines += _legend_section()
     return "\n".join(lines)

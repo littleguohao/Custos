@@ -144,22 +144,19 @@ def test_in_gate_reminder_sorted_by_j_asc_and_capped():
     assert "共 25 只命中" in sec
 
 
-def test_signal_labels_sg_merged_into_sb():
-    """2026-08-14（owner 反馈 SG/SB 两名单每次完全相同）：SG 不单列——
-    SB = SG ∧ 当日 J<13，本池已过 J<13 硬门槛 ⇒ 池内两名单恒重合，单列是噪声。
-    （两者算法不同，见 b2_surge_factor；v0.169 起「恒重合」图注行已随解释文字一并撤下，
-    口径只留在代码注释里。）"""
+def test_signal_labels_overview_removed_but_table_marks_kept():
+    """v0.580（owner）：RD / SB 已在候选总表展示，不再另列重复的一览区块。"""
     cand = _cand("600000", "甲", "半导体", "A", "优", 4, True)
     cand["signals"] = {
-        "bottom_surge": {"state": "hit"},
+        "rsi_deep_oversold": {"state": "hit"},
         "surge_then_b1": {"state": "hit"},
+        "summary": {"label": "2/2", "abbrs": ["RD", "SB"], "neg_abbrs": []},
     }
     pool = {"status": "ok", "amv_state": "做多", "candidates": [cand]}
-    md = ct.render_table(pool, "2026-07-30")
-    sec = md.split("## 🏷️ 信号标注一览")[1].split("\n## ")[0]
-    assert "异动后的B1" in sec
-    assert "- **底部异动" not in sec, "SG 行必须并入 SB，不再单列"
-    assert "恒重合" not in sec, "v0.169（owner）：解释文字行已从一览撤下"
+    md = ct.render_table(pool, "2026-11-24")
+    assert "## 🏷️ 信号标注一览" not in md
+    row = next(ln for ln in md.splitlines() if ln.startswith("| 600000 |"))
+    assert "2/2 RD·SB" in row
 
 
 def test_daily_signal_summary_section():

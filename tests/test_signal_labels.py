@@ -299,9 +299,6 @@ class TestTableRendering:
             ],
         }
 
-    def _labels_section(self, txt: str) -> str:
-        return txt.split("## 🏷️ 信号标注一览")[1].split("\n## ")[0]
-
     def test_lists_actual_codes_not_just_counts(self):
         txt = ct.render_table(
             self._pool(),
@@ -310,56 +307,22 @@ class TestTableRendering:
                 "market_quality": {"status": "pass", "amv_ok": True, "limitations": []}
             },
         )
-        assert "🏷️ 信号标注一览" in txt
-        # 必须出现具体代码+名称，而不是只有数量
-        assert "600000 浦发银行" in txt and "300750 宁德时代" in txt
+        assert "🏷️ 信号标注一览" not in txt  # v0.580：不再重复展示
+        # 总表仍出现具体代码+名称，而不是只有数量
+        assert "| 600000 | 浦发银行 |" in txt
+        assert "| 300750 | 宁德时代 |" in txt
 
-    def test_negative_signal_row_removed_but_cell_mark_kept(self):
-        """v0.169（owner）：⚠出货 行不列入一览，但主表单元格 ⚠️ 负向标记保留。"""
+    def test_negative_signal_cell_mark_kept(self):
+        """v0.580：重复的一览撤除，主表单元格 ⚠️ 负向标记保留。"""
         txt = ct.render_table(self._pool(), "2026-08-04")
-        sec = self._labels_section(txt)
-        assert "主力出货形态" not in sec, "⚠出货 一览行已撤"
+        assert "🏷️ 信号标注一览" not in txt
         assert "⚠️⚠出货" in txt, "主表单元格负向标记必须保留"
         assert "000555" in txt
-
-    def test_rows_only_live_signals_sorted_by_cw_payoff_v0529(self):
-        """v0.529（TODO #127）：一览只列 live 保留项 RD / SB，仍按跨窗盈亏比降序（RD 2.28 > SB 2.11）。"""
-        sec = self._labels_section(ct.render_table(self._pool(), "2026-08-04"))
-        rows = [ln for ln in sec.split("\n") if ln.startswith("| ")]
-        data_rows = [ln for ln in rows if "---" not in ln][1:]
-        assert [r.split("`")[1] for r in data_rows] == ["RD", "SB"]
-        assert "300750 宁德时代" in data_rows[0] and "600000 浦发银行" in data_rows[1]
-
-    def test_hits_listed_in_full_not_truncated(self):
-        """v0.169（owner）：命中名单全列不截断——>12 只时全部列出，无「等 N 只」。"""
-        pool = self._pool()
-        for i in range(14):
-            pool["candidates"].append(
-                _cand(
-                    f"60{i + 100:04d}",
-                    f"票{i}",
-                    "B",
-                    signals=_sig({"surge_then_b1"}),
-                )
-            )
-        sec = self._labels_section(ct.render_table(pool, "2026-08-04"))
-        sb_row = next(ln for ln in sec.split("\n") if "`SB`" in ln)
-        assert "`SB` | 15/17 |" in sb_row  # 新票 SB 不可评
-        assert "600113" in sb_row, "第 14 只也要列出（不再截断前 12）"
-        assert "等 15 只" not in sb_row and "前12" not in sec
 
     def test_main_table_has_label_column(self):
         txt = ct.render_table(self._pool(), "2026-08-04")
         assert "| 证据标记 | 研究标注 | 风险 |" in txt  # v0.478 单表
         assert "4/9 QG·RS·B2·SB" in txt  # 夹具里的 summary 是旧全量口径（产物兼容）
-
-    def test_no_signals_section_when_absent(self):
-        """候选没有 signals 字段（旧产物）时不渲染该区块，且不报错。"""
-        pool = self._pool()
-        for c in pool["candidates"]:
-            c.pop("signals", None)
-        txt = ct.render_table(pool, "2026-08-04")
-        assert "🏷️ 信号标注一览" not in txt
 
 
 class TestLabelsNeverAlterSelection:
