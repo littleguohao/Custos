@@ -272,12 +272,12 @@ def _leg_top_green_heavy_red_light(close, high, open_, vol, n: int) -> dict[str,
 DIST2_LOOKBACK = (
     60  # 近 60 根内出现过即算（owner 指出的出货阴线距看图日 10~62 根；原 ①② 只看 5 根）
 )
-DIST2_PREV_YANG = 5  # 阴线量须大于前 5 根里最大的阳线量（owner：只跟前面的阳线比；一字板收 = 开也算阳线）
+DIST2_PREV_YANG = 3  # 阴线量须大于前 3 根里最大的阳线量（owner：只跟前面的阳线比；v0.577 由 5 改 3：#11 600505 06-07 比 4 根前的阳线小、比紧挨着的阳线大，owner 看是大；一字板收 = 开也算阳线）
 DIST2_VOL_MA = 1.5  # 且 ≥ 前 20 日均量 1.5 倍（过滤缩量区的小阴线）
 DIST2_MAX60 = 0.6  # 且 ≥ 前 60 根最大量 × 0.6（owner 2026-11-24：温和放量不算；owner 认的放量都在 0.84~0.96，存疑的在 0.20~0.40）
 DIST2_PIVOT = 2  # 高点 = 最高价分型（左右各 2 根）
 DIST2_NEAR_HIGH = 2  # 阴线距该高点 ≤2 根（顶部 / 次高点当天或前后）
-DIST2_POS = 0.7  # 次高点 ≥ 近 60 根最高 × 0.7（更低的反弹高点不算）
+DIST2_POS = 0.65  # 次高点 ≥ 近 60 根最高 × 0.65（v0.577 由 0.7 改：#18 300157 高点放量在 0.69；更低的反弹高点不算）
 
 
 def _top_or_second_high(h, low, q: int) -> Optional[str]:
@@ -342,7 +342,13 @@ def check_top_bear_volume(df) -> dict[str, Any]:
                 "vs_prev_yang": round(float(v[t] / max(yang)), 2) if yang else None,
             }
         )
-    return {"available": True, "hit": bool(bars), "bars": bars}
+    # owner 2026-11-24「找最近的就行」：多根命中只报最近一根
+    return {
+        "available": True,
+        "hit": bool(bars),
+        "bars": bars[-1:],
+        "n_found": len(bars),
+    }
 
 
 def detect_distribution(df, code: str = "") -> dict[str, Any]:

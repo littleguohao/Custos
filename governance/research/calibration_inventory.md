@@ -267,6 +267,8 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 - **底部放量 · 阶段底部（owner 2026-11-24，`base_volume__mining_v2` labels14.csv 35 张）**：owner「整个形态要判断，要在持续下跌走势之后」「下跌之后的底部区域，只要是阶段底部都算」；#21 / #23 / #24（放量前横盘震荡 / 上涨转横盘）改判不成立。
   v0.575：底部 = 放量起点前一根的走势三态有下跌段、且最后一段不是上涨；🔄 去掉「距阶段低点 ≤5 根」（底部横盘中段的放量认不出），删 BV_NEAR_LOW / BV_STAGE_LOOKBACK / BV_PIVOT。31 张有对错（含改判）一致 20 → 22。
   待核：#44 603658 2026-01-26（owner：标准底部放量）放量前是横盘震荡、前 250 根内只跌 17%，新口径仍不认。图集归档，重出 mining_v3。
+- **顶部放量阴线复验二（`top_bear_volume__mining_v2` labels16.csv 24 张，owner 2026-11-24）**：对 19 / 错 5。owner：多根命中「找最近的就行」（#7 改判对）；#11 600505 06-07 owner 看量大于前面阳线（比紧挨的阳线大、比 4 根前的小）。
+  v0.577：DIST2_PREV_YANG 5 → 3、DIST2_POS 0.7 → 0.65（#18 次高点 0.69）、只报最近一根。三份共 58 张一致 49 → 51（88%）；剩 #1 000568（owner：后面涨上去的新平台低点，不是次高点；加「之后创新高即失效」会让 #24 变错，未采用）、#11 / #19（量 < 20 日均量 1.5 倍；降到 1.3~1.4 净值变差）等。
 - **纯数值判定退出人工校准（v0.563，owner 2026-11-23）**：MACD 区间（DIF / DEA 是否在 0 轴上 + 柱体放长 / 缩短 / 转绿）只是数值比较，看图只能核实现，改由钉测管四态；`macd_technics__mining_v1` 的 24 张区间图隐藏，MODULES 去掉该字段。
 - **owner 定（2026-11-23）**：一波流 = ①连续 ②快速（几个交易日内）③大幅（≥50%），之后 A 杀或震荡下跌 / 横盘都算，尽力识别；走势只识别买点前最近 1~2 段，尽力识别。
   落地（v0.561）：`b1_structure.check_one_wave_v4`（120 根内 ≤10 根、途中收盘回撤 <10%、最高价较起点最低价 ≥50%），live 提醒改用 v4（风险列「一波流（提醒）」，不否决不计分）；
@@ -394,11 +396,11 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `distribution` | `DIST_WINDMILL_TOP_FRAC` | 0.93 | - | active；R2 | 未校准 |
 | `distribution` | `DIST_WINDMILL_VOL_RATIO` | 1.5 | 待回测：天量=信号 K 量 ≥ 前20日量**中位数**×此值（v0.62 起中位数，见 :351 附近注释——偶发天量不把基准顶飞） | active；R2 | 未校准 |
 | `distribution` | `DIST2_LOOKBACK` | 60 | - | active；R2 | 候选（owner 2026-11-24） |
-| `distribution` | `DIST2_PREV_YANG` | 5 | 阴线量须大于前 5 根里最大的阳线量（owner：只跟前面的阳线比；一字板收 = 开也算阳线） | active；R2 | 候选（owner 2026-11-24） |
+| `distribution` | `DIST2_PREV_YANG` | 3 | 阴线量须大于前 3 根里最大的阳线量（owner：只跟前面的阳线比；v0.577 由 5 改 3：#11 600505 06-07 比 4 根前的阳线小、比紧挨着的阳线大，owner 看是大；一字板收 = 开也算阳线） | active；R2 | 候选（owner 2026-11-24） |
 | `distribution` | `DIST2_VOL_MA` | 1.5 | 且 ≥ 前 20 日均量 1.5 倍（过滤缩量区的小阴线） | active；R2 | 候选（owner 2026-11-24） |
 | `distribution` | `DIST2_PIVOT` | 2 | 高点 = 最高价分型（左右各 2 根） | active；R2 | 候选（owner 2026-11-24） |
 | `distribution` | `DIST2_NEAR_HIGH` | 2 | 阴线距该高点 ≤2 根（顶部 / 次高点当天或前后） | active；R2 | 候选（owner 2026-11-24） |
-| `distribution` | `DIST2_POS` | 0.7 | 该高点 ≥ 近 60 根最高价 × 0.7（顶部或次高点；更低的反弹高点不算） | active；R2 | 候选（owner 2026-11-24） |
+| `distribution` | `DIST2_POS` | 0.65 | 次高点 ≥ 近 60 根最高 × 0.65（v0.577 由 0.7 改：#18 300157 高点放量在 0.69；更低的反弹高点不算） | active；R2 | 候选（owner 2026-11-24） |
 | `distribution` | `DIST2_MAX60` | 0.6 | 且 ≥ 前 60 根最大量 × 0.6（owner 2026-11-24：温和放量不算；owner 认的放量都在 0.84~0.96，存疑的在 0.20~0.40） | active；R2 | 候选（owner 2026-11-24） |
 | `entry_patterns` | `RS_STRONG_PP` | 3.0 | 个股20日涨幅 − 上证20日涨幅 >= +3pp；纯数值比较 | candidate | 无需 A 类（owner 2026-11-14） |
 | `ignition` | `ZX_CROSS_RECENT` | 10 | 待回测：知行金叉"近N日"窗口 | candidate | 未校准 |
