@@ -215,35 +215,36 @@ def check_bottom_volume(df) -> dict[str, Any]:
 
 # --- 底部放量（合并候选，owner 2026-11-24）：点火 / 龙头量能 / 底部巨量描述的都是「底部放量」 ---
 BV_WINDOW = 20  # 近 20 根内（owner 2026-11-24 由 15 放宽：#51 301398 的底部巨量在 16~18 根前）；评价量能状态，与当根形态无关
-BV_PIVOT = 3  # 阶段低点 = 收盘分型低点（左右各 3 根，同 N 结构 / OW3_PIVOT 口径；右侧不足 3 根时用已有的）
-BV_NEAR_LOW = 5  # 放量起点距阶段低点 ≤5 根（放量从 N 型结构的低点起来）
-BV_STAGE_LOOKBACK = 20  # 阶段低点 = 前 20 根内最低收盘（且右侧 BV_PIVOT 根不更低）；只用左右 3 根时近七成样本点都算「底部」
+BV_BASE_LOW_WIN = 60  # 底部低点（图上标注用）= 放量起点前 60 根最低收盘
 BV_STARS = ("", "⭐", "⭐⭐", "⭐⭐⭐")
 
 
-def _bv_stage_low(close, start: int) -> Optional[int]:
-    """``start`` 之前 BV_NEAR_LOW 根内（含当根）最近的阶段低点：前 BV_STAGE_LOOKBACK 根最低收盘，右侧 BV_PIVOT 根不更低。"""
-    n = len(close)
-    for p in range(start, max(BV_STAGE_LOOKBACK, start - BV_NEAR_LOW) - 1, -1):
-        w = close[p - BV_STAGE_LOOKBACK : min(n, p + BV_PIVOT + 1)]
-        if close[p] <= w.min():
-            return p
-    return None
+def _bv_in_base(df, start: int, memo: dict[int, bool]) -> bool:
+    """阶段底部（owner 2026-11-24「下跌之后的底部区域，只要是阶段底部都算」）：截至放量起点前一根的走势三态里有下跌段，
+    且最后一段不是上涨（震荡下跌 / X 转下跌 / 下跌转横盘 都算；横盘震荡、震荡上涨、下跌转上涨 不算）。"""
+    from custos.core.factors.b1_structure import check_swing_state  # noqa: PLC0415
+
+    if start not in memo:
+        st = check_swing_state(df.iloc[:start]).get("state") or ""
+        memo[start] = "下跌" in st and not st.endswith("上涨")
+    return memo[start]
 
 
 def check_base_volume(df) -> dict[str, Any]:
-    """底部放量（合并候选，owner 2026-11-24）：近 BV_WINDOW 根内，从 N 型结构的阶段低点起来的放量，按程度分 2~3 星。
+    """底部放量（合并候选，owner 2026-11-24）：近 BV_WINDOW 根内、处在下跌之后阶段底部的放量，按程度分 2~3 星。
 
     - 🔄 ⭐（单根放量阳线，原放量点火）v0.574 起去掉：owner 2026-11-24「一星的放量没有实质意义，不再提醒和加分」；
     - ⭐⭐（连续放量，原龙头量能）：连续 3 根量都 ≥ 之前 20 根最低日量 × LEADER_VOL_RATIO；
     - ⭐⭐⭐（巨量，原底部巨量）：单根量 ≥ 近 250 根（不足时用已有的，至少 120 根）均量 × BOTTOM_VOL_RATIO。
-    两档都要求放量起点距阶段低点（收盘分型低点）≤ BV_NEAR_LOW 根，且放量结束时收盘高于该低点；同时满足几档取最高档。
+    两档都要求放量起点处在阶段底部（见 _bv_in_base，用走势三态判断）；同时满足几档取最高档。
+    🔄 v0.575 前要求「放量起点距阶段低点（前 20 根最低收盘）≤5 根」，底部横盘中段的放量认不出（owner #44 / #48），已停用。
     当根是什么形态不影响结论（owner：评价的是放量之后回调的量能状态）。🔄 原「底部巨量」的回撤 ≥40% / 不创新低改由阶段低点表达。"""
     close, _, _, vol = _ohlcv_arrays(df)
     n = len(df)
     if n < LEADER_VOL_BASE_DAYS + 3 + BV_WINDOW:
         return {"hit": False, "available": False, "level": 0, "stars": ""}
     best: dict[str, Any] = {"level": 0}
+    memo: dict[int, bool] = {}
     for t in range(n - BV_WINDOW, n):
         cands: list[tuple[int, int]] = []  # (档, 放量起点)
         s3 = t - 2
@@ -259,9 +260,10 @@ def check_base_volume(df) -> dict[str, Any]:
         for lv, st in cands:
             if lv <= best["level"]:
                 continue
-            p = _bv_stage_low(close, st)
-            if p is None or close[t] <= close[p]:
+            if not _bv_in_base(df, st, memo):
                 continue
+            a0 = max(0, st - BV_BASE_LOW_WIN)
+            p = a0 + int(close[a0 : st + 1].argmin())
             best = {
                 "level": lv,
                 "start": st,
