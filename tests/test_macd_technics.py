@@ -392,3 +392,13 @@ def test_live_divergence_uses_v2_v0567():
     for k in ("bottom_divergence", "top_divergence", "three_peaks"):
         assert r[k] == v2[k]
         assert f"{k}_v1" in r
+
+
+def test_bar_waves_small_wiggle_not_split_v0569():
+    """owner 标注 #16（000960 2026-02-09）：红柱 1.415→1.344→1.466 只回落 5%，是一个波。"""
+    from custos.core.factors import macd_technics as mt
+
+    waves = mt.macd_bar_waves(
+        [-1, 0.5, 1.012, 1.02, 1.415, 1.344, 1.466, 0.987, 0.1, -1], 1
+    )
+    assert len(waves) == 1

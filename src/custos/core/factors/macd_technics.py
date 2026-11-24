@@ -169,6 +169,7 @@ MACD2_MIN_GROUP = (
 )
 MACD2_MARGIN = 0.0  # 柱子「更短」的门槛：v0.566 起 0（owner 18 张标注上 10% 会漏掉同组内略短的背离）
 MACD2_WAVE_FRACTAL = 2  # 同一组柱子里按柱长再切「波」：柱长局部峰（左右各 2 根）各算一个波（owner：同组有多个波峰就在波之间比）
+MACD2_WAVE_VALLEY = 0.7  # v0.569：近距矮峰补回须峰间谷底 ≤0.7×较矮峰（v0.568 不限深度，5% 抖动也切波，owner 标注 50→47/51）
 
 
 def macd_bar_waves(hist, color: int) -> list[list[int]]:
@@ -189,7 +190,7 @@ def macd_bar_waves(hist, color: int) -> list[list[int]]:
             for k in range(m)
             if a[k] > 0 and a[k] == a[max(0, k - f) : k + f + 1].max()
         }
-        # 左右 2 根窗会吞掉靠近大峰的矮峰；若相邻局部峰之间已有更低谷底，补回候选。
+        # 左右 2 根窗会吞掉靠近大峰的矮峰；峰间谷底 ≤ MACD2_WAVE_VALLEY × 较矮峰（真回落）才补回，小抖动不切波。
         for k in range(1, m - 1):
             if k in pk_set or a[k] <= 0:
                 continue
@@ -203,7 +204,7 @@ def macd_bar_waves(hist, color: int) -> list[list[int]]:
                 lo, hi = sorted((prev, k))
                 if not 2 <= hi - lo <= f:
                     continue
-                if a[lo + 1 : hi].min() < min(a[lo], a[hi]):
+                if a[lo + 1 : hi].min() <= MACD2_WAVE_VALLEY * min(a[lo], a[hi]):
                     pk_set.add(k)
                     break
         pk = sorted(pk_set)

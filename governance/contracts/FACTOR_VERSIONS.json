@@ -244,8 +244,8 @@
       ]
     },
     "macd_technics": {
-      "version": 3,
-      "source_digest": "ed2596af3ff274744865",
+      "version": 4,
+      "source_digest": "19a569061aa79624e703",
       "history": [
         {
           "version": 1,
@@ -271,6 +271,11 @@
           "version": 3,
           "date": "2026-11-24",
           "change": "MACD v2 近距双峰有谷底时保留，连续同值平台峰才合并"
+        },
+        {
+          "version": 4,
+          "date": "2026-11-24",
+          "change": "近距矮峰补回加谷底深度 MACD2_WAVE_VALLEY=0.7（小抖动不切波）"
         }
       ]
     },

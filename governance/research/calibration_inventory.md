@@ -8,7 +8,7 @@
 
 ## 现状
 
-- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 91 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
+- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 92 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
   **P1 live 展示 99 个**（1800 证据标注，不进判定）、P2 研究 67 个。
 - **定义校准：0 / 233**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
 - **清单未覆盖**（需在逐因子校准时一并核）：①函数体内联常量（KDJ 9/3/3、BBI 周期、20 日相对强度窗口等）；
@@ -250,6 +250,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
   复验 `labels9.csv`（owner 2026-11-23，36/36，新样本）：**对 35 / 错 0 / 不确定 1**——底背离 12/12、顶背离 12/12、三打白骨精 11/12（#34 不确定：owner 认为更早的两波已是顶背离，最近两波股价走低故检测器判否）。
   ⇒ 背离 v2 定义校准通过；**v0.567 替换 live**（owner 2026-11-23）：check_macd_technics 的底背离 / 顶背离 / 三打白骨精改由 v2 产出，分值与否决不变，v1 结果留 `*_v1`；macd_technics v2（bump）。
 - **v0.568 review 边界修复**：原左右 2 根窗会吞掉靠近大峰的矮峰，峰距 ≤2 且峰间已有更低谷底时补回候选；只合并连续同值平台峰。补底 / 顶背离、三打白骨精受控正例及近距双峰 / 平台钉测；原 35/35 未覆盖此边界。macd_technics v3（bump）。
+  🔄 v0.569 复核：v0.568 补回矮峰不看谷底深度，5% 小抖动也切波，owner 标注 51 张一致 50 → 47（#13 / #16 顶背离、#27 三打白骨精变错）。加 `MACD2_WAVE_VALLEY=0.7`（峰间谷底 ≤0.7×较矮峰才补回）：回到 50/51，近距深谷双峰仍切开（0.5 / 0.8 同为 50/51）。macd_technics v4（bump）。
 - **纯数值判定退出人工校准（v0.563，owner 2026-11-23）**：MACD 区间（DIF / DEA 是否在 0 轴上 + 柱体放长 / 缩短 / 转绿）只是数值比较，看图只能核实现，改由钉测管四态；`macd_technics__mining_v1` 的 24 张区间图隐藏，MODULES 去掉该字段。
 - **owner 定（2026-11-23）**：一波流 = ①连续 ②快速（几个交易日内）③大幅（≥50%），之后 A 杀或震荡下跌 / 横盘都算，尽力识别；走势只识别买点前最近 1~2 段，尽力识别。
   落地（v0.561）：`b1_structure.check_one_wave_v4`（120 根内 ≤10 根、途中收盘回撤 <10%、最高价较起点最低价 ≥50%），live 提醒改用 v4（风险列「一波流（提醒）」，不否决不计分）；
@@ -318,7 +319,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `technical_monitor` | `TREND_MIN_BARS` | 60 | 趋势判定最少 K 线数 | - | 未校准 |
 | `technical_monitor` | `QFQ_LOAD_BARS` | 100000 | - | - | 未校准 |
 
-### P0（91 个参数）
+### P0（92 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -391,6 +392,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `macd_technics` | `MACD2_MIN_GROUP` | 2 | - | candidate | 已标 · live（v0.567） |
 | `macd_technics` | `MACD2_MARGIN` | 0.0 | 柱子「更短」的门槛：v0.566 起 0（owner 18 张标注上 10% 会漏掉同组内略短的背离） | candidate | 已标 · live（v0.567） |
 | `macd_technics` | `MACD2_WAVE_FRACTAL` | 2 | 同一组柱子里按柱长再切「波」：柱长局部峰（左右各 2 根）各算一个波（owner：同组有多个波峰就在波之间比） | candidate | 已标 · live（v0.567） |
+| `macd_technics` | `MACD2_WAVE_VALLEY` | 0.7 | v0.569：近距矮峰补回须峰间谷底 ≤0.7×较矮峰（v0.568 不限深度，5% 抖动也切波，owner 标注 50→47/51） | candidate | 已标 · live（v0.569） |
 | `volume_detectors` | `VOLUME_SUSTAIN_WINDOW` | 13 | 量能持续性窗口（CZ §14.6：7-13日） | candidate | 未校准 |
 | `volume_detectors` | `VOLUME_SUSTAIN_MIN_POST_DAYS` | 7 | 待回测参数：峰值日后确认主线最少观察日数 | candidate | 未校准 |
 | `volume_detectors` | `VOLUME_SUSTAIN_RATIO` | 0.55 | 峰值55%（CZ §14.6） | candidate | 未校准 |
