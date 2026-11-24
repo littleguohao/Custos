@@ -44,6 +44,7 @@
       "volume_yy_bear": -5,
       "distribution_watch": -10,
       "distribution_high": -20,
+      "distribution_top_bear": -15,
       "ci_b1_ignition": 3,
       "ci_zhixing_ride": 2,
       "ci_relative_strength": 2,

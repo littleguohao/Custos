@@ -147,7 +147,7 @@ def _dist_closes():
 
 
 def test_distribution_huge_volume_requires_ma20_threshold():
-    """ "或 20 日量新高（窗口含自身）"恒等于"当日是窗口最大量"，旁路了 2×MA20。"""
+    """v0.578 起 ①② 改 v2，本条钉旧判法（legacy_v1）的天量口径。 "或 20 日量新高（窗口含自身）"恒等于"当日是窗口最大量"，旁路了 2×MA20。"""
     closes = _dist_closes()
     n = len(closes)
     vols = [1000.0] * n
@@ -165,12 +165,12 @@ def test_distribution_huge_volume_requires_ma20_threshold():
     )
     r = ec.detect_distribution(df, "600000")
     assert r["available"]
-    assert r["signals"]["top_huge_vol_bear"]["hit"] is False  # 未达 2×MA20 → 不算天量
+    assert r["legacy_v1"]["top_huge_vol_bear"]["hit"] is False  # 未达 2×MA20 → 不算天量
 
     df2 = df.copy()
     df2["volume"] = vols[:-1] + [3000.0]  # 3×MA20 → 真天量
     r2 = ec.detect_distribution(df2, "600000")
-    assert r2["signals"]["top_huge_vol_bear"]["hit"] is True
+    assert r2["legacy_v1"]["top_huge_vol_bear"]["hit"] is True
 
 
 # ---------------------------------------------------------------- 4. fund_flow 2 字前缀误配

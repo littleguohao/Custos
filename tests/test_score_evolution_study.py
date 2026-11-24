@@ -789,7 +789,9 @@ from custos.research.score_calibration_study import (  # noqa: E402
     CONTRIB_LEG_KEYS,
 )
 
-V0L_LEGS = list(CONTRIB_LEG_KEYS)  # 30 键权威清单（含合成腿 repair_signals）
+V0L_LEGS = list(
+    CONTRIB_LEG_KEYS
+)  # 31 键权威清单（v0.578 +distribution_top_bear）（含合成腿 repair_signals）
 
 
 def _mk_trade(code, d_in, d_out, ret, r):
@@ -942,8 +944,8 @@ class TestV0LatticeUnits:
         for leg in V0L_LEGS:
             for key in ses._v0_leg_weight_keys(leg):
                 assert ov1[key] == DEFAULT_TECH_WEIGHTS[key]
-        # 31 键 = 29 直映腿 + repair_signals 双键
-        assert len(ov1) == 31
+        # 32 键 = 30 直映腿（v0.578 +distribution_top_bear） + repair_signals 双键
+        assert len(ov1) == 32
 
     def test_mult_overrides_negative_leg_sign_preserved(self):
         """负腿倍率缩放罚分幅度、永不变号；0 = 罚分移除。"""
@@ -1044,7 +1046,7 @@ class TestV0LatticeEndToEnd:
         assert "倍率" in cfg["multiplier_space"]
         assert rep["legs"] == V0L_LEGS  # 腿轴 = 权威清单
         lat = rep["lattice"]
-        assert lat["kind"] == "v0_multiplier" and lat["n_legs"] == 30
+        assert lat["kind"] == "v0_multiplier" and lat["n_legs"] == 31
         assert lat["n_combos"] == 64
         assert lat["default_weights_snapshot"] == DEFAULT_TECH_WEIGHTS
         assert lat["leg_weight_keys"]["repair_signals"] == [
@@ -1072,7 +1074,7 @@ class TestV0LatticeEndToEnd:
         # bbi_above 单腿格是全平分「取候选序在前者」碰巧选中 A，审计 E1 正是此病）
         top = rep["top_genome"]
         jl = V0L_LEGS.index("j_low")
-        assert top["weights"] == [1.0 if k == jl else 0.0 for k in range(30)]
+        assert top["weights"] == [1.0 if k == jl else 0.0 for k in range(len(V0L_LEGS))]
         # expr 槽位 = 可还原的倍率向量 JSON 字符串
         mult = json.loads(top["expr"])
         assert mult == top["multipliers"] and mult["j_low"] == 1.0
@@ -1088,7 +1090,7 @@ class TestV0LatticeEndToEnd:
         assert top["mining"]["margin"] == pytest.approx(0.5 - 1 / 6)
         # 等倍率基准 = live V0 默认权重：选中 B 两笔（−0.02/+0.03）
         eq = rep["arms"]["equal_weight"]
-        assert eq["weights"] == [1.0] * 30
+        assert eq["weights"] == [1.0] * len(V0L_LEGS)
         assert eq["reading"]["payoff_ratio"] == pytest.approx(1.5)
         assert eq["reading"]["margin"] == pytest.approx(0.1)
         # arms.v0 即等倍率行读数（V0 本臂不另跑）
@@ -1107,9 +1109,9 @@ class TestV0LatticeEndToEnd:
         assert c2["judgment_window"] is False
         assert rep["criteria_readings"]["R34-C1"]["top_n_mining"] == 2
         # 单腿臂带腿名且全部有读数
-        assert len(rep["arms"]["single_legs"]) == 30
+        assert len(rep["arms"]["single_legs"]) == 31
         assert {s["name"] for s in rep["arms"]["single_legs"]} == {
-            f"single_{i}" for i in range(30)
+            f"single_{i}" for i in range(len(V0L_LEGS))
         }
         j_low_single = rep["arms"]["single_legs"][2]
         assert j_low_single["leg"] == "j_low"
@@ -1156,7 +1158,7 @@ class TestV0LatticeEndToEnd:
         assert sens["flips"] == 0
         assert rep["criteria_readings"]["R34-C3"]["flips"] == 0
         for arm in sens["arms"]:
-            assert len(arm["weights"]) == 30
+            assert len(arm["weights"]) == 31
             assert all(w >= 0 for w in arm["weights"])  # 倍率非负
             assert arm["weights"] != rep["top_genome"]["weights"]  # 确实扰动
             assert arm["flip"] is False
@@ -1359,7 +1361,7 @@ class TestV0LatticeAddon:
         # C2 机械读数 = top margin − 基准 margin（在场可判）
         assert rep["criteria_readings"]["R34-C2"]["delta_mining"] is not None
         # 灵敏度扰动 31 维（30 倍率 + λ——λ 也是基因组参数同受扰）
-        assert len(rep["sensitivity"]["arms"][0]["weights"]) == 31
+        assert len(rep["sensitivity"]["arms"][0]["weights"]) == 32
         # 每加腿最佳档行 = λ=24
         per = rep["arms"]["addon_per_expr"]
         assert per[0]["expr"] == ADDON_EXPR

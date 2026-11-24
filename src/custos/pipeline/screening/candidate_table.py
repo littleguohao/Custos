@@ -470,6 +470,7 @@ COLUMN_LEGEND = [
 RISK_ZH: dict[str, str] = {
     "distribution_high": "出货（高，否决）",
     "distribution_watch": "出货（观察）",
+    "distribution_top_bear": "顶部放量阴（提醒）",
     "distribution_detected_cap_disabled": "出货（已检出，封顶关闭）",
     "macd_three_peaks": "MACD 三打白骨精（否决）",
     "macd_top_divergence": "MACD 顶背离（减分）",

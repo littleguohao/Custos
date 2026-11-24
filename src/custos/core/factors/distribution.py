@@ -305,7 +305,7 @@ def check_top_bear_volume(df) -> dict[str, Any]:
     if n < 61:
         return {"available": False, "hit": False, "bars": []}
     bars: list[dict[str, Any]] = []
-    for t in range(max(61, n - DIST2_LOOKBACK), n):
+    for t in range(max(60, n - DIST2_LOOKBACK), n):
         if c[t] >= o[t] or v[t] < v[t - 20 : t].mean() * DIST2_VOL_MA:
             continue
         if v[t] < v[max(0, t - 60) : t].max() * DIST2_MAX60:
@@ -354,7 +354,7 @@ def check_top_bear_volume(df) -> dict[str, Any]:
 def detect_distribution(df, code: str = "") -> dict[str, Any]:
     """主力出货五方式（顶部派发，B1 §七.3）：负向因子，用于选股规避/降档。
 
-    ① 顶部天量大阴、② 次高点巨量长阴、③ 阶梯放量跌破QSX、④ 双头双巨阴、
+    ① 顶部放量阴线、② 次高点放量阴线（v0.578 起 v2，见 check_top_bear_volume）、③ 阶梯放量跌破QSX、④ 双头双巨阴、
     ⑤ 顶部绿肥红瘦。命中≥1→watch；命中①/②或≥2→high。阈值均为待回测参数。
     """
     close, high, _low, vol = _ohlcv_arrays(df)
@@ -393,12 +393,22 @@ def detect_distribution(df, code: str = "") -> dict[str, Any]:
     # 逐腿检测（腿①-⑤为纯函数，同模块上方；⑥ 大风车走 detect_top_windmill 接线）。
     # 各腿 hit/detail 键值与原内联实现逐字一致。
     sig: dict[str, Any] = {}
-    sig["top_huge_vol_bear"] = _leg_top_huge_vol_bear(
-        close, open_, vol, n, vol_ma20, big_bear
-    )
-    sig["subhigh_vol_bear"] = _leg_subhigh_vol_bear(
-        close, high, open_, vol, n, vol_ma20, long_bear
-    )
+    # v0.578（owner 2026-11-24）：①② 改用 v2「顶部 / 次高点放量阴线」（check_top_bear_volume，近 60 根、阴量 > 前 3 根阳线、
+    # ≥20 日均量 1.5 倍且 ≥ 前 60 根最大量 0.6 倍、顶部或次高点）；顶部 ⇒ ①、次高点 ⇒ ②。🔄 原 ①②（近 5 根、大阴 / 加速 / 前日缩量）
+    # owner 15 张一致 7，停用，结果只留 legacy_v1 备查（不计 hits）。
+    legacy_v1 = {
+        "top_huge_vol_bear": _leg_top_huge_vol_bear(
+            close, open_, vol, n, vol_ma20, big_bear
+        ),
+        "subhigh_vol_bear": _leg_subhigh_vol_bear(
+            close, high, open_, vol, n, vol_ma20, long_bear
+        ),
+    }
+    tb = check_top_bear_volume(df)
+    last = (tb.get("bars") or [None])[-1]
+    for key, kind in (("top_huge_vol_bear", "顶部"), ("subhigh_vol_bear", "次高点")):
+        on = bool(tb.get("hit") and last and last["kind"] == kind)
+        sig[key] = {"hit": on, "detail": dict(last) if on and last else None}
     sig["stairstep_vol_decline"] = _leg_stairstep_vol_decline(
         close, open_, vol, qsx, dks, n
     )
@@ -423,15 +433,25 @@ def detect_distribution(df, code: str = "") -> dict[str, Any]:
 
     hits = [k for k, v in sig.items() if v["hit"]]
     severe = sig["top_huge_vol_bear"]["hit"] or sig["subhigh_vol_bear"]["hit"]
-    risk = "high" if (severe or len(hits) >= 2) else ("watch" if hits else "none")
+    # v0.578（owner 2026-11-24）：①② 顶部 / 次高点放量阴线只提醒、不进风险等级（J<13 样本点约 48% 命中，否决会砍掉半个池子），
+    # 打分侧单独 −15（score_candidates.distribution_top_bear）。风险等级只看 ③~⑥：≥2 项 high、1 项 watch。
+    others = [k for k in hits if k not in ("top_huge_vol_bear", "subhigh_vol_bear")]
+    risk = "high" if len(others) >= 2 else ("watch" if others else "none")
+    top_bear = {
+        "hit": bool(severe),
+        "kind": (tb.get("bars") or [{}])[-1].get("kind") if severe else None,
+        "detail": last if severe else None,
+    }
     return {
         "available": True,
         "signals": sig,
         "hits": hits,
         "hit_count": len(hits),
-        "severe": bool(severe),
+        "severe": bool(severe),  # = ①② 命中（v0.578 起不再抬风险等级）
+        "top_bear": top_bear,
         "risk_level": risk,
         "price_limit": limit,
+        "legacy_v1": legacy_v1,
     }
 
 

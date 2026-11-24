@@ -726,7 +726,7 @@ class TestCharacterizationSnapshot:
         "baseline": "2bd7dd114d5c",
         "bottom_patterns": "76cf78a9d5be",  # v0.218…B2 更新（新增 detect 打包入口槽）
         "capital_intent": "b60916945ed9",  # v0.227 更新（ctx 双形态入口接管）
-        "distribution": "c75399e5d2ad",
+        "distribution": "2e19f7cbe882",  # v0.578 ①② 改 v2 顶部 / 次高点放量阴线，只提醒（owner 2026-11-24）
         "entry_patterns": "bb7bfe3d1b65",  # v0.227 更新（ctx 打包门面接管）
         "fundamentals": "ac8fae92afec",
         "ignition": "951e4fd04fe5",

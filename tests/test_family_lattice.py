@@ -18,7 +18,9 @@ LEGS = list(CONTRIB_LEG_KEYS)
 
 def test_families_partition_all_legs():
     flat = [leg for f in fl.FAMILY_NAMES for leg in fl.FAMILIES[f]]
-    assert sorted(flat) == sorted(LEGS) and len(flat) == len(set(flat)) == 30
+    assert (
+        sorted(flat) == sorted(LEGS) and len(flat) == len(set(flat)) == 31
+    )  # v0.578 +distribution_top_bear
     assert len(fl.GRID) == 729 and fl.BASE in fl.GRID and len(fl.ONOFF) == 64
 
 

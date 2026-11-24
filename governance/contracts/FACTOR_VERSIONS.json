@@ -167,8 +167,8 @@
       ]
     },
     "distribution": {
-      "version": 1,
-      "source_digest": "4b8a4ec082cc294fe688",
+      "version": 2,
+      "source_digest": "ef8d8cc1faf052d595d6",
       "history": [
         {
           "version": 1,
@@ -194,6 +194,16 @@
           "version": 1,
           "date": "2026-11-24",
           "refactor": "①② v2 候选：前 3 根阳线、次高点 0.65、只报最近一根（未接 live）"
+        },
+        {
+          "version": 2,
+          "date": "2026-11-24",
+          "change": "①② 改用 v2 顶部 / 次高点放量阴线（owner 复验 58 张一致 51），旧判法留 legacy_v1"
+        },
+        {
+          "version": 2,
+          "date": "2026-11-24",
+          "refactor": "同批：①② 只提醒不抬风险等级，新增 top_bear 字段"
         }
       ]
     },

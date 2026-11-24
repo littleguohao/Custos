@@ -110,17 +110,18 @@ def test_pullback_shrink_miss_when_volume_not_shrinking():
 
 def test_distribution_top_huge_vol_bear():
     # 20 平 + 10 快涨(~+35%) + 顶部天量大阴(-6%, 4x量)
-    base = [10.0] * 20
+    base = [10.0] * 50  # v0.578：v2 需 ≥61 根
     up = [10.0 * (1.031**i) for i in range(1, 11)]
     red_open = up[-1]
     red_close = up[-1] * 0.94
     closes = base + up + [red_close]
     opens = base + up + [red_open]
-    vols = [1000.0] * 20 + [1500.0] * 10 + [4200.0]
+    vols = [1000.0] * 50 + [1500.0] * 10 + [4200.0]
     r = ec.detect_distribution(make_df(closes, vols=vols, opens=opens), code="600000")
     assert r["available"]
     assert r["signals"]["top_huge_vol_bear"]["hit"] is True
-    assert r["severe"] is True and r["risk_level"] == "high"
+    assert r["severe"] is True and r["top_bear"]["hit"] is True  # v0.578：①② 只提醒
+    assert r["risk_level"] == "none"  # 不抬风险等级（owner 2026-11-24）
 
 
 def test_distribution_green_heavy_red_light():
@@ -285,13 +286,13 @@ def _sig1_bars(next_close=None, next_open=None, next_low=None):
     返回 (df,) —— 信号 K 的开/收/低由调用方按常量自算：
     red_open = 10×1.031**10，red_close = red_open×0.94，sig_low = min×0.995。
     """
-    base = [10.0] * 20
+    base = [10.0] * 50  # v0.578：v2 需 ≥61 根
     up = [10.0 * (1.031**i) for i in range(1, 11)]
     red_open = up[-1]
     red_close = up[-1] * 0.94
     closes = base + up + [red_close]
     opens = base + up + [red_open]
-    vols = [1000.0] * 20 + [1500.0] * 10 + [4200.0]
+    vols = [1000.0] * 50 + [1500.0] * 10 + [4200.0]
     if next_close is not None:
         closes.append(next_close)
         opens.append(next_open if next_open is not None else next_close)
@@ -348,7 +349,8 @@ class TestNextDayConfirmExemption:
         df = _sig1_bars(next_close=13.6, next_open=_RED_CLOSE)  # 见上：不超过 +10%
         r = ec.detect_distribution(df, code="600000")
         assert r["signals"]["top_huge_vol_bear"]["hit"] is True  # 豁免不影响命中
-        assert r["severe"] is True and r["risk_level"] == "high"
+        assert r["severe"] is True and r["top_bear"]["hit"] is True  # v0.578：①② 只提醒
+        assert r["risk_level"] == "none"  # 不抬风险等级（owner 2026-11-24）
 
 
 class TestStairstepCompleted:
@@ -486,7 +488,9 @@ class TestTopWindmill:
         r = ec.detect_distribution(self._windmill_df(next_close=15.8), code="600000")
         assert r["signals"]["top_windmill"]["hit"] is True
         assert "top_windmill" in r["hits"]
-        assert r["risk_level"] == "watch"
+        # v0.578：该大风车 K 同时是顶部放量阴线（①v2，阴量 > 前 3 根阳线且放量）⇒ high；单独大风车仍是 watch 级
+        assert r["signals"]["top_huge_vol_bear"]["hit"] is True
+        assert r["risk_level"] == "watch"  # v0.578：①② 不抬等级，大风车单项仍 watch
 
     def test_detect_distribution_pending_windmill_not_counted_v062(self):
         """pending（信号 K 为最后一根，T+1 未收盘）不计 hit--T+1 纪律。"""

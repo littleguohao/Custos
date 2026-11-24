@@ -170,6 +170,7 @@ DEFAULT_TECH_WEIGHTS: dict[str, Any] = {
     # 出货形态分数层减分（封顶规则不动）
     "distribution_watch": -10,
     "distribution_high": -20,
+    "distribution_top_bear": -15,  # v0.578（owner 2026-11-24）：顶部 / 次高点放量阴线只提醒不受限，扣 15
 }
 
 
@@ -568,11 +569,21 @@ def _distribution_score(cand: dict, w: dict) -> tuple[int, dict]:
     """
     dist = cand.get("distribution") or {}
     dist_level = dist.get("risk_level") if dist.get("available") else None
+    score, contrib = 0, {}
     if dist_level == "watch":
-        return w["distribution_watch"], {"distribution_watch": w["distribution_watch"]}
-    if dist_level == "high":
-        return w["distribution_high"], {"distribution_high": w["distribution_high"]}
-    return 0, {}
+        score, contrib = (
+            w["distribution_watch"],
+            {"distribution_watch": w["distribution_watch"]},
+        )
+    elif dist_level == "high":
+        score, contrib = (
+            w["distribution_high"],
+            {"distribution_high": w["distribution_high"]},
+        )
+    if dist.get("available") and (dist.get("top_bear") or {}).get("hit"):
+        score += w["distribution_top_bear"]
+        contrib["distribution_top_bear"] = w["distribution_top_bear"]
+    return score, contrib
 
 
 def sector_heat(sector_entry: Optional[dict]) -> tuple[str, str, str]:
@@ -698,7 +709,8 @@ def _cap_wave_rules(risk_flags: list, bucket: str, cand: dict, rules: dict):
 
 def _cap_distribution(risk_flags: list, bucket: str, dist: dict, rules: dict) -> str:
     """B1 §七.3：主力出货五方式命中 → high 封 D（否决）；watch 只标记（v0.530）。"""
-    if dist.get("available") and dist.get("hits"):
+    # v0.578：①② 不进风险等级，只按 risk_level（③~⑥）判否决 / 观察
+    if dist.get("available") and dist.get("risk_level") in ("watch", "high"):
         if rules["distribution_cap"]:
             if dist.get("risk_level") == "high":
                 risk_flags.append("distribution_high")
@@ -709,6 +721,8 @@ def _cap_distribution(risk_flags: list, bucket: str, dist: dict, rules: dict) ->
                 risk_flags.append("distribution_watch")
         else:
             risk_flags.append("distribution_detected_cap_disabled")
+    if dist.get("available") and (dist.get("top_bear") or {}).get("hit"):
+        risk_flags.append("distribution_top_bear")  # v0.578：只提醒，不受限
     return bucket
 
 

@@ -390,3 +390,25 @@ def test_one_wave_v3_marks_only_v0555():
         scored["score_detail"]["technical_score"]
         == base["score_detail"]["technical_score"]
     )
+
+
+def test_top_bear_volume_reminds_minus15_not_restricted_v0578():
+    """owner 2026-11-24：顶部 / 次高点放量阴线只提醒、不受限，技术分 −15。"""
+    base = sc.score_candidate(_cand(), SECTOR_STRONG, "做多")
+    dist = {
+        "available": True,
+        "hits": ["top_huge_vol_bear"],
+        "risk_level": "none",
+        "top_bear": {"hit": True, "kind": "顶部"},
+    }
+    scored = sc.score_candidate(_cand(distribution=dist), SECTOR_STRONG, "做多")
+    assert "distribution_top_bear" in scored["risk_flags"]
+    assert (
+        "distribution_high" not in scored["risk_flags"]
+        and "distribution_watch" not in scored["risk_flags"]
+    )
+    assert scored["bucket"] == base["bucket"]
+    assert (
+        scored["score_detail"].get("distribution_top_bear") == -15
+        or scored["score"] == base["score"] - 15
+    )

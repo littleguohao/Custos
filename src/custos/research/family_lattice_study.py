@@ -82,6 +82,7 @@ FAMILIES: dict[str, tuple[str, ...]] = {
         "volume_yy_bear",
         "distribution_watch",
         "distribution_high",
+        "distribution_top_bear",  # v0.578 顶部 / 次高点放量阴线 −15
     ),
 }
 FAMILY_NAMES = tuple(FAMILIES)
