@@ -168,12 +168,22 @@
     },
     "distribution": {
       "version": 1,
-      "source_digest": "6f09737bc459ac4ecfbe",
+      "source_digest": "65236fb0c9e6a75dc42c",
       "history": [
         {
           "version": 1,
           "date": "2026-11-03",
           "change": "初始版本（定义校准前基线，TODO #121）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-24",
+          "refactor": "新增出货 ①② v2 候选 check_top_bear_volume（未接 live）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-24",
+          "refactor": "①② v2 候选次高点口径"
         }
       ]
     },

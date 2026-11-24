@@ -268,6 +268,80 @@ def _leg_top_green_heavy_red_light(close, high, open_, vol, n: int) -> dict[str,
     }
 
 
+# --- ①② v2 候选（owner 2026-11-24）：顶部 / 次高点放量阴线 = 最高优先级出货信号 ---
+DIST2_LOOKBACK = (
+    60  # 近 60 根内出现过即算（owner 指出的出货阴线距看图日 10~62 根；原 ①② 只看 5 根）
+)
+DIST2_PREV_YANG = 5  # 阴线量须大于前 5 根里最大的阳线量（owner：只跟前面的阳线比；一字板收 = 开也算阳线）
+DIST2_VOL_MA = 1.5  # 且 ≥ 前 20 日均量 1.5 倍（过滤缩量区的小阴线）
+DIST2_PIVOT = 2  # 高点 = 最高价分型（左右各 2 根）
+DIST2_NEAR_HIGH = 2  # 阴线距该高点 ≤2 根（顶部 / 次高点当天或前后）
+DIST2_POS = 0.7  # 次高点 ≥ 近 60 根最高 × 0.7（更低的反弹高点不算）
+
+
+def _top_or_second_high(h, low, q: int) -> Optional[str]:
+    """``q``（最高价分型高点）在 q 之前 60 根里：是最高 ⇒ 顶部；≥ 最高 × DIST2_POS ⇒ 次高点；更低不算。
+    ``low`` 暂未使用（v0.572 试过「本轮先见底再见顶」才算次高点，owner 15 张一致 13 → 11，未采用）。"""
+    a = max(0, q - 60)
+    hi = float(h[a : q + 1].max())
+    if h[q] >= hi:
+        return "顶部"
+    return "次高点" if h[q] >= hi * DIST2_POS else None
+
+
+def check_top_bear_volume(df) -> dict[str, Any]:
+    """顶部 / 次高点放量阴线（①② v2 候选，owner 2026-11-24；未接 live）。
+
+    近 DIST2_LOOKBACK 根内任一根 t：阴线（收 < 开），量 > 前 DIST2_PREV_YANG 根阳线（收 ≥ 开）的最大量且 ≥ 20 日均量 × DIST2_VOL_MA，
+    t 前后 DIST2_NEAR_HIGH 根内有最高价分型高点，且它是本轮顶部或次高点（见 _top_or_second_high）。
+    假阴真阳（收 < 开但收 > 前收）：顶部区间算阴量、底部区间算阳量（owner）。顶部区间 = 该高点是次高点（低于它之前 60 根最高），
+    或走势三态（截至 t）最后一段是上涨（owner：走势三态与 N 型结构位置配合）。不要求跌幅、不要求阴线前加速（🔄 原 ①② 的大阴 / 加速 / 前日缩量）。"""
+    from custos.core.factors.b1_structure import check_swing_state  # noqa: PLC0415
+
+    c, h, _l, v = _ohlcv_arrays(df)
+    o = df["open"].astype(float).to_numpy()
+    n = len(c)
+    if n < 61:
+        return {"available": False, "hit": False, "bars": []}
+    bars: list[dict[str, Any]] = []
+    for t in range(max(61, n - DIST2_LOOKBACK), n):
+        if c[t] >= o[t] or v[t] < v[t - 20 : t].mean() * DIST2_VOL_MA:
+            continue
+        yang = [v[j] for j in range(t - DIST2_PREV_YANG, t) if c[j] >= o[j]]
+        if yang and v[t] <= max(yang):
+            continue
+        hit_q = None
+        for q in range(t - DIST2_NEAR_HIGH, min(n, t + DIST2_NEAR_HIGH + 1)):
+            if h[q] < h[max(0, q - DIST2_PIVOT) : q + DIST2_PIVOT + 1].max():
+                continue
+            kind = _top_or_second_high(h, _l, q)
+            if kind:
+                hit_q = (q, kind)
+                break
+        if hit_q is None:
+            continue
+        q, kind = hit_q
+        second = kind == "次高点"
+        fake = bool(c[t] > c[t - 1])  # 假阴真阳
+        if fake and not second:
+            st = check_swing_state(df.iloc[: t + 1]).get("state") or ""
+            if not st.endswith("上涨"):
+                continue  # 底部区间的假阴真阳算阳量
+        bars.append(
+            {
+                "i": t,
+                "bars_ago": n - 1 - t,
+                "high_i": q,
+                "high": float(h[q]),
+                "kind": kind,
+                "fake_yin": fake,
+                "vol_ma20": round(float(v[t] / v[t - 20 : t].mean()), 2),
+                "vs_prev_yang": round(float(v[t] / max(yang)), 2) if yang else None,
+            }
+        )
+    return {"available": True, "hit": bool(bars), "bars": bars}
+
+
 def detect_distribution(df, code: str = "") -> dict[str, Any]:
     """主力出货五方式（顶部派发，B1 §七.3）：负向因子，用于选股规避/降档。
 

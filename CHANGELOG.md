@@ -577,6 +577,7 @@
 | 2026-11-24 | v0.569 | 🔄 修正 v0.568：MACD v2 近距矮峰补回须峰间谷底 ≤0.7×较矮峰（MACD2_WAVE_VALLEY），小抖动不再切波；owner 51 张标注一致 47 → 50（与 v0.567 同）。macd_technics v4（bump） | review 2026-11-24 | TODO #123 |
 | 2026-11-24 | v0.570 | 底部放量合并候选（owner：点火 / 龙头量能 / 底部巨量都是底部放量，近 10~15 根、从 N 型阶段低点起来，按程度 1~3 星，当根不管）：volume_detectors.check_base_volume + calib 模块 base_volume（图上标阶段低点与放量 K）。未接 live；点火 36 张旧标注作废（图集没说明近 10 根） | owner 2026-11-24 | TODO #123 |
 | 2026-11-24 | v0.571 | MACD「过度伸展」更名「乖离过大」并按 owner 定义重写：双线还在上涨 + 红柱滞涨或下降 + 双线超过红柱范围（DEA > 红柱）；原 DIF 绝对值分位口径（绿柱也命中）停用，删 MACD_OVEREXT_*；纯数值判定退出人工校准。仍只作风险标记。macd_technics v5（bump） | owner 2026-11-24 | TODO #123 |
+| 2026-11-24 | v0.572 | 出货 ①② v2 候选（owner：顶部 / 次高点放量阴线优先级最高，阴量须大于前面阳线，假阴真阳顶部算阴、底部算阳）：distribution.check_top_bear_volume + calib 模块 top_bear_volume（图上标高点与阴线）；owner 15 张一致 7 → 13。未接 live | owner 2026-11-24 | TODO #123 |
 
 ## 写入规范（2026-08-29 v0.144 起）
 

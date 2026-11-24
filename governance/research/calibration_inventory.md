@@ -8,7 +8,7 @@
 
 ## 现状
 
-- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 94 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
+- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 100 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
   **P1 live 展示 99 个**（1800 证据标注，不进判定）、P2 研究 67 个。
 - **定义校准：0 / 233**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
 - **清单未覆盖**（需在逐因子校准时一并核）：①函数体内联常量（KDJ 9/3/3、BBI 周期、20 日相对强度窗口等）；
@@ -257,6 +257,9 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
   未接 live（live 仍是三项叠加 +4 / +6 / +10）。图集 `base_volume__mining_v1`；旧图集隐藏点火与 B1 点火（依赖点火，合并后重定），只留回调缩量。
 - **乖离过大（owner 2026-11-24）**：原名「过度伸展」是 agent 对字段 `overextended` 的直译，原文（qn/01_general.md §二）是「乖离过大 = 失去支撑力量，追高易站岗」。原判法 |DIF| 近 120 根分位 ≥90% 且柱体与 DIF 同号，绿柱也命中；`macd_technics__mining_v1` 的 24 张里 23 张绿柱、0 张水上红柱，不对题，已隐藏。
   owner 定义：MACD 双线还在上涨，但红柱开始滞涨或下降，且双线已经超过红柱范围。v0.571 落地：DIF、DEA 都比昨天高 ∧ 0 < 当根红柱 ≤ 昨天 ∧ DEA > 当根红柱；纯数值判定，退出人工校准（钉测）。删 MACD_OVEREXT_PCTL / WIN。挖掘 B 样本点命中 2.9%。live 仍只作风险标记「MACD 乖离过大」。
+- **出货 ①②（owner 2026-11-24，`distribution__mining_v1` labels11.csv 15 张）**：对 7 / 错 8；错的都是 owner 指出更早的顶部 / 次高点放量阴线应判 high，原 ①② 只看近 5 根、要求大阴（≥ 涨跌停 ×0.5 / 0.8）+ 加速 ≥25% / 前日缩量，一根都没认出。
+  owner 判法：顶部和次高点放量阴线是最高优先级出货信号；阴线量须大于**前面**的阳线（一字板算阳线）；假阴真阳（收 < 开、收 > 前收）底部区间算阳量、顶部区间算阴量，区间用走势三态 + N 型结构位置配合判断；#7 000812 2002-05-20 改判为次高点放量出货。
+  候选（v0.572）：`distribution.check_top_bear_volume`（近 60 根；阴量 > 前 5 根阳线最大量且 ≥ 20 日均量 1.5 倍；距最高价分型高点 ≤2 根、该高点 ≥ 近 60 根最高 0.7）。15 张一致 13/15（原 7/15），剩 #8 002568 2025-10-28 判出、#14 000700 2004-02-06 未判出。未接 live。图集 `top_bear_volume__mining_v1`。
 - **纯数值判定退出人工校准（v0.563，owner 2026-11-23）**：MACD 区间（DIF / DEA 是否在 0 轴上 + 柱体放长 / 缩短 / 转绿）只是数值比较，看图只能核实现，改由钉测管四态；`macd_technics__mining_v1` 的 24 张区间图隐藏，MODULES 去掉该字段。
 - **owner 定（2026-11-23）**：一波流 = ①连续 ②快速（几个交易日内）③大幅（≥50%），之后 A 杀或震荡下跌 / 横盘都算，尽力识别；走势只识别买点前最近 1~2 段，尽力识别。
   落地（v0.561）：`b1_structure.check_one_wave_v4`（120 根内 ≤10 根、途中收盘回撤 <10%、最高价较起点最低价 ≥50%），live 提醒改用 v4（风险列「一波流（提醒）」，不否决不计分）；
@@ -325,7 +328,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `technical_monitor` | `TREND_MIN_BARS` | 60 | 趋势判定最少 K 线数 | - | 未校准 |
 | `technical_monitor` | `QFQ_LOAD_BARS` | 100000 | - | - | 未校准 |
 
-### P0（94 个参数）
+### P0（100 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -383,6 +386,12 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `distribution` | `DIST_WINDMILL_RANGE_PCT` | 7.0 | 待回测：宽幅震荡 K=振幅（高−低）/前收 ≥ 此值% | active；R2 | 未校准 |
 | `distribution` | `DIST_WINDMILL_TOP_FRAC` | 0.93 | - | active；R2 | 未校准 |
 | `distribution` | `DIST_WINDMILL_VOL_RATIO` | 1.5 | 待回测：天量=信号 K 量 ≥ 前20日量**中位数**×此值（v0.62 起中位数，见 :351 附近注释——偶发天量不把基准顶飞） | active；R2 | 未校准 |
+| `distribution` | `DIST2_LOOKBACK` | 60 | - | active；R2 | 候选（owner 2026-11-24） |
+| `distribution` | `DIST2_PREV_YANG` | 5 | 阴线量须大于前 5 根里最大的阳线量（owner：只跟前面的阳线比；一字板收 = 开也算阳线） | active；R2 | 候选（owner 2026-11-24） |
+| `distribution` | `DIST2_VOL_MA` | 1.5 | 且 ≥ 前 20 日均量 1.5 倍（过滤缩量区的小阴线） | active；R2 | 候选（owner 2026-11-24） |
+| `distribution` | `DIST2_PIVOT` | 2 | 高点 = 最高价分型（左右各 2 根） | active；R2 | 候选（owner 2026-11-24） |
+| `distribution` | `DIST2_NEAR_HIGH` | 2 | 阴线距该高点 ≤2 根（顶部 / 次高点当天或前后） | active；R2 | 候选（owner 2026-11-24） |
+| `distribution` | `DIST2_POS` | 0.7 | 该高点 ≥ 近 60 根最高价 × 0.7（顶部或次高点；更低的反弹高点不算） | active；R2 | 候选（owner 2026-11-24） |
 | `entry_patterns` | `RS_STRONG_PP` | 3.0 | 个股20日涨幅 − 上证20日涨幅 >= +3pp；纯数值比较 | candidate | 无需 A 类（owner 2026-11-14） |
 | `ignition` | `ZX_CROSS_RECENT` | 10 | 待回测：知行金叉"近N日"窗口 | candidate | 未校准 |
 | `ignition` | `IGNITION_WINDOW` | 10 | 待回测：放量点火扫描窗口（日） | candidate | 未校准 |

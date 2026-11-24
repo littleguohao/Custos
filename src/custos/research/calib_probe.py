@@ -178,6 +178,19 @@ MODULES: dict[str, dict[str, Any]] = {
             "CZ_MIN_BARS",
         ],
     },
+    "top_bear_volume": {  # 出货 ①② v2 候选（owner 2026-11-24：顶部 / 次高点放量阴线，最高优先级）
+        "defmod": "custos.core.factors.distribution",
+        "eval": "top_bear_volume",
+        "chart_panes": ["vol"],
+        "fields": ["top_bear_volume.hit"],
+        "params": [
+            "DIST2_LOOKBACK",
+            "DIST2_PREV_YANG",
+            "DIST2_VOL_MA",
+            "DIST2_NEAR_HIGH",
+            "DIST2_POS",
+        ],
+    },
     "base_volume": {  # 底部放量合并候选（owner 2026-11-24：点火 / 龙头量能 / 底部巨量合并，按程度 1~3 星）
         "defmod": "custos.core.factors.volume_detectors",
         "eval": "base_volume",
@@ -450,6 +463,14 @@ def evaluate(
 
         with patched(defmod, overrides):
             an = {"macd_v2": mtm.check_macd_divergence_v2(df.reset_index(drop=True))}
+        return {f: field_value(an, f) for f in fields}
+    if spec is not None and spec["eval"] == "top_bear_volume":
+        from custos.core.factors import distribution as dsm  # noqa: PLC0415
+
+        with patched(defmod, overrides):
+            an = {
+                "top_bear_volume": dsm.check_top_bear_volume(df.reset_index(drop=True))
+            }
         return {f: field_value(an, f) for f in fields}
     if spec is not None and spec["eval"] == "base_volume":
         from custos.core.factors import volume_detectors as vdm  # noqa: PLC0415
@@ -1288,6 +1309,7 @@ def _csv_rows(rep: dict[str, Any], frames: dict) -> list[list[Any]]:
 #: 每个字段「检测器在测什么」的中文说明（v0.516，owner 2026-11-13：放在每张图最上方）。
 #: 只说定义，不说好坏；出处见各检测器 docstring。键 = summary 里的字段名。
 FIELD_DEF: dict[str, str] = {
+    "top_bear_volume.hit": "顶部 / 次高点放量阴线（出货 ①② v2）：近 60 根内，顶部或次高点（最高价分型、≥ 近 60 根最高 7 成）前后 2 根内出现阴线，量大于前 5 根里最大的阳线量、且 ≥ 20 日均量 1.5 倍。假阴真阳（收低于开、高于前收）只在顶部区间算阴量。图上标高点与阴线",
     "base_volume.l1": "底部放量 ⭐（单根放量阳线）：近 15 根内，从阶段低点（前 20 根最低收盘）起 5 根内出现一根放量阳线（量 ≥ 前 5 日均量 1.5 倍、涨 ≥3%），且没有更强的放量。评价的是量能状态，当根形态不管。图上标阶段低点与放量 K",
     "base_volume.l2": "底部放量 ⭐⭐（连续放量）：近 15 根内，从阶段低点起 5 根内连续 3 根量都 ≥ 之前 20 根最低日量 1.7 倍，且没有巨量。当根形态不管。图上标阶段低点与放量 K",
     "base_volume.l3": "底部放量 ⭐⭐⭐（巨量）：近 15 根内，从阶段低点起 5 根内出现一根量 ≥ 近 250 根均量 2 倍的巨量。当根形态不管。图上标阶段低点与放量 K",
@@ -2380,6 +2402,28 @@ def macd_v2_marks(df: Any, field: str) -> list[dict[str, Any]]:
     ]
 
 
+def top_bear_marks(df: Any) -> list[dict[str, Any]]:
+    """顶部 / 次高点放量阴线：每根一条线（价位 = 对应高点），标「顶部 / 次高点 放量阴」。"""
+    from custos.core.factors import distribution as dsm  # noqa: PLC0415
+
+    r = dsm.check_top_bear_volume(df.reset_index(drop=True))
+    ds = [str(x)[:10] for x in df["date"]]
+    first_i = max(0, len(df) - CHART_BARS)
+    return [
+        {
+            "kind": "M",
+            "price": round(b["high"], 2),
+            "date": ds[b["i"]],
+            "start": ds[min(b["i"], b["high_i"])],
+            "end": ds[max(b["i"], b["high_i"])],
+            "label": f"{b['kind']}放量阴" + ("（假阴真阳）" if b["fake_yin"] else ""),
+            "ongoing": False,
+        }
+        for b in (r.get("bars") or [])
+        if b["i"] >= first_i
+    ]
+
+
 def base_volume_marks(df: Any) -> list[dict[str, Any]]:
     """底部放量：阶段低点一条线 + 放量 K（起止）一条线，标星级。"""
     from custos.core.factors import volume_detectors as vdm  # noqa: PLC0415
@@ -2517,7 +2561,11 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
                                 else (
                                     base_volume_marks(fr[1])
                                     if rep["module"] == "base_volume"
-                                    else []
+                                    else (
+                                        top_bear_marks(fr[1])
+                                        if rep["module"] == "top_bear_volume"
+                                        else []
+                                    )
                                 )
                             )
                         ),
