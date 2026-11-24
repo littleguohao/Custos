@@ -682,13 +682,7 @@ def _cap_wave_rules(risk_flags: list, bucket: str, cand: dict, rules: dict):
             bucket = cap_bucket(bucket, "B")
         else:
             risk_flags.append("sprint_wave_detected_cap_disabled")
-    if (cand.get("volume_sustain") or {}).get("status") == "retreat":
-        # CZ §14.6：连续3日量<峰值55%，主力撤退 → 最高 C
-        if rules["volume_retreat"]:
-            risk_flags.append("main_force_retreat")
-            bucket = cap_bucket(bucket, "C")
-        else:
-            risk_flags.append("main_force_retreat_cap_disabled")
+    # 🔄 v0.576（owner 2026-11-24）：量能撤退（最近 3 根量 < 13 根内峰值 55%）去掉——与 B1「放量之后回调缩量」矛盾，不再标记 / 封顶
     if (cand.get("one_wave_v4") or {}).get("hit"):
         # v0.561（owner 2026-11-23）：一波流 = 连续、快速、大幅（v4）；只作提醒——不封顶、不改状态、不计分
         risk_flags.append("one_wave")
@@ -795,8 +789,6 @@ def _reason_patterns(cand: dict, entry_reason: list) -> None:
 
 def _reason_b1cz_signals(cand: dict, entry_reason: list) -> None:
     """B1/CZ 对齐信号：五日战法/龙头量/底部巨量/修复信号/非一波流。"""
-    if (cand.get("five_day_entry") or {}).get("hit"):
-        entry_reason.append("五日战法入场")
     if (cand.get("leader_volume") or {}).get("hit"):
         entry_reason.append("龙头量能")
     if (cand.get("bottom_volume") or {}).get("hit"):

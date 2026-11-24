@@ -40,16 +40,12 @@ WAVE_LABELS = {"buildup": "建仓", "rally": "拉升", "sprint": "冲刺"}
 
 
 def _cz_tags(c: dict) -> str:
-    """CZ 标签紧凑拼接：五日/龙头量/底部巨量/撤退。"""
+    """CZ 标签紧凑拼接：龙头量/底部巨量。🔄 v0.576 去掉「五日」（v0.529 已退出打分，owner 2026-11-24：不再显示）与「撤退」（owner 2026-11-24 去掉）。"""
     tags = []
-    if (c.get("five_day_entry") or {}).get("hit"):
-        tags.append("五日")
     if (c.get("leader_volume") or {}).get("hit"):
         tags.append("龙头量")
     if (c.get("bottom_volume") or {}).get("hit"):
         tags.append("底部巨量")
-    if (c.get("volume_sustain") or {}).get("status") == "retreat":
-        tags.append("撤退")
     return "、".join(tags) or "-"
 
 
@@ -453,7 +449,7 @@ COLUMN_LEGEND = [
     ),
     (
         "触发",
-        "公式命中 · 模式标签（BBI上/低J/缩量/反转K/强RS）· CZ 标签（五日/龙头量/底部巨量/撤退）· 波浪（建仓/拉升/冲刺）",
+        "公式命中 · 模式标签（BBI上/低J/缩量/反转K/强RS）· CZ 标签（龙头量/底部巨量）· 波浪（建仓/拉升/冲刺）",
     ),
     (
         "证据标记",

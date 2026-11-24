@@ -434,7 +434,7 @@ def test_evidence_and_trigger_cells():
     r = _rows(ct.render_table({"status": "ok", "candidates": [c, c2]}, "2026-11-03"))
     assert "ADX25" in r["600000"][7] and "S反转66.5" in r["600000"][7]
     assert "平台回踩✓@10.25" in r["600000"][7] and r["000002"][7] == "-"
-    assert r["600000"][6] == "KDJ_J_LOW · 低J · 五日"
+    assert r["600000"][6] == "KDJ_J_LOW · 低J"  # v0.576 五日不再显示
 
 
 def test_industry_preferred_over_theme_sector():

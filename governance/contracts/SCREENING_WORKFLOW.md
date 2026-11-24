@@ -326,3 +326,5 @@ next_step（由封顶后的 bucket 定）：A→buy_review（v0.50：原 generat
 （单线程阻塞，需重启客户端恢复，见 governance/data/TDX_LOCAL_INTERFACES.md「TQ 服务可被打挂」）。
 因此：固定参数形态写入代码（formula_name/formula_arg/stock_list/stock_period/
 count/dividend_type），不得随意改动；所有调用带 15s 超时与熔断。
+
+> v0.576（owner 2026-11-24）：候选表不再显示「五日」（v0.529 已退出打分）与「撤退」；量能撤退风险标记（含「仅标记」）去掉，与 B1 放量之后回调缩量矛盾。

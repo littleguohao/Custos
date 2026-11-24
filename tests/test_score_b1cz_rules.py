@@ -54,7 +54,8 @@ def test_volume_sustain_retreat_no_longer_caps():
         "做多",
     )
     assert "main_force_retreat" not in scored["risk_flags"]
-    assert "main_force_retreat_cap_disabled" in scored["risk_flags"]
+    # v0.576（owner 2026-11-24）：撤退去掉，连「仅标记」也不再出现
+    assert "main_force_retreat_cap_disabled" not in scored["risk_flags"]
     # v0.529：分层改 B1 规则（J<13 ∧ QSX>DKX ⇒ A），量能撤退不影响
     assert scored["bucket"] == "A"
 
@@ -319,7 +320,9 @@ def test_cap_rules_disabled_retreat_revoked_keep_a():
         },
     )
     assert scored["bucket"] == "A"  # 两条降档全关 + 资金意图强 → 保持基础 强×强＝A
-    assert "main_force_retreat_cap_disabled" in scored["risk_flags"]
+    assert (
+        "main_force_retreat_cap_disabled" not in scored["risk_flags"]
+    )  # v0.576 撤退去掉
     assert "non_one_wave_revoked_cap_disabled" in scored["risk_flags"]
 
 

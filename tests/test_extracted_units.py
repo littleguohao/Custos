@@ -96,7 +96,7 @@ class TestScoreCandidateUnits:
             wave_type="build",
         )
         assert "公式命中:bbi_above" in rs and "公式命中:j_low" in rs
-        assert any("5日" in x or "五日" in x or "入场" in x for x in rs), rs
+        assert not any("五日" in x for x in rs), rs  # v0.576 五日战法不再进入选理由
 
     def test_four_leg_is_evidence_not_gate(self):
         """⚠️ 四面共振是**证据层描述**，不是 gate。
