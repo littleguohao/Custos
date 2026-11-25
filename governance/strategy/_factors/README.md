@@ -93,6 +93,26 @@
 ⚠️ 没有 "falsified" 这一档是刻意的（owner：不要随便证伪）——needs_work = 「按现有证据
 不可用，但证据本身待重跑」。
 
+## 概念唯一实现（v0.596，owner 2026-11-25「同一件事不要搞好几套实现」）
+
+同一个形态概念全项目只有一份实现，其余地方只许调用。登记表与钉测在 `tests/test_concept_single_source.py`：
+名字像这些概念的新函数、写死的涨停阈值、indicators.py 之外的 EMA / MACD 都会让测试变红；原始阴阳比较、原始量比分母只减不增。
+
+| 概念 | 唯一实现 | 口径 |
+|---|---|---|
+| MACD 平台点 | `b1_structure.macd_platform_segments` | owner 通达信公式：红柱段内阴线最高开盘 = 平台顶 H，绿柱段内阴线最低收盘 = 平台底 L |
+| 走势三态 | `b1_structure.check_swing_state` | N 结构抬高 = 震荡上涨、横盘 = 横盘震荡、降低 = 震荡下跌，前后不同 ⇒「X 转 Y」 |
+| 上升 / 下降 N 结构位 | `b1_structure.check_n_structure` / `check_descending_n_structure` | 已完成平台点；持仓 P0 / P1 |
+| 上涨段 / 回调段 | `b1_structure.rally_segment` | 最近平台顶 H 与前一平台底 L；H 之后 = 回调段 |
+| 价格区间 | `b1_structure.price_zone` | 走势三态最后一段上涨 = 顶部；有下跌段 = 底部 |
+| 顶部 / 次高点放量阴线 | `distribution.top_bear_bars` | owner 11-24 校准；高点 = 平台顶所在红柱段最高价 |
+| MACD 背离 / 三打白骨精 | `macd_technics.macd_divergence_v2_arrays` | 绿柱和绿柱比、红柱和红柱比，同组多波峰按波 |
+| 涨停 | `code_utils.is_limit_up` | 收盘 = 涨停价或涨幅在 限幅 ± 0.2% |
+| 涨跌停幅度 | `code_utils.price_limit_pct` | 按代码前缀：主板 10、创业 / 科创 20、北交所 30 |
+| K 线阴阳 | `indicators.candle_side` | 假阴真阳底部算阳、顶部算阴；一字板按前收；假阳真阴暂按阳 |
+| 量比 | `indicators.vol_ratio` / `vol_ma_prev` | 量 / 前 5 日均量（不含当根） |
+| MACD / EMA | `indicators.macd_series` / `ema` | 中式 ×2 柱 |
+
 ## 新增因子
 
 放一份 `lower_snake.md`（因子无阅读顺序，故**不编号**），在注册表 `factors` 段登记

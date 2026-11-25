@@ -175,6 +175,10 @@ uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 �
 - 规范入口 `detect(df, code, ctx=)` / `score()`，live 标注与研究 SCORERS 同源
   （改判定语义 = 语义变更，须立项 + 回测）。
 
+**概念唯一实现**（v0.596，`tests/test_concept_single_source.py`）：走势三态、MACD 平台点 / N 结构、上涨段、价格区间、顶部放量阴线、
+MACD 背离、涨停、涨跌停幅度、K 线阴阳、量比、EMA / MACD 各只有一份实现（登记表见 `governance/strategy/_factors/README.md`「概念唯一实现」）。
+同类名字的新函数、写死涨停阈值、indicators.py 之外的 EMA 都会红；原始 `收<开` 比较与 `vol[-6:-1].mean()` 只减不增。
+
 **因子版本表**（v0.481，`governance/contracts/FACTOR_VERSIONS.json`，`tests/test_factor_versions.py`）：每个因子模块 + `b1_thresholds`
 一个整数版本（每升一次 = 判定语义变一次）+ 规范化 AST 源码摘要（剔注释/docstring/空 type_params，跨 Python 版本稳定）。改了因子代码不处理版本即红：语义变跑
 `scripts/dev/factor_versions.py --bump <因子> --reason ...`，纯重构跑 `--refactor`；用 holdout 期 1800 结果做校准须 `--holdout-use` 登记。
