@@ -20,6 +20,7 @@ from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays
 
 
 from custos.core.indicators import (
+    vol_ratio,
     _infer_price_limit,
     candle_side,
     qsx_series,
@@ -83,9 +84,8 @@ def _pct_chg(close, t: int) -> float:
 
 
 def _vol_ratio5(vol, t: int) -> float | None:
-    """量比 = t 日量 / 前 5 日均量（基线为 0 → None）。"""
-    base = vol[max(0, t - 5) : t].mean()
-    return float(vol[t] / base) if base else None
+    """量比 = t 日量 / 前 5 日均量（v0.595 起委托 indicators.vol_ratio 唯一实现）。"""
+    return vol_ratio(vol, t)
 
 
 def _leg_stairstep_vol_decline(close, open_, vol, qsx, dks, n: int) -> dict[str, Any]:

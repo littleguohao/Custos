@@ -45,7 +45,7 @@ FACTOR: dict[str, Any] = {
 
 from custos.core.code_utils import price_limit_pct  # noqa: E402
 from custos.core.b1_thresholds import change_in_range  # noqa: E402  反转K涨跌幅判定（live 同口径，round-2）
-from custos.core.indicators import amplitude_pct as amplitude_pct_of  # noqa: E402  振幅唯一实现
+from custos.core.indicators import amplitude_pct as amplitude_pct_of, vol_ma_prev  # noqa: E402  振幅唯一实现
 
 _kdj_fn: Callable[..., Any] | None  # 导入失败时退 None（调用点有守卫）
 _kdj_series_fn: Callable[..., Any] | None  # 同上（v0.236 预计算旁路的全序列版）
@@ -350,7 +350,7 @@ def compute_penalty(df, code: str = "") -> dict[str, Any]:
     pen = 0.0
     detail = None
     for t in range(n - 1, max(0, n - 6), -1):
-        base = vol[max(0, t - 5) : t].mean()
+        base = vol_ma_prev(vol, t)  # v0.595 量比唯一实现
         vr = (vol[t] / base) if base else None
         chg = (close[t] / close[t - 1] - 1) * 100 if close[t - 1] else 0.0
         if (
@@ -363,7 +363,7 @@ def compute_penalty(df, code: str = "") -> dict[str, Any]:
             if not recovered:
                 pen = 15.0
             else:
-                cur_base = vol[-6:-1].mean()
+                cur_base = vol_ma_prev(vol, n - 1)
                 pen = (
                     10.0 if (cur_base and vol[-1] < cur_base * PEN_RECOVER_VOL) else 5.0
                 )
@@ -544,7 +544,7 @@ def _rev_oversold(close, high, n: int, j) -> dict[str, Any]:
 
 def _rev_contraction_stabilize(close, low, vol, n: int) -> dict[str, Any]:
     """缩量企稳 0-30：极致缩量 + 回调段缩量 + 守近20日低。"""
-    vol_ma5_prev = float(vol[-6:-1].mean()) if n >= 6 else None
+    vol_ma5_prev = vol_ma_prev(vol, n - 1) if n >= 6 else None
     vr = (vol[-1] / vol_ma5_prev) if vol_ma5_prev else None
     vol20 = vol[-20:]
     pctile = float((vol20 < vol[-1]).mean() * 100) if len(vol20) >= 20 else None
@@ -979,7 +979,7 @@ def _rev_contraction_at(i: int, a: dict[str, Any]) -> float:
     """_rev_contraction_stabilize 的第 i 点；extreme/low20 经 a 带出供确认段复用。"""
     nn = i + 1
     close, low, vol = a["close"], a["low"], a["vol"]
-    vol_ma5_prev = float(vol[i - 5 : i].mean()) if nn >= 6 else None
+    vol_ma5_prev = vol_ma_prev(vol, i) if nn >= 6 else None
     vr = (vol[i] / vol_ma5_prev) if vol_ma5_prev else None
     vol20 = vol[i - 19 : i + 1]
     pctile = float((vol20 < vol[i]).mean() * 100) if len(vol20) >= 20 else None
@@ -1207,7 +1207,7 @@ def _penalty_bar_at(a: dict[str, Any], i: int, t: int, big: float) -> Optional[f
     """
     close, high, vol, open_ = a["close"], a["high"], a["vol"], a["open"]
     nn = i + 1
-    base = vol[max(0, t - 5) : t].mean()
+    base = vol_ma_prev(vol, t)
     vr = (vol[t] / base) if base else None
     chg = (close[t] / close[t - 1] - 1) * 100 if close[t - 1] else 0.0
     if not (

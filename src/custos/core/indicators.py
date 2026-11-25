@@ -584,6 +584,20 @@ def zhixing_state(
     }
 
 
+def vol_ma_prev(vol, t: int, window: int = 5) -> float:
+    """第 t 根之前 ``window`` 根的均量（不含 t；不足用已有的；没有 ⇒ 0.0）——「量比」分母的**全项目唯一实现**（v0.595）。"""
+    import numpy as np  # noqa: PLC0415
+
+    base = np.asarray(vol[max(0, t - window) : t], dtype=float)
+    return float(base.mean()) if len(base) else 0.0
+
+
+def vol_ratio(vol, t: int, window: int = 5) -> Optional[float]:
+    """量比 = 第 t 根量 / 前 ``window`` 根均量（``vol_ma_prev``）；分母为 0 ⇒ None。"""
+    base = vol_ma_prev(vol, t, window)
+    return float(vol[t] / base) if base else None
+
+
 def candle_side(
     o: float, c: float, prev_c: Optional[float] = None, zone: Optional[str] = None
 ) -> int:

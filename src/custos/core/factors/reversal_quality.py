@@ -26,7 +26,10 @@ from __future__ import annotations
 from typing import Any, Optional
 import pandas as pd
 
-from custos.core.indicators import amplitude_pct as amplitude_pct_of  # 振幅唯一实现
+from custos.core.indicators import (
+    amplitude_pct as amplitude_pct_of,
+    vol_ma_prev,
+)  # 振幅唯一实现
 
 # ⚠️ 阈值**保持与 backtest_factors 原值一致**（对称 ±2%）并**刻意不读环境变量** ——
 # 改了会作废已有回测数字，而那些数字已在重跑清单里（R2 P1）。
@@ -76,7 +79,9 @@ def score(
             high = df["high"].astype(float).values
             low = df["low"].astype(float).values
             vol = df["volume"].astype(float).to_numpy()
-        vma5 = vol[-6:-1].mean() if len(vol) >= 6 else vol[:-1].mean()
+        vma5 = vol_ma_prev(
+            vol, len(vol) - 1
+        )  # v0.595 量比唯一实现（不足 5 根用已有的，同原 vol[:-1].mean()）
         v20 = vol[-20:]
         pts = 0
         pts += int(vma5 > 0 and vol[-1] / vma5 <= REVK_VOL_RATIO)  # 缩量

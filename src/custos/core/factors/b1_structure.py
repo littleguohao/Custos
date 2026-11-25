@@ -33,7 +33,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays  # noqa: E402
-from custos.core.indicators import kdj, macd_series, pct_change  # noqa: E402
+from custos.core.indicators import kdj, macd_series, pct_change, vol_ratio  # noqa: E402
 
 FACTOR: dict[str, Any] = {
     "id": "b1_structure",
@@ -187,16 +187,15 @@ def _repair_shrink_stop(
     close, vol, n: int
 ) -> tuple[bool, Optional[float], Optional[float]]:
     """修复信号②：缩量止跌（量比 <= REPAIR_VOL_SHRINK 且涨跌幅在 ±REPAIR_CHANGE_PCT 内）。"""
-    vol_ma5_prev = float(vol[-6:-1].mean()) if n >= 6 else None
-    vol_ratio = float(vol[-1] / vol_ma5_prev) if vol_ma5_prev else None
+    vr = vol_ratio(vol, n - 1) if n >= 6 else None  # v0.595 量比唯一实现
     change = (close[-1] / close[-2] - 1) * 100 if n >= 2 and close[-2] else None
     hit = bool(
-        vol_ratio is not None
-        and vol_ratio <= REPAIR_VOL_SHRINK
+        vr is not None
+        and vr <= REPAIR_VOL_SHRINK
         and change is not None
         and abs(change) <= REPAIR_CHANGE_PCT
     )
-    return hit, vol_ratio, change
+    return hit, vr, change
 
 
 def _repair_rs_turn(
@@ -344,10 +343,8 @@ def check_five_day_entry_v2(df) -> dict[str, Any]:
 
 
 def _v2_vol_up(vol, t: int) -> bool:
-    base = vol[max(0, t - 5) : t]
-    return bool(
-        len(base) and base.mean() > 0 and vol[t] >= NOW_V2_VOL_RATIO * base.mean()
-    )
+    r = vol_ratio(vol, t)  # v0.595 量比唯一实现
+    return bool(r is not None and r >= NOW_V2_VOL_RATIO)
 
 
 def check_non_one_wave_v2(df) -> dict[str, Any]:

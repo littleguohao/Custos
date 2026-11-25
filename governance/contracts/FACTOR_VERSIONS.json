@@ -58,7 +58,7 @@
     },
     "b1_structure": {
       "version": 7,
-      "source_digest": "c3ef6fc14ee7ea2d1b17",
+      "source_digest": "0d1574ae0576d9e32762",
       "history": [
         {
           "version": 1,
@@ -129,6 +129,11 @@
           "version": 7,
           "date": "2026-11-25",
           "change": "阴阳线统一判定 indicators.candle_side（假阴真阳按区间，一字板按前收）+ 区间唯一判定 price_zone（owner 2026-11-25）"
+        },
+        {
+          "version": 7,
+          "date": "2026-11-25",
+          "refactor": "量比分母改调 indicators.vol_ma_prev / vol_ratio 唯一实现（输出逐位不变，快照钉测通过）"
         }
       ]
     },
@@ -198,7 +203,7 @@
     },
     "distribution": {
       "version": 6,
-      "source_digest": "b591c80de05d85deb581",
+      "source_digest": "7764b3e07e2feb1295a9",
       "history": [
         {
           "version": 1,
@@ -254,6 +259,11 @@
           "version": 6,
           "date": "2026-11-25",
           "change": "价格高低点改用 MACD 平台点、MACD 背离统一走 macd_divergence_v2_arrays；删分型摆点与旧背离 / 旧 ①② 实现（owner 2026-11-25）"
+        },
+        {
+          "version": 6,
+          "date": "2026-11-25",
+          "refactor": "量比分母改调 indicators.vol_ma_prev / vol_ratio 唯一实现（输出逐位不变，快照钉测通过）"
         }
       ]
     },
@@ -281,7 +291,7 @@
     },
     "ignition": {
       "version": 3,
-      "source_digest": "b6588765a82874864862",
+      "source_digest": "61e936cb688273bfef9b",
       "history": [
         {
           "version": 1,
@@ -302,6 +312,11 @@
           "version": 3,
           "date": "2026-11-25",
           "change": "价格高低点改用 MACD 平台点、MACD 背离统一走 macd_divergence_v2_arrays；删分型摆点与旧背离 / 旧 ①② 实现（owner 2026-11-25）"
+        },
+        {
+          "version": 3,
+          "date": "2026-11-25",
+          "refactor": "量比分母改调 indicators.vol_ma_prev / vol_ratio 唯一实现（输出逐位不变，快照钉测通过）"
         }
       ]
     },
@@ -435,12 +450,17 @@
     },
     "platform_pullback": {
       "version": 1,
-      "source_digest": "8872c427702835bc16fb",
+      "source_digest": "16924221bc869717b747",
       "history": [
         {
           "version": 1,
           "date": "2026-11-03",
           "change": "初始版本（定义校准前基线，TODO #121）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-25",
+          "refactor": "量比分母改调 indicators.vol_ma_prev / vol_ratio 唯一实现（输出逐位不变，快照钉测通过）"
         }
       ]
     },
@@ -604,12 +624,17 @@
     },
     "reversal_quality": {
       "version": 1,
-      "source_digest": "7a94633c198a20b2c16e",
+      "source_digest": "d149717e78bc54e21c95",
       "history": [
         {
           "version": 1,
           "date": "2026-11-03",
           "change": "初始版本（定义校准前基线，TODO #121）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-25",
+          "refactor": "量比分母改调 indicators.vol_ma_prev / vol_ratio 唯一实现（输出逐位不变，快照钉测通过）"
         }
       ]
     },
@@ -637,7 +662,7 @@
     },
     "s_shape": {
       "version": 2,
-      "source_digest": "5d61ed9979e73886c9f9",
+      "source_digest": "ec443816d51bc16c9f2c",
       "history": [
         {
           "version": 1,
@@ -658,6 +683,11 @@
           "version": 2,
           "date": "2026-11-25",
           "change": "涨停 / 涨跌停幅度统一口径（owner 2026-11-25：通达信 ZT 公式，限幅按代码前缀，去掉行情自纠）"
+        },
+        {
+          "version": 2,
+          "date": "2026-11-25",
+          "refactor": "量比分母改调 indicators.vol_ma_prev / vol_ratio 唯一实现（输出逐位不变，快照钉测通过）"
         }
       ]
     },
@@ -726,7 +756,7 @@
     },
     "wave_type": {
       "version": 3,
-      "source_digest": "80c776971b13b20cb6f2",
+      "source_digest": "19eb78124cbebacaa0bd",
       "history": [
         {
           "version": 1,
@@ -742,6 +772,11 @@
           "version": 3,
           "date": "2026-11-25",
           "change": "上涨段统一由 MACD 平台 N 结构定位（rally_segment 唯一实现，owner 2026-11-25）"
+        },
+        {
+          "version": 3,
+          "date": "2026-11-25",
+          "refactor": "量比分母改调 indicators.vol_ma_prev / vol_ratio 唯一实现（输出逐位不变，快照钉测通过）"
         }
       ]
     },

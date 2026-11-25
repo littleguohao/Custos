@@ -31,6 +31,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays  # noqa: E402
+from custos.core.indicators import vol_ma_prev  # noqa: E402  量比唯一实现
 
 FACTOR: dict[str, Any] = {
     "id": "ignition",
@@ -74,7 +75,7 @@ def check_ignition(df) -> dict[str, Any]:
         return {"hit": False, "available": False}
     hit_detail = None
     for t in range(max(11, n - IGNITION_WINDOW), n):
-        base5 = vol[t - 5 : t].mean()
+        base5 = vol_ma_prev(vol, t)  # v0.595 量比唯一实现
         if not base5:
             continue
         vr = float(vol[t] / base5)
@@ -181,7 +182,7 @@ def check_pullback_shrink_v2(df, dks_last: Optional[float] = None) -> dict[str, 
     k = max(1, len(pv) // 3)
     head = float(pv[:k].mean())
     decay = float(pv[-k:].mean() / head) if head else None
-    base5 = float(vol[-6:-1].mean())
+    base5 = vol_ma_prev(vol, n - 1)
     vr = float(vol[-1] / base5) if base5 else None
     yin = bool(close[-1] < open_[-1])
     body = abs(close[-1] - open_[-1]) / close[-2] * 100 if close[-2] else 0.0

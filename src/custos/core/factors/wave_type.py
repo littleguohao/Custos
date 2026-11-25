@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 from custos.core.factors import b1_structure as _bs  # v0.591 上涨段唯一定位
 from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays
+from custos.core.indicators import vol_ma_prev  # noqa: E402  量比唯一实现
 
 
 FACTOR: dict[str, Any] = {
@@ -98,7 +99,7 @@ def _top_vol_ratio(vol, i_high: int) -> Optional[float]:
 def _start_bull_candle(close, vol, i_low: int, n: int) -> bool:
     """启动段放量长阳：启动低点后5日内存在涨幅>=5%且量>=前5日均量1.5倍"""
     for t in range(i_low + 1, min(i_low + 6, n)):
-        base = vol[max(0, t - 5) : t].mean()
+        base = vol_ma_prev(vol, t)  # v0.595 量比唯一实现
         # close[t-1] 守卫与上方 accel_10d（close[t-10] > 0）同款：prev close<=0 的脏数据
         # bar 直接跳过，不算启动长阳（此前缺这个守卫会 RuntimeWarning: divide by zero）。
         if (

@@ -34,7 +34,7 @@ FACTOR: dict[str, Any] = {
 # 原先的 screening 一项已于 2026-08-08 删除：本模块只依赖 src 根
 
 
-from custos.core.indicators import j_series as _j_canonical  # noqa: E402
+from custos.core.indicators import j_series as _j_canonical, vol_ma_prev  # noqa: E402
 
 PLATFORM_LOOKBACK = 60  # 平台回看窗
 BREAKOUT_WITHIN = 40  # 突破须发生在近 40 日内
@@ -123,7 +123,9 @@ def _is_top_volume_exhaustion(
 
 def _apply_stabilize(out: dict[str, Any], df: pd.DataFrame, vol: Any) -> None:
     """可选企稳过滤:就地给 out 追加 vol_shrink / j / stabilized 三键(键序契约)。"""
-    vma5 = vol[-6:-1].mean() if len(vol) >= 6 else 0.0
+    vma5 = (
+        vol_ma_prev(vol, len(vol) - 1) if len(vol) >= 6 else 0.0
+    )  # v0.595 量比唯一实现
     out["vol_shrink"] = bool(vma5 > 0 and vol[-1] / vma5 <= 0.7)
     # ⚠️ 2026-08-07 破环：这里原本惰性 `import backtest_factors as bt`
     # 只为拿 `bt._kdj` —— 而 `bt._kdj` 就是 `technical_monitor.kdj`
