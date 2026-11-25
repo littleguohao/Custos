@@ -177,7 +177,7 @@ MODULES: dict[str, dict[str, Any]] = {
             "DIST2_PREV_YANG",
             "DIST2_VOL_MA",
             "DIST2_MAX60",
-            "DIST2_NEAR_HIGH",
+            "DIST2_SEG_TAIL",
             "DIST2_POS",
         ],
     },
@@ -218,10 +218,7 @@ MODULES: dict[str, dict[str, Any]] = {
             "macd_technics.top_divergence.hit",
             "macd_technics.three_peaks.hit",
         ],
-        "params": [
-            "MACD_SWING_FRACTAL",
-            "MACD_DIV_LOOKBACK",
-        ],
+        "params": [],
     },
     "distribution": {
         "defmod": "custos.core.factors.distribution",

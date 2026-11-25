@@ -315,16 +315,38 @@ class TestAdxExtreme:
         assert r["available"] and r["legs"]["adx"]["adx"] >= 60.0, r["legs"]
         assert r["hit"]
 
-    def test_extreme_side_bottom_divergence(self):
+    def test_extreme_side_bottom_divergence(self, monkeypatch):
         # 极端位 + 底背离腿中 → side="bottom"（gate 转译消费的正是这个键）
+        from custos.core.factors import macd_technics as mt
+
+        # v0.594：背离腿走 macd_divergence_v2_arrays（唯一判定，由 test_macd_technics 管），这里固定结论只钉 ADX 极端位的方向合成
+        monkeypatch.setattr(
+            mt,
+            "macd_divergence_v2_arrays",
+            lambda c, h: {
+                "top_divergence": {"hit": False},
+                "bottom_divergence": {"hit": True},
+            },
+        )
         r = qn_adx_extreme.detect(_adx_divergence_df())
         assert r["available"] and r["hit"], r["legs"]
         assert r["legs"]["bottom_divergence"]["hit"], r["legs"]
         assert r["legs"]["top_divergence"]["hit"] is False
         assert r["extreme_side"] == "bottom"
 
-    def test_extreme_side_top_divergence(self):
+    def test_extreme_side_top_divergence(self, monkeypatch):
         # 镜像构造：顶背离腿中 → side="top"（两背离腿同中时顶背离优先）
+        from custos.core.factors import macd_technics as mt
+
+        # v0.594：背离腿走 macd_divergence_v2_arrays（唯一判定，由 test_macd_technics 管），这里固定结论只钉 ADX 极端位的方向合成
+        monkeypatch.setattr(
+            mt,
+            "macd_divergence_v2_arrays",
+            lambda c, h: {
+                "top_divergence": {"hit": True},
+                "bottom_divergence": {"hit": False},
+            },
+        )
         r = qn_adx_extreme.detect(_adx_divergence_df(mirror=True))
         assert r["available"] and r["hit"], r["legs"]
         assert r["legs"]["top_divergence"]["hit"], r["legs"]

@@ -36,7 +36,6 @@ FACTOR: dict[str, Any] = {
 
 MACD_SLOW, MACD_SIGNAL = 26, 9  # fast 走 indicators 唯一实现默认参数，不单独定义
 PHASE_LOOKBACK = 60  # 顶背离/三打回看窗口(交易日)
-PHASE_FRACTAL = 2  # 摆动高点左右确认根数
 
 
 def _norm6(code) -> str:
@@ -52,46 +51,32 @@ def _clean_close(close) -> "tuple[pd.Series, list[int]]":
     return pd.Series([s[i] for i in keep], dtype=float).reset_index(drop=True), keep
 
 
-def _swing_highs(x: np.ndarray, f: int, w0: int) -> list[int]:
-    """收盘摆动高点:窗口[i-f,i+f]内 x[i]=max 且至少 2f-1 根严格更低(允许1平台)。"""
-    out = []
-    n = len(x)
-    for i in range(max(w0, f), n - f):
-        seg = x[i - f : i + f + 1]
-        if x[i] == seg.max() and int((seg < x[i]).sum()) >= 2 * f - 1:
-            out.append(i)
-    return out
+def _phase_exhausted(close_v, hist_v, end: int, lookback: int) -> tuple[bool, bool]:
+    """截至 ``end``（含）近 lookback 根的 (顶背离, 三打白骨精)——v0.594 起走唯一判定
+    ``macd_technics.macd_divergence_v2_arrays``（同色柱按波比较）；🔄 原收盘摆动高点 + DIF 比较停用。"""
+    from custos.core.factors.macd_technics import macd_divergence_v2_arrays  # noqa: PLC0415
+
+    a = max(0, end + 1 - lookback)
+    r = macd_divergence_v2_arrays(close_v[a : end + 1], hist_v[a : end + 1])
+    return bool(r["top_divergence"].get("hit")), bool(r["three_peaks"].get("hit"))
 
 
 def compute_sector_phase(
-    close, lookback: int = PHASE_LOOKBACK, fractal: int = PHASE_FRACTAL
+    close, lookback: int = PHASE_LOOKBACK, fractal: int = 0
 ) -> dict[str, Any]:
     """输入板块指数收盘(list/Series)→ 相位字典。favorable=可在该板块选股进场。"""
     c, _ = _clean_close(close)
     n = len(c)
-    if n < MACD_SLOW + MACD_SIGNAL + fractal + 5:
+    if n < MACD_SLOW + MACD_SIGNAL + 5:
         return {"available": False}
-    dif, _dea, _hist = _macd_series(
+    dif, _dea, hist = _macd_series(
         c
     )  # 2026-08-09 起走 indicators.macd_series（唯一实现）
     dif_v = dif.values
-    close_v = np.asarray(c)
+    close_v = np.asarray(c, dtype=float)
     dif_last = float(dif_v[-1])
     above_zero = bool(dif_last > 0)  # 建仓已上水/趋势在
-    w0 = max(fractal, n - lookback)
-    hi = _swing_highs(close_v, fractal, w0)
-    top_div = three_peaks = False
-    if len(hi) >= 2:
-        a, b = hi[-2], hi[-1]
-        top_div = bool(
-            close_v[b] > close_v[a] and dif_v[b] < dif_v[a]
-        )  # 价新高、DIF不创高=顶背离
-    if len(hi) >= 3:
-        p1, p2, p3 = hi[-3], hi[-2], hi[-1]
-        three_peaks = bool(
-            close_v[p1] < close_v[p2] < close_v[p3]
-            and dif_v[p1] > dif_v[p2] > dif_v[p3]
-        )  # 三打白骨精
+    top_div, three_peaks = _phase_exhausted(close_v, hist.values, n - 1, lookback)
     exhausted = bool(top_div or three_peaks)  # 冲刺(接近)走完
     favorable = bool(above_zero and not exhausted)
     if not above_zero:
@@ -113,36 +98,25 @@ def compute_sector_phase(
 
 
 def favorable_series(
-    dates, close, lookback: int = PHASE_LOOKBACK, fractal: int = PHASE_FRACTAL
+    dates, close, lookback: int = PHASE_LOOKBACK, fractal: int = 0
 ) -> dict[str, bool]:
-    """逐日**因果**有利标志(date→bool):每个 t 只用截至 t 的信息(摆动高点需 i+fractal 确认)。
-    favorable[t] = DIF[t]>0 且 截至 t 无(顶背离/三打)。供板块相位 gate 按 as-of 查询。"""
+    """逐日**因果**有利标志(date→bool):每个 t 只用截至 t 的信息。
+    favorable[t] = DIF[t]>0 且 截至 t 近 lookback 根无(顶背离/三打)——v0.594 起背离走 v2 唯一判定（``fractal`` 参数已无作用，保留签名兼容）。"""
     c_full, keep = _clean_close(close)
-    c = np.asarray(c_full)
+    c = np.asarray(c_full, dtype=float)
     n = len(c)
     ds = [str(dates[i])[:10] for i in keep]  # 与被保留的收盘对齐(丢非数值项不错位)
-    if n < MACD_SLOW + MACD_SIGNAL + fractal + 5:
+    if n < MACD_SLOW + MACD_SIGNAL + 5:
         return {d: False for d in ds}
-    dif = _macd_series(pd.Series(c))[0].values
-    sh = _swing_highs(c, fractal, 0)  # 全部摆动高点(每个在 i+fractal 才确认)
+    dif, _dea, hist = _macd_series(pd.Series(c))
+    dif_v, hist_v = dif.values, hist.values
     out: dict[str, bool] = {}
     for t in range(n):
-        if dif[t] <= 0:
+        if dif_v[t] <= 0:
             out[ds[t]] = False
             continue
-        conf = [
-            i for i in sh if i + fractal <= t and i >= t - lookback + 1
-        ]  # 截至 t 已确认且在回看内(与 compute_sector_phase 同宽)
-        exhausted = False
-        if len(conf) >= 2:
-            a, b = conf[-2], conf[-1]
-            exhausted = bool(c[b] > c[a] and dif[b] < dif[a])  # 顶背离
-        if not exhausted and len(conf) >= 3:
-            p1, p2, p3 = conf[-3], conf[-2], conf[-1]
-            exhausted = bool(
-                c[p1] < c[p2] < c[p3] and dif[p1] > dif[p2] > dif[p3]
-            )  # 三打
-        out[ds[t]] = not exhausted
+        top_div, three = _phase_exhausted(c, hist_v, t, lookback)
+        out[ds[t]] = not (top_div or three)
     return out
 
 

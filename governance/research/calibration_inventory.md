@@ -8,9 +8,9 @@
 
 ## 现状
 
-- **P0H 持仓大形态 13 个**（12 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 260 个模块级数值参数：**P0 96 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
-  **P1 live 展示 99 个**（1800 证据标注，不进判定）、P2 研究 65 个。
-- **定义校准：0 / 260**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
+- **P0H 持仓大形态 13 个**（12 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 249 个模块级数值参数：**P0 88 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
+  **P1 live 展示 97 个**（1800 证据标注，不进判定）、P2 研究 64 个。
+- **定义校准：0 / 249**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
 - **清单未覆盖**（需在逐因子校准时一并核）：①函数体内联常量（KDJ 9/3/3、BBI 周期、20 日相对强度窗口等）；
   ②打分权重与分档（`DEFAULT_TECH_WEIGHTS`、`tech_strong/mid` 60/30、资金意图 `ci_*` 与 `CAP_STRONG/MID`——属打分，R35 终局 A 已收口，
   不在 A 类范围，只在因子定义改动时同步核对）；③出场规则（`EXIT_RULES.json`，R10/R44/R47 测过效果）与 0AMV 状态机（R4），另议。
@@ -279,6 +279,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 - **上涨段统一（v0.591，owner 2026-11-25）**：`b1_structure.rally_segment` 为唯一定位（最近平台顶 H 与前一平台底 L；H 之后 = 回调段）。波段类型、非一波流 v1/v2、一波流 v3、回调缩量 v1（live）/ v2 都改用它；🔄 停用 wave_type「近 60 根最低价 → 其后最高价」、非一波流 v2 / 一波流 v3 的「窗口最高价」兜底、回调缩量的 20 / 30 / 40 根窗口（删 PULLBACK_LOOKBACK、PB2_LOOKBACK、PB2_RUN_BACK）。b1_pullback_fit（live_use none）未动。
 - **顶部放量阴线统一（v0.592，owner 2026-11-25）**：唯一判定 `distribution.top_bear_bars`（owner 11-24 校准口径）；非一波流 v1 的「阶段高点 ±3 日放量大阴（跌 ≥3%、量 ≥1.5 倍）」、v2 / 一波流 v3 的「高点 / 次高点 ±3 日放量大阴 + 自找次高点分型」改为调它（上涨段起点之后）。删 NOW_BEAR_DROP_PCT / NOW_BEAR_VOL_RATIO / NOW_TOP_ZONE。J<13 样本：非一波流撤销 33.9% → 43.2%、一波流 v3 出货标记 9.7% → 25.0%。wave_type 的「顶部放量」是冲刺波的高点放量（不分阴阳），概念不同，保留。
 - **阴阳线统一（v0.593，owner 2026-11-25）**：阴阳唯一判定 `indicators.candle_side`（假阴真阳：底部区间算阳、顶部区间算阴；一字板按前收，一字涨停算阳），区间唯一判定 `b1_structure.price_zone`（走势三态最后一段上涨 = 顶部；有下跌段 = 底部）。接入：阴阳量（live +7 / −5）、红肥绿瘦 W 底 / v2（底部）、出货 ③④⑤（顶部，结果不变）、顶部放量阴线、底部放量阶段底部。J<13 样本阴阳量「阳 > 阴」21.9% → 24.6%（翻转 4.9%）。实体统计排除一字板（实体 0）。K 线形态类（阳包阴、线上阴线、平台公式 C<O）仍按实体，不分区间。假阳真阴（收 > 开、收 < 前收）owner 未定，暂按阳。
+- **价格高低点改平台点 / 背离统一（v0.594，owner 2026-11-25）**：价格高低点统一取 MACD 平台点（`b1_structure.macd_platform_segments`）——顶部放量阴线的高点（阴线在平台顶所在红柱段内或段后 ≤2 根，owner 58 张一致数不变 49）、双头 ④、W 底双底、回调缩量 v2 前一低点；MACD 背离统一走 `macd_technics.macd_divergence_v2_arrays`——板块相位、QN ADX、W 底背离腿。删：MACD 背离 v1（*_v1 字段）、出货旧 ①②（legacy_v1）、6 套分型摆点。J<13 样本：④ 0.3% → 3.0%、出货 high（否决）4.8% → 6.4%、顶部放量阴 47.4% → 47.1%。
 - **纯数值判定退出人工校准（v0.563，owner 2026-11-23）**：MACD 区间（DIF / DEA 是否在 0 轴上 + 柱体放长 / 缩短 / 转绿）只是数值比较，看图只能核实现，改由钉测管四态；`macd_technics__mining_v1` 的 24 张区间图隐藏，MODULES 去掉该字段。
 - **owner 定（2026-11-23）**：一波流 = ①连续 ②快速（几个交易日内）③大幅（≥50%），之后 A 杀或震荡下跌 / 横盘都算，尽力识别；走势只识别买点前最近 1~2 段，尽力识别。
   落地（v0.561）：`b1_structure.check_one_wave_v4`（120 根内 ≤10 根、途中收盘回撤 <10%、最高价较起点最低价 ≥50%），live 提醒改用 v4（风险列「一波流（提醒）」，不否决不计分）；
@@ -342,7 +343,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `technical_monitor` | `TREND_MIN_BARS` | 60 | 趋势判定最少 K 线数 | - | 未校准 |
 | `technical_monitor` | `QFQ_LOAD_BARS` | 100000 | - | - | 未校准 |
 
-### P0（96 个参数）
+### P0（88 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -377,17 +378,12 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `capital_intent` | `CAP_STRONG` | 5 | - | candidate | 未校准 |
 | `capital_intent` | `CAP_MID` | 2 | - | candidate | 未校准 |
 | `distribution` | `DIST_RECENT` | 5 | 待回测：出货形态观察最近N根 | active；R2 | 未校准 |
-| `distribution` | `DIST_ACCEL_WIN` | 10 | 待回测：加速涨幅窗口（日） | active；R2 | 未校准 |
-| `distribution` | `DIST_ACCEL_GAIN` | 25.0 | 待回测：加速涨幅%下限（阴线前） | active；R2 | 未校准 |
-| `distribution` | `DIST_BIG_BEAR_FRAC` | 0.5 | 待回测：大阴=跌幅≥涨跌幅制度×0.5 | active；R2 | 未校准 |
-| `distribution` | `DIST_LONG_BEAR_FRAC` | 0.8 | 待回测：长阴/近跌停=跌幅≥涨跌幅制度×0.8 | active；R2 | 未校准 |
 | `distribution` | `DIST_HUGE_VOL_RATIO` | 2.0 | 待回测：天量/巨量=≥20日均量×2 | active；R2 | 未校准 |
 | `distribution` | `DIST_HUGE_VOL_WIN` | 20 | 待回测：天量对比窗口（日） | active；R2 | 未校准 |
 | `distribution` | `DIST_STAIR_MIN_BARS` | 3 | 待回测：阶梯放量阴线最少连续根数 | active；R2 | 未校准 |
 | `distribution` | `DIST_STAIR_BREAK_VR` | 1.2 | 待回测：放量跌破QSX的量比下限 | active；R2 | 未校准 |
 | `distribution` | `DIST_TOP_WINDOW` | 10 | 待回测：顶部区间（绿肥红瘦/双头）窗口 | active；R2 | 未校准 |
 | `distribution` | `DIST_DOUBLE_TOP_TOL` | 3.0 | 待回测：双头两顶相近容差% | active；R2 | 未校准 |
-| `distribution` | `DIST_SUBHIGH_SHRINK` | 0.9 | 待回测：次高前一日缩量量比上限 | active；R2 | 未校准 |
 | `distribution` | `DIST_MIN_VOL_MA20_FRAC` | 0.05 | 待回测：vol_ma20 低于全序列均量×此比例时视为近零（派发检测器 available=False） | active；R2 | 未校准 |
 | `distribution` | `DIST_WINDMILL_SHADOW_BODY` | 1.0 | 待回测：大风车长上影=上影 ≥ 实体×此值 | active；R2 | 未校准 |
 | `distribution` | `DIST_WINDMILL_RANGE_PCT` | 7.0 | 待回测：宽幅震荡 K=振幅（高−低）/前收 ≥ 此值% | active；R2 | 未校准 |
@@ -396,10 +392,10 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `distribution` | `DIST2_LOOKBACK` | 60 | - | active；R2 | 已标 · live 提示（v0.578） |
 | `distribution` | `DIST2_PREV_YANG` | 3 | 阴线量须大于前 3 根里最大的阳线量（owner：只跟前面的阳线比；v0.577 由 5 改 3：#11 600505 06-07 比 4 根前的阳线小、比紧挨着的阳线大，owner 看是大；一字板收 = 开也算阳线） | active；R2 | 已标 · live 提示（v0.578） |
 | `distribution` | `DIST2_VOL_MA` | 1.5 | 且 ≥ 前 20 日均量 1.5 倍（过滤缩量区的小阴线） | active；R2 | 已标 · live 提示（v0.578） |
-| `distribution` | `DIST2_PIVOT` | 2 | 高点 = 最高价分型（左右各 2 根） | active；R2 | 已标 · live 提示（v0.578） |
-| `distribution` | `DIST2_NEAR_HIGH` | 2 | 阴线距该高点 ≤2 根（顶部 / 次高点当天或前后） | active；R2 | 已标 · live 提示（v0.578） |
 | `distribution` | `DIST2_POS` | 0.65 | 次高点 ≥ 近 60 根最高 × 0.65（v0.577 由 0.7 改：#18 300157 高点放量在 0.69；更低的反弹高点不算） | active；R2 | 已标 · live 提示（v0.578） |
 | `distribution` | `DIST2_MAX60` | 0.6 | 且 ≥ 前 60 根最大量 × 0.6（owner 2026-11-24：温和放量不算；owner 认的放量都在 0.84~0.96，存疑的在 0.20~0.40） | active；R2 | 已标 · live 提示（v0.578） |
+| `distribution` | `DIST_DOUBLE_TOP_WIN` | 60 | 待回测：双头只看近 60 根内的 MACD 平台顶（v0.594 起替代 DIST_TOP_WINDOW×2 的 20 根分型窗） | active；R2 | 未校准 |
+| `distribution` | `DIST2_SEG_TAIL` | 2 | 阴线在平台顶所在红柱段内，或该段结束后 ≤2 根（v0.594 替代「最高价分型左右 2 根 + 距高点 ≤2 根」；owner 58 张一致数不变 49） | active；R2 | 候选（owner 2026-11-25） |
 | `entry_patterns` | `RS_STRONG_PP` | 3.0 | 个股20日涨幅 − 上证20日涨幅 >= +3pp；纯数值比较 | candidate | 无需 A 类（owner 2026-11-14） |
 | `ignition` | `ZX_CROSS_RECENT` | 10 | 待回测：知行金叉"近N日"窗口 | candidate | 未校准 |
 | `ignition` | `IGNITION_WINDOW` | 10 | 待回测：放量点火扫描窗口（日） | candidate | 未校准 |
@@ -412,9 +408,6 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `ignition` | `PB2_YIN_VOL` | 0.9 | 当根是阴线时：量 < 前 5 日均量 × 0.9（owner #40 2.52、#41 0.96 判放量；完美 B1 阴线 0.61~0.89） | candidate | 候选（owner 2026-11-25） |
 | `ignition` | `PB2_YANG_VOL` | 1.5 | 当根是阳线时：量 < 前 5 日均量 × 1.5（完美 B1 阳线 0.47~1.17；缩量回调末端的小阳放一点量正常） | candidate | 候选（owner 2026-11-25） |
 | `ignition` | `PB2_MAX_BODY` | 4.0 | 当根实体 < 前收 × 4%（owner #42 5.2% 判 K 线大；完美 B1 0.3~3.7%） | candidate | 候选（owner 2026-11-25） |
-| `ignition` | `PB2_PIVOT` | 3 | 前一有效低点 = 上涨段内最后一个收盘分型低点（左右各 3 根） | candidate | 候选（owner 2026-11-25） |
-| `macd_technics` | `MACD_SWING_FRACTAL` | 2 | 摆动高/低点分型：左右各 N 根确认 | candidate | 未校准 |
-| `macd_technics` | `MACD_DIV_LOOKBACK` | 60 | 背离观察窗口（日） | candidate | 未校准 |
 | `macd_technics` | `MACD2_MIN_GROUP` | 2 | - | candidate | 已标 · live（v0.567） |
 | `macd_technics` | `MACD2_MARGIN` | 0.0 | 柱子「更短」的门槛：v0.566 起 0（owner 18 张标注上 10% 会漏掉同组内略短的背离） | candidate | 已标 · live（v0.567） |
 | `macd_technics` | `MACD2_WAVE_FRACTAL` | 2 | 同一组柱子里按柱长再切「波」：柱长局部峰（左右各 2 根）各算一个波（owner：同组有多个波峰就在波之间比） | candidate | 已标 · live（v0.567） |
@@ -443,7 +436,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `wave_type` | `WAVE_START_CANDLE_VOL` | 1.5 | 待回测参数：启动段放量倍数 | active；R2 | 未校准 |
 | `wave_type` | `WAVE_SECOND_START_GAIN` | 15.0 | 待回测参数：二次启动（前一段摆动幅度%下限） | active；R2 | 未校准 |
 
-### P1（99 个参数）
+### P1（97 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -476,8 +469,6 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `b2_surge_factor` | `B2_NO_UPPER_SHADOW_PTS` | 20.0 | 无上影线加分 | needs_work；R7 | 未校准 |
 | `bottom_patterns` | `WBOT_TOL_PCT` | 3.0 | 待回测：双底两低点相近容差%（镜像双顶 DIST_DOUBLE_TOP_TOL） | untested；R2 | 未校准 |
 | `bottom_patterns` | `WBOT_MIN_GAP` | 3 | 待回测：两底最少间隔根数（镜像双顶 p2-p1>=3） | untested；R2 | 未校准 |
-| `bottom_patterns` | `WBOT_FRACTAL` | 2 | 待回测：分型左右确认根数（镜像双顶的 2 左 2 右窗口） | untested；R2 | 未校准 |
-| `bottom_patterns` | `WBOT_WINDOW` | 20 | 待回测：双底观察窗口（近 N 根，镜像 DIST_TOP_WINDOW×2） | untested；R2 | 未校准 |
 | `bottom_patterns` | `WBOT_DRAWDOWN_PCT` | 40.0 | - | untested；R2 | 未校准 |
 | `bottom_patterns` | `WBOT_VOL_RATIO` | 2.0 | 待回测：底部放量=量 ≥ 250 日均量×此值（同 check_bottom_volume BOTTOM_VOL_RATIO） | untested；R2 | 未校准 |
 | `bottom_patterns` | `WBOT_VOL_WIN` | 5 | 待回测：第二底之后几根内出现放量（含当日） | untested；R2 | 未校准 |
@@ -489,6 +480,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `bottom_patterns` | `RG2_STAGE_LOOKBACK` | 120 | 阶段高点回看根数 | untested；R2 | 候选（v0.532，owner 2026-11-16 定稿，抽检图集 `red_green_v2__mining_v1`） |
 | `bottom_patterns` | `RG2_BOTTOM_DD_PCT` | 30.0 | 阶段底部 = 收盘距近 120 根最高价回撤 ≥ 此值（待校准） | untested；R2 | 候选（v0.532，owner 2026-11-16 定稿，抽检图集 `red_green_v2__mining_v1`） |
 | `bottom_patterns` | `RG2_TOP_NEAR_PCT` | 5.0 | 阶段顶部 = 收盘距近 120 根最高价 ≤ 此值 | untested；R2 | 候选（v0.532，owner 2026-11-16 定稿，抽检图集 `red_green_v2__mining_v1`） |
+| `bottom_patterns` | `WBOT_PLATFORM_WIN` | 60 | 待回测：双底只看近 60 根内的 MACD 平台底（v0.594 起替代 WBOT_WINDOW×2 的 40 根分型窗；平台点比分型稀，放宽） | untested；R2 | 未校准 |
 | `fundamentals` | `DIXI_NET_PROFIT_YOY` | 100.0 | 待回测：业绩预增代理阈值（净利同比%） | untested | 未校准 |
 | `fundamentals` | `REPORT_MAX_AGE_DAYS` | 270 | - | untested | 未校准 |
 | `perfect_b1_fit` | `FIT_J_DEEP` | 0.0 | J<0 → 2 分 | candidate；R2 | 未校准 |
@@ -545,9 +537,8 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `s_shape` | `SSTAR_MID` | 40.0 | - | needs_work；R2 | 未校准 |
 | `s_shape` | `HOURGLASS_LOOKBACK` | 60 | 沙漏事件回看根数（同 SB 异动后的 B1） | needs_work；R2 | 候选（owner 2026-11-17，抽检图集 `hourglass_b1__mining_v1`） |
 | `sector_phase` | `PHASE_LOOKBACK` | 60 | 顶背离/三打回看窗口(交易日) | active；R4 | 未校准 |
-| `sector_phase` | `PHASE_FRACTAL` | 2 | 摆动高点左右确认根数 | active；R4 | 未校准 |
 
-### P2（65 个参数）
+### P2（64 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -568,7 +559,6 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `main_rally_factor` | `MAIN_RALLY_MIN_BARS` | 60 | 原文 BARSCOUNT(C)>60 | untested；R8 | 未校准 |
 | `qn_adx_extreme` | `QN_ADX_EXTREME` | 60.0 | 待回测：极端位阈值（源规则「ADX 大于等于 60」） | untested | 未校准 |
 | `qn_adx_extreme` | `QN_DIV_WINDOW` | 20 | 待回测：背离分型观察窗（近 N 根，同 bottom_patterns WBOT_WINDOW） | untested | 未校准 |
-| `qn_adx_extreme` | `QN_DIV_FRACTAL` | 2 | 待回测：分型左右确认根数（同 bottom_patterns WBOT_FRACTAL） | untested | 未校准 |
 | `qn_box_target` | `QN_BASE_WIN` | 60 | 待回测：波段低点观察窗（转译定窗 60 日，spec 表未要求 20/60 取大） | needs_work；R31 | 未校准 |
 | `qn_box_target` | `QN_COEF_BIG` | 1.3 | 待回测：大波段系数（源规则 1.3） | needs_work；R31 | 未校准 |
 | `qn_box_target` | `QN_COEF_SMALL` | 1.26 | 待回测：小波段系数（源规则 1.26/1.2 取 1.26） | needs_work；R31 | 未校准 |

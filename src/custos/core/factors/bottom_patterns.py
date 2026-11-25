@@ -43,8 +43,7 @@ FACTOR: dict[str, Any] = {
 # ---- W 底（待回测参数；镜像出货侧同义常量的取值口径）----
 WBOT_TOL_PCT = 3.0  # 待回测：双底两低点相近容差%（镜像双顶 DIST_DOUBLE_TOP_TOL）
 WBOT_MIN_GAP = 3  # 待回测：两底最少间隔根数（镜像双顶 p2-p1>=3）
-WBOT_FRACTAL = 2  # 待回测：分型左右确认根数（镜像双顶的 2 左 2 右窗口）
-WBOT_WINDOW = 20  # 待回测：双底观察窗口（近 N 根，镜像 DIST_TOP_WINDOW×2）
+WBOT_PLATFORM_WIN = 60  # 待回测：双底只看近 60 根内的 MACD 平台底（v0.594 起替代 WBOT_WINDOW×2 的 40 根分型窗；平台点比分型稀，放宽）
 WBOT_DRAWDOWN_PCT = (
     40.0  # 待回测：底部区域=距 250 日高点回撤≥此值（同底部巨量 low_price 口径）
 )
@@ -56,29 +55,30 @@ RF_WINDOW = 10  # 待回测：底部区间窗口（镜像 DIST_TOP_WINDOW）
 RF_BOTTOM_FRAC = 1.02  # 待回测：底部=窗口最低 ≤ 近60根最低×此值（镜像 near_top 0.98）
 
 
-def _wbot_leg_double_bottom(low, n: int, w0: int, f: int) -> dict[str, Any]:
-    """腿① 双底：镜像 double_top 的分型结构——窗口内摆动低点（WBOT_FRACTAL 左右
-    确认的局部最低，且窗口内唯一），取最近两个，容差 WBOT_TOL_PCT、间隔 ≥ WBOT_MIN_GAP"""
-    troughs = [
-        i
-        for i in range(w0 + f, n - f)
-        if low[i] == low[i - f : i + f + 1].min()
-        and float((low[i - f : i + f + 1] == low[i]).sum()) == 1
+def _wbot_platform_lows(df, n: int) -> list[dict[str, Any]]:
+    """近 WBOT_PLATFORM_WIN 根内的 MACD 平台底（v0.594 起价格低点唯一来源 = b1_structure.macd_platform_segments）。"""
+    from custos.core.factors.b1_structure import macd_platform_segments  # noqa: PLC0415
+
+    return [
+        s
+        for s in macd_platform_segments(df.reset_index(drop=True))
+        if s["kind"] == "L" and s["idx"] >= n - WBOT_PLATFORM_WIN
     ]
+
+
+def _wbot_leg_double_bottom(lows: list[dict[str, Any]], n: int) -> dict[str, Any]:
+    """腿① 双底：最近两个 MACD 平台底（v0.594，owner 2026-11-25「价格高低点改用平台点」；🔄 原最低价 2 根分型停用），
+    b1 取与最近底价位最接近的前一个平台底，容差 WBOT_TOL_PCT、间隔 ≥ WBOT_MIN_GAP。"""
     leg_double: dict[str, Any] = {"hit": False}
-    b1 = b2 = None
-    if len(troughs) >= 2:
-        b2 = troughs[-1]
-        # 2026-08-16 review 修复：b1 取「与 b2 价位最接近」的前谷（双底配对的
-        # 本义），此前取 max(low)=此前**最浅**的谷——教科书 W 底（左深右浅/
-        # 等深）会跳过一个无关紧要的小谷去比容差，3% 容差腿系统性假阴性。
-        b1 = min(troughs[:-1], key=lambda i: abs(low[i] / low[b2] - 1), default=None)
-        if b1 is not None and b2 - b1 >= WBOT_MIN_GAP:
-            gap_pct = abs(low[b1] / low[b2] - 1) * 100 if low[b2] else 999.0
+    if len(lows) >= 2:
+        b2 = lows[-1]
+        b1 = min(lows[:-1], key=lambda x: abs(x["price"] / b2["price"] - 1))
+        if b2["idx"] - b1["idx"] >= WBOT_MIN_GAP and b2["price"]:
+            gap_pct = abs(b1["price"] / b2["price"] - 1) * 100
             leg_double = {
                 "hit": bool(gap_pct <= WBOT_TOL_PCT),
-                "bottom1_bars_ago": n - 1 - b1,
-                "bottom2_bars_ago": n - 1 - b2,
+                "bottom1_bars_ago": n - 1 - b1["idx"],
+                "bottom2_bars_ago": n - 1 - b2["idx"],
                 "bottoms_gap_pct": round(gap_pct, 2),
             }
     return leg_double
@@ -124,30 +124,19 @@ def _wbot_leg_bottom_volume(low, vol, n: int, window_bars: int) -> dict[str, Any
     }
 
 
-def _wbot_leg_macd_divergence(df, close, n: int, w0: int, f: int) -> dict[str, Any]:
-    """腿④ MACD 底背离：两个收盘摆低 L2<L1（分型口径同①），DIF 低点抬高
-    （口径同 enrich.check_macd_technics 的 bottom_divergence；本模块用 L0 的
-    macd_series 自重算——factors 不得 import pipeline/screening）。"""
-    leg_div: dict[str, Any] = {"hit": False}
-    dif, _dea, _h = macd_series(df["close"])
-    d = dif.to_numpy()
-    swing_lo = [
-        i
-        for i in range(w0 + f, n - f)
-        if close[i] == close[i - f : i + f + 1].min()
-        and (close[i - f : i + f + 1] > close[i]).sum() >= 2 * f - 1
+def _wbot_leg_macd_divergence(df, close, lows: list[dict[str, Any]]) -> dict[str, Any]:
+    """腿④ MACD 底背离：截至第二个平台底那根，走唯一判定 ``macd_technics.macd_divergence_v2_arrays``
+    （绿柱和绿柱比，owner 2026-11-23 校准）；🔄 原收盘分型摆低 + DIF 比较停用（v0.594）。"""
+    from custos.core.factors.macd_technics import macd_divergence_v2_arrays  # noqa: PLC0415
+
+    if not lows:
+        return {"hit": False}
+    b2 = int(lows[-1]["idx"])
+    _dif, _dea, h = macd_series(df["close"])
+    r = macd_divergence_v2_arrays(close[: b2 + 1], h.to_numpy()[: b2 + 1])[
+        "bottom_divergence"
     ]
-    if len(swing_lo) >= 2:
-        a, b = swing_lo[-2], swing_lo[-1]
-        if close[b] < close[a] and d[b] > d[a]:
-            leg_div = {
-                "hit": True,
-                "close_a": round(float(close[a]), 4),
-                "close_b": round(float(close[b]), 4),
-                "dif_a": round(float(d[a]), 4),
-                "dif_b": round(float(d[b]), 4),
-            }
-    return leg_div
+    return {"hit": bool(r.get("hit")), "groups": r.get("groups") or []}
 
 
 def detect_w_bottom(df, code: str = "") -> dict[str, Any]:
@@ -168,12 +157,11 @@ def detect_w_bottom(df, code: str = "") -> dict[str, Any]:
                 "reason": f"少于60根K线（{n}）",
             }
 
-        w0 = max(0, n - WBOT_WINDOW * 2)
-        f = WBOT_FRACTAL
-        leg_double = _wbot_leg_double_bottom(low, n, w0, f)
+        lows = _wbot_platform_lows(df, n)
+        leg_double = _wbot_leg_double_bottom(lows, n)
         leg_zone = _wbot_leg_bottom_zone(close, high, n)
         leg_volume = _wbot_leg_bottom_volume(low, vol, n, leg_zone["window_bars"])
-        leg_div = _wbot_leg_macd_divergence(df, close, n, w0, f)
+        leg_div = _wbot_leg_macd_divergence(df, close, lows)
 
         hit = bool(
             leg_double["hit"]

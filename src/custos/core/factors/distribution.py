@@ -43,17 +43,13 @@ FACTOR: dict[str, Any] = {
 }
 
 DIST_RECENT = 5  # 待回测：出货形态观察最近N根
-DIST_ACCEL_WIN = 10  # 待回测：加速涨幅窗口（日）
-DIST_ACCEL_GAIN = 25.0  # 待回测：加速涨幅%下限（阴线前）
-DIST_BIG_BEAR_FRAC = 0.5  # 待回测：大阴=跌幅≥涨跌幅制度×0.5
-DIST_LONG_BEAR_FRAC = 0.8  # 待回测：长阴/近跌停=跌幅≥涨跌幅制度×0.8
 DIST_HUGE_VOL_RATIO = 2.0  # 待回测：天量/巨量=≥20日均量×2
 DIST_HUGE_VOL_WIN = 20  # 待回测：天量对比窗口（日）
 DIST_STAIR_MIN_BARS = 3  # 待回测：阶梯放量阴线最少连续根数
 DIST_STAIR_BREAK_VR = 1.2  # 待回测：放量跌破QSX的量比下限
 DIST_TOP_WINDOW = 10  # 待回测：顶部区间（绿肥红瘦/双头）窗口
+DIST_DOUBLE_TOP_WIN = 60  # 待回测：双头只看近 60 根内的 MACD 平台顶（v0.594 起替代 DIST_TOP_WINDOW×2 的 20 根分型窗）
 DIST_DOUBLE_TOP_TOL = 3.0  # 待回测：双头两顶相近容差%
-DIST_SUBHIGH_SHRINK = 0.9  # 待回测：次高前一日缩量量比上限
 DIST_MIN_VOL_MA20_FRAC = 0.05  # 待回测：vol_ma20 低于全序列均量×此比例时视为近零（派发检测器 available=False）
 
 # ---- 25chuhuo 讲义覆盖度缺口补全（2026-08-13，owner 批准）----
@@ -90,69 +86,6 @@ def _vol_ratio5(vol, t: int) -> float | None:
     """量比 = t 日量 / 前 5 日均量（基线为 0 → None）。"""
     base = vol[max(0, t - 5) : t].mean()
     return float(vol[t] / base) if base else None
-
-
-def _leg_top_huge_vol_bear(
-    close, open_, vol, n: int, vol_ma20: float, big_bear: float
-) -> dict[str, Any]:
-    """① 顶部天量大阴：近DIST_RECENT根内 大阴 + 天量 + 阴线前加速。"""
-    hit = None
-    for t in range(n - DIST_RECENT, n):
-        if t < DIST_ACCEL_WIN + 1:
-            continue
-        c = _pct_chg(close, t)
-        # 「天量」＝ 量 ≥ 20日均量×DIST_HUGE_VOL_RATIO（与②同一口径，见顶部常量）。
-        # 审计：原先还 or 了 `vol[t] >= vol[t-20:t+1].max()`——该切片**含 t 自身**，
-        # 于是它恒等于"当日是窗口最大量"，即 20 日量新高，完全旁路了 2×MA20 阈值：
-        # 一只均量平稳的票只要今天量比昨天高一点点就算"天量"，配上大阴+加速就被判出货。
-        huge = bool(vol_ma20) and vol[t] >= vol_ma20 * DIST_HUGE_VOL_RATIO
-        accel = (
-            (close[t - 1] / close[t - DIST_ACCEL_WIN] - 1) * 100
-            if close[t - DIST_ACCEL_WIN]
-            else 0.0
-        )
-        if close[t] < open_[t] and c <= -big_bear and huge and accel >= DIST_ACCEL_GAIN:
-            hit = {
-                "bars_ago": n - 1 - t,
-                "change_pct": round(c, 2),
-                "vol_ratio_ma20": round(float(vol[t] / vol_ma20), 3)
-                if vol_ma20
-                else None,
-                "accel_pct": round(accel, 2),
-            }
-            break
-    return {"hit": hit is not None, "detail": hit}
-
-
-def _leg_subhigh_vol_bear(
-    close, high, open_, vol, n: int, vol_ma20: float, long_bear: float
-) -> dict[str, Any]:
-    """② 次高点巨量长阴：前一日缩量创新高/次高 + 当日巨量长阴。"""
-    hit = None
-    for t in range(n - DIST_RECENT, n):
-        if t < 25:
-            continue
-        c = _pct_chg(close, t)
-        prev_new_high = high[t - 1] >= high[max(0, t - 21) : t - 1].max()
-        v5 = _vol_ratio5(vol, t - 1)
-        prev_shrink = v5 is not None and v5 <= DIST_SUBHIGH_SHRINK
-        huge = vol_ma20 and vol[t] >= vol_ma20 * DIST_HUGE_VOL_RATIO
-        if (
-            close[t] < open_[t]
-            and c <= -long_bear
-            and huge
-            and prev_new_high
-            and prev_shrink
-            and v5 is not None  # prev_shrink 已蕴含；显式写出是为了类型收窄
-        ):
-            hit = {
-                "bars_ago": n - 1 - t,
-                "change_pct": round(c, 2),
-                "prev_vol_ratio5": round(float(v5), 3),
-                "vol_ratio_ma20": round(float(vol[t] / vol_ma20), 3),
-            }
-            break
-    return {"hit": hit is not None, "detail": hit}
 
 
 def _leg_stairstep_vol_decline(close, open_, vol, qsx, dks, n: int) -> dict[str, Any]:
@@ -193,24 +126,34 @@ def _leg_stairstep_vol_decline(close, open_, vol, qsx, dks, n: int) -> dict[str,
     return {"hit": hit is not None, "detail": hit}
 
 
-def _leg_double_top_vol_bear(close, high, open_, vol, n: int) -> dict[str, Any]:
-    """④ 双头双巨阴：近窗口内两个相近高点，各自其后≤2根内出现放量阴。"""
+def _leg_double_top_vol_bear(
+    close, high, open_, vol, n: int, df=None
+) -> dict[str, Any]:
+    """④ 双头双巨阴：近 DIST_DOUBLE_TOP_WIN 根内最近一个 MACD 平台顶与其前最高的平台顶相近，且各自所在红柱段到其后 2 根内
+    出现放量阴（v0.594：顶点改用平台顶，owner 2026-11-25「价格高低点改用平台点」；🔄 原最高价 2 根分型停用）。"""
+    from custos.core.factors.b1_structure import macd_platform_segments  # noqa: PLC0415
+
     hit = None
-    w0 = max(0, n - DIST_TOP_WINDOW * 2)
-    peaks = [
-        i
-        for i in range(w0 + 2, n - 2)
-        if high[i] == high[i - 2 : i + 3].max()
-        and float((high[i - 2 : i + 3] == high[i]).sum()) == 1
+    if df is None:
+        return {"hit": False, "detail": None}
+    tops = [
+        s
+        for s in macd_platform_segments(df.reset_index(drop=True))
+        if s["kind"] == "H" and s["idx"] >= n - DIST_DOUBLE_TOP_WIN
     ]
-    if len(peaks) >= 2:
-        p2 = peaks[-1]
-        p1 = max((p for p in peaks[:-1]), key=lambda i: high[i], default=None)
-        if p1 is not None and p2 - p1 >= 3:
+    if len(tops) >= 2:
+
+        def peak(sg):  # 平台顶所在红柱段内的最高价根
+            return sg["start_i"] + int(high[sg["start_i"] : sg["end_i"] + 1].argmax())
+
+        s2 = tops[-1]
+        s1 = max(tops[:-1], key=lambda sg: high[peak(sg)])
+        p1, p2 = peak(s1), peak(s2)
+        if p2 - p1 >= 3:
             close_tops = abs(high[p1] / high[p2] - 1) * 100 <= DIST_DOUBLE_TOP_TOL
 
-            def bear_vol_after(p: int) -> bool:
-                for t in range(p + 1, min(n, p + 3)):
+            def bear_vol_after(sg) -> bool:
+                for t in range(sg["start_i"], min(n, sg["end_i"] + 3)):
                     vrt = _vol_ratio5(vol, t)
                     if (
                         candle_side(open_[t], close[t], close[t - 1], "top") < 0
@@ -220,7 +163,7 @@ def _leg_double_top_vol_bear(close, high, open_, vol, n: int) -> dict[str, Any]:
                         return True
                 return False
 
-            if close_tops and bear_vol_after(p1) and bear_vol_after(p2):
+            if close_tops and bear_vol_after(s1) and bear_vol_after(s2):
                 hit = {
                     "peak1_bars_ago": n - 1 - p1,
                     "peak2_bars_ago": n - 1 - p2,
@@ -294,8 +237,7 @@ DIST2_LOOKBACK = (
 DIST2_PREV_YANG = 3  # 阴线量须大于前 3 根里最大的阳线量（owner：只跟前面的阳线比；v0.577 由 5 改 3：#11 600505 06-07 比 4 根前的阳线小、比紧挨着的阳线大，owner 看是大；一字板收 = 开也算阳线）
 DIST2_VOL_MA = 1.5  # 且 ≥ 前 20 日均量 1.5 倍（过滤缩量区的小阴线）
 DIST2_MAX60 = 0.6  # 且 ≥ 前 60 根最大量 × 0.6（owner 2026-11-24：温和放量不算；owner 认的放量都在 0.84~0.96，存疑的在 0.20~0.40）
-DIST2_PIVOT = 2  # 高点 = 最高价分型（左右各 2 根）
-DIST2_NEAR_HIGH = 2  # 阴线距该高点 ≤2 根（顶部 / 次高点当天或前后）
+DIST2_SEG_TAIL = 2  # 阴线在平台顶所在红柱段内，或该段结束后 ≤2 根（v0.594 替代「最高价分型左右 2 根 + 距高点 ≤2 根」；owner 58 张一致数不变 49）
 DIST2_POS = 0.65  # 次高点 ≥ 近 60 根最高 × 0.65（v0.577 由 0.7 改：#18 300157 高点放量在 0.69；更低的反弹高点不算）
 
 
@@ -314,10 +256,13 @@ def top_bear_bars(df, start: Optional[int] = None) -> list[dict[str, Any]]:
     ``start`` 起逐根判（缺省 = 近 DIST2_LOOKBACK 根），返回全部命中（时间顺序）；非一波流 v1/v2、一波流 v3 也调这里。
 
     近 DIST2_LOOKBACK 根内任一根 t：阴线（收 < 开），量 > 前 DIST2_PREV_YANG 根阳线（收 ≥ 开）的最大量、≥ 20 日均量 × DIST2_VOL_MA、≥ 前 60 根最大量 × DIST2_MAX60，
-    t 前后 DIST2_NEAR_HIGH 根内有最高价分型高点，且它是本轮顶部或次高点（见 _top_or_second_high）。
+    t 在 MACD 平台顶所在红柱段内（或段后 ≤ DIST2_SEG_TAIL 根），该段最高价是本轮顶部或次高点（见 _top_or_second_high）。
     假阴真阳（收 < 开但收 > 前收）：顶部区间算阴量、底部区间算阳量（owner）。顶部区间 = 该高点是次高点（低于它之前 60 根最高），
     或走势三态（截至 t）最后一段是上涨（owner：走势三态与 N 型结构位置配合）。不要求跌幅、不要求阴线前加速（🔄 原 ①② 的大阴 / 加速 / 前日缩量）。"""
-    from custos.core.factors.b1_structure import price_zone  # noqa: PLC0415  v0.593 区间唯一判定
+    from custos.core.factors.b1_structure import (  # noqa: PLC0415
+        macd_platform_segments,
+        price_zone,
+    )
 
     c, h, _l, v = _ohlcv_arrays(df)
     o = df["open"].astype(float).to_numpy()
@@ -325,6 +270,11 @@ def top_bear_bars(df, start: Optional[int] = None) -> list[dict[str, Any]]:
     if n < 61:
         return []
     bars: list[dict[str, Any]] = []
+    tops = [
+        sg
+        for sg in macd_platform_segments(df.reset_index(drop=True))
+        if sg["kind"] == "H"
+    ]
     t0 = n - DIST2_LOOKBACK if start is None else int(start)
     for t in range(max(60, t0), n):
         if c[t] >= o[t] or v[t] < v[t - 20 : t].mean() * DIST2_VOL_MA:
@@ -339,9 +289,10 @@ def top_bear_bars(df, start: Optional[int] = None) -> list[dict[str, Any]]:
         if yang and v[t] <= max(yang):
             continue
         hit_q = None
-        for q in range(t - DIST2_NEAR_HIGH, min(n, t + DIST2_NEAR_HIGH + 1)):
-            if h[q] < h[max(0, q - DIST2_PIVOT) : q + DIST2_PIVOT + 1].max():
+        for sg in tops:  # v0.594：高点 = 阴线所在（或刚结束 ≤ DIST2_SEG_TAIL 根）的红柱段内最高价（平台顶所在段）
+            if not sg["start_i"] <= t <= sg["end_i"] + DIST2_SEG_TAIL:
                 continue
+            q = sg["start_i"] + int(h[sg["start_i"] : sg["end_i"] + 1].argmax())
             kind = _top_or_second_high(h, _l, q)
             if kind:
                 hit_q = (q, kind)
@@ -401,8 +352,6 @@ def detect_distribution(df, code: str = "") -> dict[str, Any]:
             "risk_level": "none",
         }
     limit = _infer_price_limit(code, df)
-    big_bear = limit * DIST_BIG_BEAR_FRAC
-    long_bear = limit * DIST_LONG_BEAR_FRAC
     vol_ma20 = float(vol[max(0, n - DIST_HUGE_VOL_WIN - 1) : n - 1].mean())
     # vol_ma20 近零（长期停牌/零成交脏数据）时量比类判定全部失真 → 检测器不可用
     series_vol_mean = float(vol.mean()) if n else 0.0
@@ -426,15 +375,7 @@ def detect_distribution(df, code: str = "") -> dict[str, Any]:
     sig: dict[str, Any] = {}
     # v0.578（owner 2026-11-24）：①② 改用 v2「顶部 / 次高点放量阴线」（check_top_bear_volume，近 60 根、阴量 > 前 3 根阳线、
     # ≥20 日均量 1.5 倍且 ≥ 前 60 根最大量 0.6 倍、顶部或次高点）；顶部 ⇒ ①、次高点 ⇒ ②。🔄 原 ①②（近 5 根、大阴 / 加速 / 前日缩量）
-    # owner 15 张一致 7，停用，结果只留 legacy_v1 备查（不计 hits）。
-    legacy_v1 = {
-        "top_huge_vol_bear": _leg_top_huge_vol_bear(
-            close, open_, vol, n, vol_ma20, big_bear
-        ),
-        "subhigh_vol_bear": _leg_subhigh_vol_bear(
-            close, high, open_, vol, n, vol_ma20, long_bear
-        ),
-    }
+    # owner 15 张一致 7，停用；v0.594 起旧 ①② 代码与 legacy_v1 字段删除（顶部放量阴线只留一份实现）。
     tb = check_top_bear_volume(df)
     last = (tb.get("bars") or [None])[-1]
     for key, kind in (("top_huge_vol_bear", "顶部"), ("subhigh_vol_bear", "次高点")):
@@ -443,7 +384,9 @@ def detect_distribution(df, code: str = "") -> dict[str, Any]:
     sig["stairstep_vol_decline"] = _leg_stairstep_vol_decline(
         close, open_, vol, qsx, dks, n
     )
-    sig["double_top_vol_bear"] = _leg_double_top_vol_bear(close, high, open_, vol, n)
+    sig["double_top_vol_bear"] = _leg_double_top_vol_bear(
+        close, high, open_, vol, n, df
+    )
     sig["top_green_heavy_red_light"] = _leg_top_green_heavy_red_light(
         close, high, open_, vol, n
     )
@@ -482,7 +425,6 @@ def detect_distribution(df, code: str = "") -> dict[str, Any]:
         "top_bear": top_bear,
         "risk_level": risk,
         "price_limit": limit,
-        "legacy_v1": legacy_v1,
     }
 
 

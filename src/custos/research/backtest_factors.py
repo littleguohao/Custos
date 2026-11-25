@@ -1166,7 +1166,7 @@ _QN_GATE_KEYS: dict[str, tuple[str, ...]] = {
     ),
     "qn_macd_bar_shift": ("close", "macd_dif", "macd_dea"),
     "qn_kdj_neg_day": ("close", "open", "kdj_raw_k", "kdj_raw_d", "kdj_raw_j"),
-    "qn_adx_extreme": ("close", "macd_dif", "adx", "dmi_pdi", "dmi_mdi"),
+    "qn_adx_extreme": ("close", "macd_dif", "macd_dea", "adx", "dmi_pdi", "dmi_mdi"),
     "qn_box_target": ("close", "low"),
     "qn_ma144_launch": (
         "close",

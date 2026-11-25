@@ -150,7 +150,6 @@ PB2_DECAY = 0.75  # 量「一路缩」：回调段末 1/3 均量 ≤ 初 1/3 均
 PB2_YIN_VOL = 0.9  # 当根是阴线时：量 < 前 5 日均量 × 0.9（owner #40 2.52、#41 0.96 判放量；完美 B1 阴线 0.61~0.89）
 PB2_YANG_VOL = 1.5  # 当根是阳线时：量 < 前 5 日均量 × 1.5（完美 B1 阳线 0.47~1.17；缩量回调末端的小阳放一点量正常）
 PB2_MAX_BODY = 4.0  # 当根实体 < 前收 × 4%（owner #42 5.2% 判 K 线大；完美 B1 0.3~3.7%）
-PB2_PIVOT = 3  # 前一有效低点 = 上涨段内最后一个收盘分型低点（左右各 3 根）
 
 
 def check_pullback_shrink_v2(df, dks_last: Optional[float] = None) -> dict[str, Any]:
@@ -186,12 +185,15 @@ def check_pullback_shrink_v2(df, dks_last: Optional[float] = None) -> dict[str, 
     vr = float(vol[-1] / base5) if base5 else None
     yin = bool(close[-1] < open_[-1])
     body = abs(close[-1] - open_[-1]) / close[-2] * 100 if close[-2] else 0.0
-    piv = [
-        t
-        for t in range(lo + PB2_PIVOT, hp - PB2_PIVOT + 1)
-        if close[t] <= close[t - PB2_PIVOT : t + PB2_PIVOT + 1].min()
+    # v0.594：前一有效低点 = 上涨段内最后一个已完成的 MACD 平台底（owner 2026-11-25「价格高低点改用平台点」；🔄 原收盘 3 根分型停用）
+    from custos.core.factors.b1_structure import macd_platform_segments  # noqa: PLC0415
+
+    plows = [
+        sg
+        for sg in macd_platform_segments(df.reset_index(drop=True))
+        if sg["kind"] == "L" and not sg["ongoing"] and lo < sg["idx"] < hp
     ]
-    prev_low = float(close[piv[-1]]) if piv else float(close[lo])
+    prev_low = float(plows[-1]["price"]) if plows else float(close[lo])
     hold = bool(
         (dks_last is not None and close[-1] >= dks_last) or close[-1] >= prev_low
     )

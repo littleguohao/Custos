@@ -135,44 +135,6 @@ def test_score_candidate_unknown_wave_type_no_crash():
     assert any("brand_new_wave" in r for r in out["entry_reason"])
 
 
-# ---------------------------------------------------------------- 3. 天量 or 分支含自身
-
-
-def _dist_closes():
-    """构造 ①顶部天量大阴 的全部前置条件（阴线前 10 日加速 +34%），只留"天量"可调。"""
-    closes = [10.0] * 40
-    closes += [10.0 * (1.03**i) for i in range(1, 21)]  # 40..59：连续加速
-    closes.append(closes[-1] * 0.93)  # 末根 -7% 大阴
-    return closes
-
-
-def test_distribution_huge_volume_requires_ma20_threshold():
-    """v0.578 起 ①② 改 v2，本条钉旧判法（legacy_v1）的天量口径。 "或 20 日量新高（窗口含自身）"恒等于"当日是窗口最大量"，旁路了 2×MA20。"""
-    closes = _dist_closes()
-    n = len(closes)
-    vols = [1000.0] * n
-    vols[-1] = 1400.0  # 是 20 日最大量，但只有 1.4×MA20 < 2.0×MA20
-    df = pd.DataFrame(
-        {
-            "date": pd.date_range(end="2026-07-22", periods=n, freq="B"),
-            "open": [c * 1.001 for c in closes],  # 收 < 开 → 阴线
-            "high": [c * 1.002 for c in closes],
-            "low": [c * 0.999 for c in closes],
-            "close": closes,
-            "volume": vols,
-            "amount": [0.0] * n,
-        }
-    )
-    r = ec.detect_distribution(df, "600000")
-    assert r["available"]
-    assert r["legacy_v1"]["top_huge_vol_bear"]["hit"] is False  # 未达 2×MA20 → 不算天量
-
-    df2 = df.copy()
-    df2["volume"] = vols[:-1] + [3000.0]  # 3×MA20 → 真天量
-    r2 = ec.detect_distribution(df2, "600000")
-    assert r2["legacy_v1"]["top_huge_vol_bear"]["hit"] is True
-
-
 # ---------------------------------------------------------------- 4. fund_flow 2 字前缀误配
 
 _FF = {

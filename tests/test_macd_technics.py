@@ -88,41 +88,6 @@ def _divergence_df(top: bool):
     return make_df(closes)
 
 
-def test_top_divergence_detected_v1():
-    r = ec.check_macd_technics(_divergence_df(top=True))
-    assert r["available"]
-    assert r["top_divergence_v1"]["hit"] is True
-    assert r["top_divergence_v1"]["close_b"] > r["top_divergence_v1"]["close_a"]
-    assert r["top_divergence_v1"]["dif_b"] < r["top_divergence_v1"]["dif_a"]
-    assert r["bottom_divergence_v1"]["hit"] is False
-
-
-def test_bottom_divergence_detected_v1():
-    r = ec.check_macd_technics(_divergence_df(top=False))
-    assert r["available"]
-    assert r["bottom_divergence_v1"]["hit"] is True
-    assert r["bottom_divergence_v1"]["close_b"] < r["bottom_divergence_v1"]["close_a"]
-    assert r["bottom_divergence_v1"]["dif_b"] > r["bottom_divergence_v1"]["dif_a"]
-    assert r["top_divergence_v1"]["hit"] is False
-
-
-def test_three_peaks_detected_v1():
-    # 三打白骨精：三峰价格递增（13.0/13.3/13.5）、斜率递减（0.3/0.1/0.03）
-    closes = (
-        [10.0] * 30
-        + _seg(10, 0.3, 10)
-        + _seg(13.0, -0.2, 4)
-        + _seg(12.2, 0.1, 11)
-        + _seg(13.3, -0.15, 4)
-        + _seg(12.7, 0.03, 27)
-        + _seg(13.5, -0.1, 4)
-    )
-    r = ec.check_macd_technics(make_df(closes))
-    assert r["three_peaks_v1"]["hit"] is True
-    d = r["three_peaks_v1"]["dif_peaks"]
-    assert d[0] > d[1] > d[2]
-
-
 def test_no_divergence_on_monotone():
     r = ec.check_macd_technics(make_df(_ramp_up(150)))
     assert r["available"]
@@ -391,7 +356,6 @@ def test_live_divergence_uses_v2_v0567():
     v2 = mt.check_macd_divergence_v2(df)
     for k in ("bottom_divergence", "top_divergence", "three_peaks"):
         assert r[k] == v2[k]
-        assert f"{k}_v1" in r
 
 
 def test_bar_waves_small_wiggle_not_split_v0569():

@@ -53,8 +53,41 @@ def _w_bottom_df():
     return mk(closes, vols=vols)
 
 
+def _patch_w(monkeypatch, div_hit=True):
+    """v0.594：双底取 MACD 平台底、背离腿走 macd_divergence_v2_arrays；合成序列无阴线形不成平台点，
+    这里固定两底（idx 70 / 77）与背离结论，只钉 W 底四腿的合成逻辑（平台点 / 背离由各自测试管）。"""
+    from custos.core.factors import b1_structure as bs
+    from custos.core.factors import macd_technics as mt
+
+    lows = [
+        {
+            "kind": "L",
+            "price": 10.0,
+            "idx": 70,
+            "ongoing": False,
+            "start_i": 68,
+            "end_i": 72,
+        },
+        {
+            "kind": "L",
+            "price": 9.97,
+            "idx": 77,
+            "ongoing": True,
+            "start_i": 76,
+            "end_i": 79,
+        },
+    ]
+    monkeypatch.setattr(bs, "macd_platform_segments", lambda df: lows)
+    monkeypatch.setattr(
+        mt,
+        "macd_divergence_v2_arrays",
+        lambda c, h: {"bottom_divergence": {"hit": div_hit, "groups": []}},
+    )
+
+
 class TestWBottom:
-    def test_all_four_legs_hit(self):
+    def test_all_four_legs_hit(self, monkeypatch):
+        _patch_w(monkeypatch)
         r = bp.detect_w_bottom(_w_bottom_df(), "600000")
         assert r["available"] and r["hit"] is True
         for leg in (
@@ -65,7 +98,8 @@ class TestWBottom:
         ):
             assert r["legs"][leg]["hit"] is True, f"{leg} 未中：{r['legs'][leg]}"
 
-    def test_missing_volume_leg_no_hit(self):
+    def test_missing_volume_leg_no_hit(self, monkeypatch):
+        _patch_w(monkeypatch)
         df = _w_bottom_df()
         df.loc[df.index[-1], "volume"] = 800.0  # 末根不放量
         r = bp.detect_w_bottom(df, "600000")

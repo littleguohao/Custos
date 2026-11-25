@@ -38,41 +38,18 @@ FACTOR: dict[str, Any] = {
 
 # ---- 待回测参数 ----
 QN_ADX_EXTREME = 60.0  # 待回测：极端位阈值（源规则「ADX 大于等于 60」）
-QN_DIV_WINDOW = 20  # 待回测：背离分型观察窗（近 N 根，同 bottom_patterns WBOT_WINDOW）
-QN_DIV_FRACTAL = 2  # 待回测：分型左右确认根数（同 bottom_patterns WBOT_FRACTAL）
+QN_DIV_WINDOW = 20  # 待回测：背离观察窗（近 N×2 根的 MACD 柱切片；v0.594 起背离走 macd_divergence_v2_arrays）
 
 
-def _swing_points(arr, n: int, w0: int, f: int, find_max: bool) -> list[int]:
-    """分型摆点：窗口内左右 f 根确认的局部极值（唯一）。"""
-    out = []
-    for i in range(w0 + f, n - f):
-        seg = arr[i - f : i + f + 1]
-        is_extreme = arr[i] == (seg.max() if find_max else seg.min())
-        if is_extreme and float((seg == arr[i]).sum()) == 1:
-            out.append(i)
-    return out
+def _divergence(close, hist, n: int, find_top: bool) -> dict[str, Any]:
+    """MACD 背离腿（v0.594 起走唯一判定 ``macd_technics.macd_divergence_v2_arrays``：同色柱按波比较，owner 2026-11-23 校准）；
+    🔄 原「两个收盘分型摆点 + DIF 高低」停用。只看近 QN_DIV_WINDOW×2 根的柱子切片（同原观察窗）。"""
+    from custos.core.factors.macd_technics import macd_divergence_v2_arrays  # noqa: PLC0415
 
-
-def _divergence(close, dif, n: int, find_top: bool) -> dict[str, Any]:
-    """MACD 背离腿：顶背离=两个收盘摆高 H2>H1 而 DIF 高点降低；
-    底背离=两个收盘摆低 L2<L1 而 DIF 低点抬高（口径同 bottom_patterns 腿④）。"""
     w0 = max(0, n - QN_DIV_WINDOW * 2)
-    pts = _swing_points(close, n, w0, QN_DIV_FRACTAL, find_max=find_top)
-    if len(pts) < 2:
-        return {"hit": False, "points": len(pts)}
-    a, b = pts[-2], pts[-1]
-    if find_top:
-        hit = bool(close[b] > close[a] and dif[b] < dif[a])
-    else:
-        hit = bool(close[b] < close[a] and dif[b] > dif[a])
-    return {
-        "hit": hit,
-        "points": len(pts),
-        "close_a": round(float(close[a]), 4),
-        "close_b": round(float(close[b]), 4),
-        "dif_a": round(float(dif[a]), 4),
-        "dif_b": round(float(dif[b]), 4),
-    }
+    r = macd_divergence_v2_arrays(close[w0:n], hist[w0:n])
+    leg = r["top_divergence" if find_top else "bottom_divergence"]
+    return {"hit": bool(leg.get("hit")), "groups": leg.get("groups") or []}
 
 
 def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
@@ -101,12 +78,16 @@ def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
             pdi, mdi, adx = dmi_arrays(high, low, close)
             if pdi is None or mdi is None or adx is None:
                 return {"available": False, "hit": False, "reason": "DMI 数据不足"}
-            dif, _dea, _hist = macd_series(df["close"])
+            dif, _dea, hist_s = macd_series(df["close"])
             d = dif.to_numpy()
+            hist = hist_s.to_numpy()
             a_last, p_last, m_last = adx[-1], pdi[-1], mdi[-1]
         else:
             close = _arr["close"][:n]
             d = _arr["macd_dif"][:n]
+            hist = (
+                d - _arr["macd_dea"][:n]
+            ) * 2  # 中式 ×2 柱（同 indicators.macd_series）
             if (
                 _arr["adx"] is None
                 or _arr["dmi_pdi"] is None
@@ -119,8 +100,8 @@ def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
         extreme = bool(a_last >= QN_ADX_EXTREME)
         legs = {
             "adx": {"hit": extreme, "adx": round(float(a_last), 3)},
-            "top_divergence": _divergence(close, d, n, find_top=True),
-            "bottom_divergence": _divergence(close, d, n, find_top=False),
+            "top_divergence": _divergence(close, hist, n, find_top=True),
+            "bottom_divergence": _divergence(close, hist, n, find_top=False),
             "di_cross": {
                 # 记录腿：DI+ 在 DI- 上方 = 多头交叉态；不参与 extreme_side 定向
                 "hit": bool(p_last > m_last),

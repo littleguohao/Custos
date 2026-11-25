@@ -398,7 +398,7 @@ class TestInlineFactorsExtracted:
             ("perfect_b1_fit", "FIT_"),
             ("b1_pullback_fit", "B1PB_"),
             ("distribution", "DIST_"),
-            ("macd_technics", "MACD_"),
+            ("macd_technics", "MACD2_"),  # v0.594 v1 背离参数删除，只剩 v2
             # v0.86（因子化批 B）
             ("volume_detectors", "VOLUME_SUSTAIN_"),
             ("volume_detectors", "LEADER_VOL_"),
@@ -724,22 +724,22 @@ class TestCharacterizationSnapshot:
         "b1_structure": "a000d4ec2023",  # v0.592 顶部放量阴线统一判定（owner 2026-11-25）
         "b2_surge_factor": "9f3b7bcdc8e1",
         "baseline": "2bd7dd114d5c",
-        "bottom_patterns": "8d4ab26c9670",  # v0.593 阴阳线统一判定（owner 2026-11-25）
+        "bottom_patterns": "df803a82fd38",  # v0.594 价格高低点改平台点、背离统一 v2（owner 2026-11-25）
         "capital_intent": "b60916945ed9",  # v0.227 更新（ctx 双形态入口接管）
-        "distribution": "0e9077b2a317",  # v0.590 涨停 / 涨跌停幅度统一口径（owner 2026-11-25）
+        "distribution": "5955dcaa8706",  # v0.594 价格高低点改平台点、背离统一 v2（owner 2026-11-25）
         "entry_patterns": "bb7bfe3d1b65",  # v0.227 更新（ctx 打包门面接管）
         "fundamentals": "ac8fae92afec",
         "ignition": "951e4fd04fe5",
         "j_low_gate": "fa66b2d075d5",  # v0.227 更新（ctx 双形态入口接管）
         "kdj_j": "fc95f211968d",
         "low_vol": "28cd5e0cd2b8",
-        "macd_technics": "3149bc983d9b",  # v0.571 乖离过大按 owner 定义（2026-11-24）
+        "macd_technics": "75284ddc2c6e",  # v0.594 价格高低点改平台点、背离统一 v2（owner 2026-11-25）
         "main_rally_factor": "75fdb6c812e8",
         "mcap": "75fe0399258d",  # 2026-09-13 改 hermetic 夹具快照（股本钉死 300亿，见下方 test 内注释）
         "momentum": "841b02900b08",
         "perfect_b1_fit": "c48b169f824e",
         "platform_pullback": "2be88ca4242c",
-        "qn_adx_extreme": "300de58cada0",
+        "qn_adx_extreme": "ae0b41b07a3a",  # v0.594 价格高低点改平台点、背离统一 v2（owner 2026-11-25）
         "qn_box_target": "345870238d01",
         "qn_bullish_engulf": "9029887566ec",
         "qn_kdj_neg_day": "3c440352db25",

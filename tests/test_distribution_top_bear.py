@@ -23,6 +23,9 @@ def _base():
     n = 120
     close = np.r_[np.linspace(10, 20, 100), np.linspace(20, 18, 20)]
     open_ = close * 0.995  # 默认小阳
+    open_[96] = (
+        close[96] * 1.002
+    )  # 顶部红柱段里一根小阴（v0.594：平台顶需要红柱段内有阴线）
     vol = np.full(n, 1000.0)
     return close, open_, vol
 

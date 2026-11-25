@@ -160,8 +160,8 @@
       ]
     },
     "bottom_patterns": {
-      "version": 2,
-      "source_digest": "68355ccaf2e8fede1824",
+      "version": 3,
+      "source_digest": "9e5bea7cdbe5f7f4a14a",
       "history": [
         {
           "version": 1,
@@ -177,6 +177,11 @@
           "version": 2,
           "date": "2026-11-25",
           "change": "阴阳线统一判定 indicators.candle_side（假阴真阳按区间，一字板按前收）+ 区间唯一判定 price_zone（owner 2026-11-25）"
+        },
+        {
+          "version": 3,
+          "date": "2026-11-25",
+          "change": "价格高低点改用 MACD 平台点、MACD 背离统一走 macd_divergence_v2_arrays；删分型摆点与旧背离 / 旧 ①② 实现（owner 2026-11-25）"
         }
       ]
     },
@@ -192,8 +197,8 @@
       ]
     },
     "distribution": {
-      "version": 5,
-      "source_digest": "077a361769b219bd7dab",
+      "version": 6,
+      "source_digest": "b591c80de05d85deb581",
       "history": [
         {
           "version": 1,
@@ -244,6 +249,11 @@
           "version": 5,
           "date": "2026-11-25",
           "change": "阴阳线统一判定 indicators.candle_side（假阴真阳按区间，一字板按前收）+ 区间唯一判定 price_zone（owner 2026-11-25）"
+        },
+        {
+          "version": 6,
+          "date": "2026-11-25",
+          "change": "价格高低点改用 MACD 平台点、MACD 背离统一走 macd_divergence_v2_arrays；删分型摆点与旧背离 / 旧 ①② 实现（owner 2026-11-25）"
         }
       ]
     },
@@ -270,8 +280,8 @@
       ]
     },
     "ignition": {
-      "version": 2,
-      "source_digest": "5596909708809f691d81",
+      "version": 3,
+      "source_digest": "b6588765a82874864862",
       "history": [
         {
           "version": 1,
@@ -287,6 +297,11 @@
           "version": 2,
           "date": "2026-11-25",
           "change": "上涨段统一由 MACD 平台 N 结构定位（rally_segment 唯一实现，owner 2026-11-25）"
+        },
+        {
+          "version": 3,
+          "date": "2026-11-25",
+          "change": "价格高低点改用 MACD 平台点、MACD 背离统一走 macd_divergence_v2_arrays；删分型摆点与旧背离 / 旧 ①② 实现（owner 2026-11-25）"
         }
       ]
     },
@@ -324,8 +339,8 @@
       ]
     },
     "macd_technics": {
-      "version": 5,
-      "source_digest": "61af0a31dee409d769b0",
+      "version": 6,
+      "source_digest": "303613968a3caf419699",
       "history": [
         {
           "version": 1,
@@ -361,6 +376,11 @@
           "version": 5,
           "date": "2026-11-24",
           "change": "乖离过大按 owner 定义：双线上涨 + 红柱滞涨或下降 + 双线超过红柱（原 |DIF| 分位口径停用）"
+        },
+        {
+          "version": 6,
+          "date": "2026-11-25",
+          "change": "价格高低点改用 MACD 平台点、MACD 背离统一走 macd_divergence_v2_arrays；删分型摆点与旧背离 / 旧 ①② 实现（owner 2026-11-25）"
         }
       ]
     },
@@ -425,13 +445,18 @@
       ]
     },
     "qn_adx_extreme": {
-      "version": 1,
-      "source_digest": "e4a946b6e8c77fc72090",
+      "version": 2,
+      "source_digest": "45608785b68c7535857d",
       "history": [
         {
           "version": 1,
           "date": "2026-11-03",
           "change": "初始版本（定义校准前基线，TODO #121）"
+        },
+        {
+          "version": 2,
+          "date": "2026-11-25",
+          "change": "价格高低点改用 MACD 平台点、MACD 背离统一走 macd_divergence_v2_arrays；删分型摆点与旧背离 / 旧 ①② 实现（owner 2026-11-25）"
         }
       ]
     },
@@ -648,13 +673,18 @@
       ]
     },
     "sector_phase": {
-      "version": 1,
-      "source_digest": "90456000206163470b5a",
+      "version": 2,
+      "source_digest": "12c154397c23a34b0c1b",
       "history": [
         {
           "version": 1,
           "date": "2026-11-03",
           "change": "初始版本（定义校准前基线，TODO #121）"
+        },
+        {
+          "version": 2,
+          "date": "2026-11-25",
+          "change": "价格高低点改用 MACD 平台点、MACD 背离统一走 macd_divergence_v2_arrays；删分型摆点与旧背离 / 旧 ①② 实现（owner 2026-11-25）"
         }
       ]
     },
