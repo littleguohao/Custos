@@ -172,7 +172,7 @@
       ]
     },
     "distribution": {
-      "version": 2,
+      "version": 3,
       "source_digest": "ef8d8cc1faf052d595d6",
       "history": [
         {
@@ -209,6 +209,11 @@
           "version": 2,
           "date": "2026-11-24",
           "refactor": "同批：①② 只提醒不抬风险等级，新增 top_bear 字段"
+        },
+        {
+          "version": 3,
+          "date": "2026-11-25",
+          "change": "依赖的涨跌停幅度改为按代码前缀（owner 2026-11-25），输出随之变化"
         }
       ]
     },
@@ -429,13 +434,18 @@
       ]
     },
     "qn_ma144_launch": {
-      "version": 1,
-      "source_digest": "034c18b746d22a01597f",
+      "version": 2,
+      "source_digest": "175c579782f7f1f66578",
       "history": [
         {
           "version": 1,
           "date": "2026-11-03",
           "change": "初始版本（定义校准前基线，TODO #121）"
+        },
+        {
+          "version": 2,
+          "date": "2026-11-25",
+          "change": "涨停 / 涨跌停幅度统一口径（owner 2026-11-25：通达信 ZT 公式，限幅按代码前缀，去掉行情自纠）"
         }
       ]
     },
@@ -473,13 +483,18 @@
       ]
     },
     "qn_shrink_limit_up": {
-      "version": 1,
-      "source_digest": "a50a2a17413b394f13c7",
+      "version": 2,
+      "source_digest": "dd83234f6ffc8d66b5d5",
       "history": [
         {
           "version": 1,
           "date": "2026-11-03",
           "change": "初始版本（定义校准前基线，TODO #121）"
+        },
+        {
+          "version": 2,
+          "date": "2026-11-25",
+          "change": "涨停 / 涨跌停幅度统一口径（owner 2026-11-25：通达信 ZT 公式，限幅按代码前缀，去掉行情自纠）"
         }
       ]
     },
@@ -561,8 +576,8 @@
       ]
     },
     "s_shape": {
-      "version": 1,
-      "source_digest": "e9178e7ae6aecf31ba83",
+      "version": 2,
+      "source_digest": "5d61ed9979e73886c9f9",
       "history": [
         {
           "version": 1,
@@ -578,6 +593,11 @@
           "version": 1,
           "date": "2026-11-17",
           "refactor": "沙漏候选补口径注释"
+        },
+        {
+          "version": 2,
+          "date": "2026-11-25",
+          "change": "涨停 / 涨跌停幅度统一口径（owner 2026-11-25：通达信 ZT 公式，限幅按代码前缀，去掉行情自纠）"
         }
       ]
     },
@@ -635,13 +655,18 @@
       ]
     },
     "wave_type": {
-      "version": 1,
-      "source_digest": "befaefe393c1809700a1",
+      "version": 2,
+      "source_digest": "275843576d25bb243f94",
       "history": [
         {
           "version": 1,
           "date": "2026-11-03",
           "change": "初始版本（定义校准前基线，TODO #121）"
+        },
+        {
+          "version": 2,
+          "date": "2026-11-25",
+          "change": "涨停 / 涨跌停幅度统一口径（owner 2026-11-25：通达信 ZT 公式，限幅按代码前缀，去掉行情自纠）"
         }
       ]
     },
@@ -657,7 +682,7 @@
       ]
     },
     "technical_monitor": {
-      "version": 3,
+      "version": 4,
       "source_digest": "5df8130f807be195e162",
       "history": [
         {
@@ -689,6 +714,11 @@
           "version": 3,
           "date": "2026-11-25",
           "change": "趋势三态与上升 / 下降 N 改由 b1_structure 的 MACD 平台 N 结构推出（owner 2026-11-25）"
+        },
+        {
+          "version": 4,
+          "date": "2026-11-25",
+          "change": "依赖的涨跌停幅度改为按代码前缀（owner 2026-11-25），输出随之变化"
         }
       ]
     }

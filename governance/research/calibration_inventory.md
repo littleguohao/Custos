@@ -8,9 +8,9 @@
 
 ## 现状
 
-- **P0H 持仓大形态 13 个**（12 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 269 个模块级数值参数：**P0 103 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
-  **P1 live 展示 99 个**（1800 证据标注，不进判定）、P2 研究 67 个。
-- **定义校准：0 / 269**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
+- **P0H 持仓大形态 13 个**（12 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 266 个模块级数值参数：**P0 102 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
+  **P1 live 展示 99 个**（1800 证据标注，不进判定）、P2 研究 65 个。
+- **定义校准：0 / 266**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
 - **清单未覆盖**（需在逐因子校准时一并核）：①函数体内联常量（KDJ 9/3/3、BBI 周期、20 日相对强度窗口等）；
   ②打分权重与分档（`DEFAULT_TECH_WEIGHTS`、`tech_strong/mid` 60/30、资金意图 `ci_*` 与 `CAP_STRONG/MID`——属打分，R35 终局 A 已收口，
   不在 A 类范围，只在因子定义改动时同步核对）；③出场规则（`EXIT_RULES.json`，R10/R44/R47 测过效果）与 0AMV 状态机（R4），另议。
@@ -275,6 +275,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 - **回调缩量企稳 v2（owner 2026-11-25）**：`ignition__mining_v1` labels10.csv 回调缩量 6 张（对 1 / 错 3 / 不确定 2），错的都是当根放量（#40 2.52、#41 0.96 倍前 5 日均量）或 K 线大（#42 实体 5.2%）。原文（01_swing_rules §5）是「回调段成交量单调收缩，收盘守住 DKS 或前一有效低点」，v1 只比两段均量（< 0.85）。
   完美 B1 10 例（R36 买点）读数：回调 4~27 根、回撤 6~30%；回调初段常是顶部余量（2~6 倍涨段均量），逐日单调无一满足，末 1/3 / 初 1/3 均量 0.40~0.71；当根阴线量 0.61~0.89、阳线 0.47~1.17，实体 0.3~3.7%；300689 收盘在 DKS 下 0.8% 但守住前一低点。
   候选（v0.584）：`ignition.check_pullback_shrink_v2`（近 30 根高点；末 / 初 1/3 均量 ≤0.75；阴线 < 0.9、阳线 < 1.5 倍前 5 日均量；实体 < 4%；守 DKS 或前一低点）。完美 B1 10 + owner 4 共 14 张全对（v1 9/14；门槛贴着这 14 张定，须新图集复验）。J<13 样本点命中 22.6%（v1 10.4%）。未接 live。「守住 DKS 或前一低点」是数值判断，退出人工校准（owner 2026-11-25），由钉测管；图集只判量与当根 K 线。图集 `pullback_v2__mining_v1`；旧图集回调缩量 30 张不再标。
+- **涨停 / 涨跌停幅度统一（v0.590，owner 2026-11-25）**：涨停唯一口径 `code_utils.is_limit_up`（owner 通达信公式 ZT：收盘 = ZTPRICE 或涨幅在 限幅 ± 0.2%，限幅按代码前缀）；删 WAVE_LIMIT_UP_PCT（写死 9.8，20cm 票 J<13 样本冲刺波 83 → 20）与 QN_LIMIT_TOL。涨跌停幅度 `indicators.price_limit_from`：有代码只看前缀，🔄 去掉行情自纠（主板 J<13 样本 24% 被升 20%、50% 被降 ST 5%，持仓中大阳 / 中大阴门槛乱跳）。
 - **纯数值判定退出人工校准（v0.563，owner 2026-11-23）**：MACD 区间（DIF / DEA 是否在 0 轴上 + 柱体放长 / 缩短 / 转绿）只是数值比较，看图只能核实现，改由钉测管四态；`macd_technics__mining_v1` 的 24 张区间图隐藏，MODULES 去掉该字段。
 - **owner 定（2026-11-23）**：一波流 = ①连续 ②快速（几个交易日内）③大幅（≥50%），之后 A 杀或震荡下跌 / 横盘都算，尽力识别；走势只识别买点前最近 1~2 段，尽力识别。
   落地（v0.561）：`b1_structure.check_one_wave_v4`（120 根内 ≤10 根、途中收盘回撤 <10%、最高价较起点最低价 ≥50%），live 提醒改用 v4（风险列「一波流（提醒）」，不否决不计分）；
@@ -338,7 +339,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `technical_monitor` | `TREND_MIN_BARS` | 60 | 趋势判定最少 K 线数 | - | 未校准 |
 | `technical_monitor` | `QFQ_LOAD_BARS` | 100000 | - | - | 未校准 |
 
-### P0（103 个参数）
+### P0（102 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -435,7 +436,6 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `volume_detectors` | `BV_BASE_LOW_WIN` | 60 | 底部低点（图上标注用）= 放量起点前 60 根最低收盘 | candidate | 候选（owner 2026-11-24） |
 | `wave_type` | `WAVE_LOOKBACK` | 60 | 拉升波分析窗口（日） | active；R2 | 未校准 |
 | `wave_type` | `WAVE_MIN_BARS` | 40 | 拉升波分类最少K线数 | active；R2 | 未校准 |
-| `wave_type` | `WAVE_LIMIT_UP_PCT` | 9.8 | 待回测参数：涨停/接近涨停判定（单日涨幅%） | active；R2 | 未校准 |
 | `wave_type` | `WAVE_SPRINT_WINDOW` | 20 | 待回测参数：冲刺波涨停统计窗口（日） | active；R2 | 未校准 |
 | `wave_type` | `WAVE_SPRINT_MIN_LIMIT_UPS` | 2 | 待回测参数：冲刺波涨停次数下限 | active；R2 | 未校准 |
 | `wave_type` | `WAVE_ACCEL_10D_GAIN` | 25.0 | - | active；R2 | 未校准 |
@@ -550,7 +550,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `sector_phase` | `PHASE_LOOKBACK` | 60 | 顶背离/三打回看窗口(交易日) | active；R4 | 未校准 |
 | `sector_phase` | `PHASE_FRACTAL` | 2 | 摆动高点左右确认根数 | active；R4 | 未校准 |
 
-### P2（67 个参数）
+### P2（65 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -587,7 +587,6 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `qn_ma144_launch` | `QN_FLAT_WIN` | 20 | 待回测：上翘之前的走平观察窗 | needs_work；R31 | 未校准 |
 | `qn_ma144_launch` | `QN_FLAT_PCT` | 0.02 | 待回测：走平容差（窗内相对变化） | needs_work；R31 | 未校准 |
 | `qn_ma144_launch` | `QN_PULLBACK_PCT` | 10.0 | 待回测：回踩均线容差 ±%（源规则「正负10%以内」） | needs_work；R31 | 未校准 |
-| `qn_ma144_launch` | `QN_LIMIT_TOL` | 0.5 | 待回测：涨停判定容差 pp（封板认定） | needs_work；R31 | 未校准 |
 | `qn_ma144_launch` | `QN_SURGE_MULT` | 2.0 | 待回测：倍量阈值（源规则「倍量」） | needs_work；R31 | 未校准 |
 | `qn_ma144_launch` | `QN_MA25_WIN` | 25 | 待回测：线上阴线的「线」（25 日线，源规则同一体系） | needs_work；R31 | 未校准 |
 | `qn_ma25_state` | `QN_MA25_WIN` | 25 | 待回测：多空分界均线窗口（源规则=25 日线，与 v0.7 口径一致） | needs_work；R31 | 未校准 |
@@ -599,7 +598,6 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `qn_macd_bar_shift` | `QN_SHRINK_BARS` | 3 | 待回测：连续缩短根数（末 N 根逐根收缩） | needs_work；R31 | 未校准 |
 | `qn_macd_bar_shift` | `QN_LOW_WIN` | 5 | 待回测：买小绿的「前低」参照窗（此前 N 根最低收盘） | needs_work；R31 | 未校准 |
 | `qn_macd_bar_shift` | `QN_HIGH_WIN` | 5 | 待回测：卖小红的「滞涨」参照窗（此前 N 根最高收盘） | needs_work；R31 | 未校准 |
-| `qn_shrink_limit_up` | `QN_LIMIT_TOL` | 0.5 | 待回测：涨停判定容差 pp（封板认定，同 qn_ma144_launch） | untested | 未校准 |
 | `qn_shrink_limit_up` | `QN_SHRINK_PCT` | 0.7 | 待回测：缩量上界（当日量 < 前日×0.7） | untested | 未校准 |
 | `qn_shrink_limit_up` | `QN_SHRINK_FLOOR` | 0.5 | 待回测：缩量下界（≤前日 1/2 = 缩过头，弱势） | untested | 未校准 |
 | `qn_shrink_limit_up` | `QN_PREV_SURGE` | 2.0 | 待回测：前序放量阴线的量能门槛（≥20 日均量×2） | untested | 未校准 |

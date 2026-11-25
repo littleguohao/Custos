@@ -584,34 +584,21 @@ def zhixing_state(
     }
 
 
-def _infer_price_limit(code: str, df: pd.DataFrame) -> int:
-    """Infer the daily price-limit percentage for a stock.
+def price_limit_from(code: str, max_abs_chg_20d: Optional[float]) -> int:
+    """涨跌停幅度（v0.590，owner 2026-11-25 统一）：有代码 ⇒ 只看前缀（``code_utils.price_limit_pct``，唯一来源）；
+    没有代码才看行情：近 20 日最大涨跌幅 > 11% ⇒ 20，否则 10。
+    🔄 停用行情自纠：主板一个涨停（+10%）就 > 9.9 被升成 20%，近 20 日平静（≤5.2%）被降成 ST 5%——
+    挖掘段 B J<13 样本点里主板票 24% 被判 20%、50% 被判 5%，持仓「中大阳 / 中大阴」门槛（限幅 / 2）因此在 2.5%~10% 之间乱跳。
+    ST（5%）只能看名称，行情推不出，不再推断。"""
+    if str(code or "").strip():
+        return int(price_limit_pct(code))
+    return 20 if (max_abs_chg_20d is not None and max_abs_chg_20d > 11.0) else 10
 
-    Base comes from ``code_utils.price_limit_pct`` (single source), then
-    validates against observed historical daily changes: if any of the
-    **last 20 trading days** shows |change_pct| > 9.9 for a 10%-prefix stock,
-    upgrade to 20%. This catches edge cases without relying solely on static
-    prefix rules. ST/special-treatment stocks typically have 5% limits; we
-    detect those by checking if observed max |change_pct| is consistently
-    <= 5.2. The ST downgrade only applies to 10%-prefix stocks — a quiet
-    20-day window must never demote a 300/301/688/920 stock to 5%.
-    """
-    # ⚠️ base 必须来自 `code_utils.price_limit_pct`（唯一来源）。此前这里内联写
-    # `20 if startswith(("688","920","300","301")) else 10`，对北交所给 20 而
-    # 实际限制是 **30**，且漏了 83/87/43 前缀。下面的数据自纠只能把 10 升到 20、
-    # **永远到不了 30**，所以那个偏差不会被历史波动纠正 —— 详见唯一实现的 docstring。
-    base = int(price_limit_pct(code))
-    if len(df) >= 20:
-        # ⚠️ 自纠只看**最近 20 个交易日**（docstring 一直写「近20日」，实现却取整条
-        # 序列）：10% 板块新股的窗口若含上市首日 +44%，max_change 会被它永久顶穿
-        # 9.9 ⇒ 该股被**永久**升级为 20% 口径，再也回不去。tail(20) 后首日异动
-        # 滚出窗口即恢复（2026-08-08 修复）。
+
+def _infer_price_limit(code: str, df: pd.DataFrame) -> int:
+    """涨跌停幅度（见 ``price_limit_from``）。"""
+    mx = None
+    if not str(code or "").strip() and len(df) >= 20:
         changes = (df["close"] / df["close"].shift(1) - 1).abs() * 100
-        max_change = float(changes.tail(20).dropna().max())
-        if base == 10 and max_change > 9.9:
-            base = 20
-        if base == 10 and max_change <= 5.2:
-            # ST 降级仅适用于 10% 前缀品种；20% 前缀（300/301/688/920）
-            # 即使近 20 日波动很小也不得降级为 5%。
-            base = 5
-    return base
+        mx = float(changes.tail(20).dropna().max())
+    return price_limit_from(code, mx)

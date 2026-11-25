@@ -11,7 +11,7 @@
 
 确定性转译（待回测）：
 - 涨停 = 当日涨幅（round-2 显示精度，项目惯例）≥ `code_utils.price_limit_pct(code)`
-  − ``QN_LIMIT_TOL``
+  （v0.590 起走 code_utils.is_limit_up：限幅 ± 0.2%）
 - 缩量 = 当日量 / 前日量 ∈ [``QN_SHRINK_FLOOR``, ``QN_SHRINK_PCT``)
   （0.5~0.7：萎缩但不过深；源规则两端都有明文）
 - 前序放量阴线 = 近 ``QN_LOOKBACK`` 根内存在阴线且量 ≥ 同期 20 日均量
@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from custos.core.code_utils import price_limit_pct
+from custos.core.code_utils import is_limit_up
 from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays
 
 FACTOR: dict[str, Any] = {
@@ -41,7 +41,6 @@ FACTOR: dict[str, Any] = {
 }
 
 # ---- 待回测参数 ----
-QN_LIMIT_TOL = 0.5  # 待回测：涨停判定容差 pp（封板认定，同 qn_ma144_launch）
 QN_SHRINK_PCT = 0.7  # 待回测：缩量上界（当日量 < 前日×0.7）
 QN_SHRINK_FLOOR = 0.5  # 待回测：缩量下界（≤前日 1/2 = 缩过头，弱势）
 QN_PREV_SURGE = 2.0  # 待回测：前序放量阴线的量能门槛（≥20 日均量×2）
@@ -85,7 +84,9 @@ def detect(df, code: str = "", _arr: dict | None = None) -> dict[str, Any]:
             }
         # 腿① 涨停
         chg = (close[-1] / close[-2] - 1) * 100 if close[-2] else 0.0
-        limit_up = bool(round(chg, 2) >= price_limit_pct(code) - QN_LIMIT_TOL)
+        limit_up = is_limit_up(
+            code, chg, close=close[-1], prev_close=close[-2]
+        )  # v0.590 唯一口径
         # 腿② 缩量适中（萎缩但不过深）
         vr = float(vol[-1] / vol[-2]) if vol[-2] else 0.0
         shrink = bool(QN_SHRINK_FLOOR <= vr < QN_SHRINK_PCT)

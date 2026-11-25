@@ -159,10 +159,10 @@ class TestPriceLimitInferenceGetsCode:
         assert tm._infer_price_limit("920819", self._quiet_df()) == 30
 
     def test_missing_code_is_what_broke_it(self):
-        """留证:不传 code 时安静窗口会被判成 5%,这正是 analyze 旧行为。"""
+        """留证：不传 code 时旧行为会把安静窗口判成 5%；v0.590 起无代码只按行情判 10 / 20。"""
         from custos.pipeline.market_timing import technical_monitor as tm
 
-        assert tm._infer_price_limit("", self._quiet_df()) == 5
+        assert tm._infer_price_limit("", self._quiet_df()) == 10
 
     def test_analyze_forwards_code_to_price_volume(self):
         from custos.pipeline.market_timing import technical_monitor as tm

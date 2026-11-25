@@ -791,7 +791,7 @@ def _assemble_metrics(
             "relative_strength_strong": bool(base["rs_strong"]),
         },
         # --- B1/CZ 策略对齐（阈值均为待回测参数，实际值随候选落盘） ---
-        "wave": detect_wave_type(df),
+        "wave": detect_wave_type(df, code),  # v0.590：涨停按代码前缀
         # 只摊 weekly_ 前缀键：裸 available 会落到候选顶层被误读成"候选可用"（审计）
         **{k: v for k, v in _wk.items() if k.startswith("weekly_")},
         "signals": ev["signals"],

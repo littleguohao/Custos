@@ -1191,16 +1191,12 @@ def penalty_from_series(pre: dict[str, Any], i: int, code: str = "") -> float:
 
 
 def _price_limit_series_at(pre: dict[str, Any], i: int, code: str) -> int:
-    """_infer_price_limit 的第 i 点（近 20 根自纠窗口 = nanmax(abs_chg[i-19..i])）。"""
+    """_infer_price_limit 的第 i 点（同 indicators.price_limit_from，唯一口径）。"""
+    from custos.core.indicators import price_limit_from  # noqa: PLC0415
+
     nn = i + 1
-    limit = int(price_limit_pct(code))
-    if nn >= 20:
-        max_change = float(np.nanmax(pre["abs_chg"][i - 19 : i + 1]))
-        if limit == 10 and max_change > 9.9:
-            limit = 20
-        if limit == 10 and max_change <= 5.2:
-            limit = 5
-    return limit
+    mx = float(np.nanmax(pre["abs_chg"][i - 19 : i + 1])) if nn >= 20 else None
+    return price_limit_from(code, mx)
 
 
 def _penalty_bar_at(a: dict[str, Any], i: int, t: int, big: float) -> Optional[float]:

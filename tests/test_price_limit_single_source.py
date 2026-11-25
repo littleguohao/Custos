@@ -89,12 +89,12 @@ class TestDelegation:
         assert tm._infer_price_limit("689009", quiet) == 20
 
     def test_st_downgrade_still_only_for_ten_percent(self):
-        """回归保护：安静窗口把 10% 品种降级 5%，但**不得**降级宽幅品种。"""
+        """v0.590：安静窗口不再降级任何品种（ST 只能看名称）；宽幅品种保持前缀。"""
         import pandas as pd
         from custos.pipeline.market_timing import technical_monitor as tm
 
         quiet = pd.DataFrame({"close": [10.0 + (i % 2) * 0.01 for i in range(25)]})
-        assert tm._infer_price_limit("600000", quiet) == 5
+        assert tm._infer_price_limit("600000", quiet) == 10
         for code in ("300750", "688111", "920808"):
             assert tm._infer_price_limit(code, quiet) > 5
 
@@ -163,3 +163,45 @@ class TestMaFlag:
 
         line = fcr.render_index_row({"name": "x", "close": None, "change_pct": None})
         assert "unavailable" in line
+
+
+class TestLimitUpSingleRule:
+    """v0.590（owner 2026-11-25 通达信公式 ZT）：涨停 = 收盘等于涨停价，或涨幅在 限幅 ± 0.2% 之内。"""
+
+    def test_main_board_band(self):
+        from custos.core.code_utils import is_limit_up
+
+        assert is_limit_up("600000", 9.95) and is_limit_up("600000", 10.1)
+        assert not is_limit_up("600000", 9.7)
+
+    def test_chinext_needs_20pct(self):
+        """原 wave_type 写死 ≥9.8%：创业板涨 10% 也被算涨停。"""
+        from custos.core.code_utils import is_limit_up
+
+        assert not is_limit_up("300750", 10.0)
+        assert is_limit_up("300750", 19.95) and is_limit_up("688111", 20.0)
+
+    def test_exact_limit_price_counts(self):
+        """低价股涨停价四舍五入后涨幅可能落在带外，收盘等于 ZTPRICE 即算。"""
+        from custos.core.code_utils import is_limit_up
+
+        assert is_limit_up("600000", 9.52, close=1.15, prev_close=1.05) is False
+        assert is_limit_up(
+            "600000", (1.16 / 1.05 - 1) * 100, close=1.16, prev_close=1.05
+        )
+
+    def test_wave_type_uses_single_rule(self):
+        import numpy as np
+        import pandas as pd
+
+        from custos.core.factors import wave_type as wt
+
+        c = np.r_[
+            np.full(40, 10.0), [11.0, 12.1], np.full(18, 12.1)
+        ]  # 两个主板涨停（+10%）
+        df = pd.DataFrame(
+            {"open": c, "high": c, "low": c, "close": c, "volume": np.full(len(c), 1e6)}
+        )
+        assert len(wt._limit_up_days(c, len(c), "600000")) == 2
+        assert len(wt._limit_up_days(c, len(c), "300750")) == 0  # 创业板 +10% 不是涨停
+        assert wt.detect_wave_type(df, "600000")["detail"]["limit_up_count_20d"] == 2

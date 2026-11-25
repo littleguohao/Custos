@@ -32,7 +32,6 @@ FACTOR: dict[str, Any] = {
 
 WAVE_LOOKBACK = 60  # 拉升波分析窗口（日）
 WAVE_MIN_BARS = 40  # 拉升波分类最少K线数
-WAVE_LIMIT_UP_PCT = 9.8  # 待回测参数：涨停/接近涨停判定（单日涨幅%）
 WAVE_SPRINT_WINDOW = 20  # 待回测参数：冲刺波涨停统计窗口（日）
 WAVE_SPRINT_MIN_LIMIT_UPS = 2  # 待回测参数：冲刺波涨停次数下限
 WAVE_ACCEL_10D_GAIN = (
@@ -68,15 +67,18 @@ def _find_rally_segment(
     return start, i_low, i_high, n
 
 
-def _limit_up_days(close, n: int) -> list[int]:
-    """近20日涨停/接近涨停的 bar 位置（全 df 口径；prev close<=0 的脏数据 bar 不计涨停）。"""
-    with np.errstate(divide="ignore", invalid="ignore"):
-        chg = close[1:] / close[:-1] * 100 - 100
-    return [
-        i + 1
-        for i in range(max(0, n - WAVE_SPRINT_WINDOW - 1), n - 1)
-        if close[i] > 0 and chg[i] >= WAVE_LIMIT_UP_PCT
-    ]
+def _limit_up_days(close, n: int, code: str = "") -> list[int]:
+    """近 20 日涨停的 bar 位置（v0.590 起走 ``code_utils.is_limit_up`` 唯一口径，按代码前缀分 10 / 20 / 30%；
+    🔄 原写死 ≥9.8%，20cm 票涨 10% 也算涨停）。prev close ≤0 的脏数据 bar 不计。"""
+    from custos.core.code_utils import is_limit_up  # noqa: PLC0415
+
+    out = []
+    for i in range(max(0, n - WAVE_SPRINT_WINDOW - 1), n - 1):
+        if close[i] > 0:
+            chg = float(close[i + 1] / close[i] * 100 - 100)
+            if is_limit_up(code, chg, close=close[i + 1], prev_close=close[i]):
+                out.append(i + 1)
+    return out
 
 
 def _accel_10d_gain(close, i_low: int, i_high: int) -> Optional[float]:
@@ -174,7 +176,7 @@ def _wave_detail(
     }
 
 
-def detect_wave_type(df) -> dict[str, Any]:
+def detect_wave_type(df, code: str = "") -> dict[str, Any]:
     """拉升波三分类（B1 §四.0）：sprint > rally > buildup，冲突取保守。
 
     detail.accel_10d_gain_pct 为拉升段（i_low→i_high）内最大 10 日涨幅，
@@ -200,7 +202,7 @@ def detect_wave_type(df) -> dict[str, Any]:
     seg_gain = (
         (float(high[i_high]) / float(close[i_low]) - 1) * 100 if close[i_low] else 0.0
     )
-    limit_ups = _limit_up_days(close, n)
+    limit_ups = _limit_up_days(close, n, code)
     accel_10d = _accel_10d_gain(close, i_low, i_high)
     top_vol_ratio = _top_vol_ratio(vol, i_high)
     start_bull = _start_bull_candle(close, vol, i_low, n)

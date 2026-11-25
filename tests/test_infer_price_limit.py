@@ -43,12 +43,18 @@ class TestStDowngradeOnlyForTenPercentPrefix:
         assert _infer_price_limit(code, _df(QUIET_20)) == want
 
     @pytest.mark.parametrize("code", ["600519", "000001"])
-    def test_quiet_10pct_prefix_demotes_to_5(self, code):
-        assert _infer_price_limit(code, _df(QUIET_20)) == 5
+    def test_quiet_10pct_prefix_not_demoted_v0590(self, code):
+        """v0.590（owner 2026-11-25）：有代码只看前缀；安静窗口不再降成 ST 5%（主板 J<13 样本 50% 被误降）。"""
+        assert _infer_price_limit(code, _df(QUIET_20)) == 10
 
-    def test_10pct_prefix_with_big_move_upgrades_to_20(self):
-        df = _df(QUIET_20[:10] + [12.0] + QUIET_20[10:])
-        assert _infer_price_limit("600519", df) == 20
+    def test_10pct_prefix_with_limit_up_not_upgraded_v0590(self):
+        """主板一个涨停（+10%）不再把限幅升成 20%（原 >9.9 即升级，主板 J<13 样本 24% 被误升）。"""
+        df = _df(QUIET_20[:10] + [10.0] + QUIET_20[10:])
+        assert _infer_price_limit("600519", df) == 10
+
+    def test_no_code_infers_from_data_v0590(self):
+        assert _infer_price_limit("", _df(QUIET_20)) == 10
+        assert _infer_price_limit("", _df(QUIET_20[:10] + [19.9] + QUIET_20[10:])) == 20
 
     def test_short_history_uses_prefix(self):
         assert _infer_price_limit("300750", _df([1.0] * 5)) == 20
@@ -72,7 +78,8 @@ class TestSelfCorrectWindowIsRecent20:
         assert len(changes) == 22 and max(changes[-20:]) == 6.0  # 首日已出窗
         assert _infer_price_limit("600519", _df(changes)) == 10
 
-    def test_big_move_inside_window_still_upgrades(self):
-        """对照：同样的 +44% 落在近 20 日窗口**内** ⇒ 仍升级。"""
+    def test_big_move_inside_window_upgrades_only_without_code(self):
+        """v0.590：+44% 落在窗口内也只在**没有代码**时升级；有代码以前缀为准。"""
         changes = [1.0, -1.0] * 9 + [44.0] + [1.0]
-        assert _infer_price_limit("600519", _df(changes)) == 20
+        assert _infer_price_limit("600519", _df(changes)) == 10
+        assert _infer_price_limit("", _df(changes)) == 20

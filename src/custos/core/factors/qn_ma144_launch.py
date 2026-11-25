@@ -12,7 +12,7 @@
 - 走平上翘 = MA144 近 ``QN_RISE_WIN`` 根上移，且此前 ``QN_FLAT_WIN`` 根
   相对变化 ≤ ``QN_FLAT_PCT``（先走平后上翘）
 - 涨停 = 当日涨幅（round-2 显示精度，项目惯例）≥ `code_utils.price_limit_pct(code)`
-  − ``QN_LIMIT_TOL``（容差，封板判定；涨跌幅限制口径 v0.33 定案，全项目唯一来源）
+  （v0.590 起走 code_utils.is_limit_up：限幅 ± 0.2%）（容差，封板判定；涨跌幅限制口径 v0.33 定案，全项目唯一来源）
 - 跳空高开 = 当日最低 > 前日最高（严格缺口）
 - 倍量 = 当日量 ≥ 前日 × ``QN_SURGE_MULT``
 - 线上阴线 = 阴线且收盘在 MA25 上方（与 qn_ma25_state 同均线口径）
@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from custos.core.code_utils import price_limit_pct
+from custos.core.code_utils import is_limit_up
 from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays
 from custos.core.indicators import macd_series
 
@@ -51,7 +51,6 @@ QN_RISE_WIN = 5  # 待回测：上翘确认根数（近 N 根均线上移）
 QN_FLAT_WIN = 20  # 待回测：上翘之前的走平观察窗
 QN_FLAT_PCT = 0.02  # 待回测：走平容差（窗内相对变化）
 QN_PULLBACK_PCT = 10.0  # 待回测：回踩均线容差 ±%（源规则「正负10%以内」）
-QN_LIMIT_TOL = 0.5  # 待回测：涨停判定容差 pp（封板认定）
 QN_SURGE_MULT = 2.0  # 待回测：倍量阈值（源规则「倍量」）
 QN_MA25_WIN = 25  # 待回测：线上阴线的「线」（25 日线，源规则同一体系）
 
@@ -96,7 +95,9 @@ def _leg_cross_forms(
     ⚠️ 简化：未判源规则的价格位穿越（左风定位价），当日出现任一形式即算过
     （spec 表批准的转译简化，命中率偏松）。"""
     chg = (close[-1] / close[-2] - 1) * 100 if close[-2] else 0.0
-    limit_up = bool(round(chg, 2) >= price_limit_pct(code) - QN_LIMIT_TOL)
+    limit_up = is_limit_up(
+        code, chg, close=close[-1], prev_close=close[-2]
+    )  # v0.590 唯一口径
     gap_up = bool(low[-1] > high[-2])
     surge = bool(vol[-2] and vol[-1] >= vol[-2] * QN_SURGE_MULT)
     online_yin = bool(close[-1] < open_[-1] and close[-1] > ma25_last)

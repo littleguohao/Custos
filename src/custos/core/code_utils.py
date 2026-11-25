@@ -75,6 +75,21 @@ def price_limit_pct(code) -> float:
     return 10.0
 
 
+LIMIT_UP_BAND = 0.2  # 涨停：涨幅在 限幅 ± 0.2% 之内（owner 通达信公式 ZT：ZF>9.8 AND ZF<10.2 / 19.8~20.2）
+
+
+def is_limit_up(code, chg_pct: float, *, close=None, prev_close=None) -> bool:
+    """涨停判定，**全项目唯一口径**（v0.590，owner 2026-11-25 通达信公式 ZT）：
+    收盘 = 涨停价 ZTPRICE(前收, 限幅)，或涨幅落在 限幅 ± ``LIMIT_UP_BAND`` 之内；限幅按代码前缀（``price_limit_pct``：
+    主板 10%、创业板 / 科创板 20%、北交所 30%）。🔄 停用：wave_type 写死 ≥9.8%（20cm 涨 10% 也算涨停）、QN 的 ≥ 限幅 − 0.5。"""
+    lim = price_limit_pct(code)
+    if close is not None and prev_close:
+        zt = round(float(prev_close) * (1 + lim / 100) + 1e-9, 2)
+        if abs(float(close) - zt) < 0.005:
+            return True
+    return bool(lim - LIMIT_UP_BAND < float(chg_pct) < lim + LIMIT_UP_BAND)
+
+
 def bare_code(code) -> str:
     """去掉交易所后缀，返回裸代码：`"600000.SH"` → `"600000"`。
 
