@@ -584,6 +584,36 @@ def zhixing_state(
     }
 
 
+def candle_side(
+    o: float, c: float, prev_c: Optional[float] = None, zone: Optional[str] = None
+) -> int:
+    """K 线阴阳（**全项目唯一判定**，v0.593，owner 2026-11-24 / 11-25）：+1 阳、−1 阴、0 平。
+
+    - 收 > 开 ⇒ 阳；收 < 开 ⇒ 阴；
+    - **假阴真阳**（收 < 开 但 收 > 前收）：``zone="bottom"``（底部区间）算阳，``"top"`` 或未给区间算阴（owner：底部算阳量、顶部算阴量）；
+    - 收 = 开（一字板 / 十字星）：按前收定（收 > 前收 ⇒ 阳，如一字涨停；收 < 前收 ⇒ 阴），没有前收 ⇒ 0。
+    ``zone`` 由 ``b1_structure.price_zone`` 给（走势三态 + N 结构）。假阳真阴（收 > 开 但 收 < 前收）owner 未定，按阳。"""
+    if c > o:
+        return 1
+    if c < o:
+        if zone == "bottom" and prev_c is not None and c > prev_c:
+            return 1
+        return -1
+    if prev_c is None or c == prev_c:
+        return 0
+    return 1 if c > prev_c else -1
+
+
+def candle_sides(open_, close, zone: Optional[str] = None) -> list[int]:
+    """``candle_side`` 的序列版（第 0 根没有前收）。"""
+    return [
+        candle_side(
+            float(open_[i]), float(close[i]), float(close[i - 1]) if i else None, zone
+        )
+        for i in range(len(close))
+    ]
+
+
 def price_limit_from(code: str, max_abs_chg_20d: Optional[float]) -> int:
     """涨跌停幅度（v0.590，owner 2026-11-25 统一）：有代码 ⇒ 只看前缀（``code_utils.price_limit_pct``，唯一来源）；
     没有代码才看行情：近 20 日最大涨跌幅 > 11% ⇒ 20，否则 10。

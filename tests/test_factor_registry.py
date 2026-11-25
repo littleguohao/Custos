@@ -724,7 +724,7 @@ class TestCharacterizationSnapshot:
         "b1_structure": "a000d4ec2023",  # v0.592 顶部放量阴线统一判定（owner 2026-11-25）
         "b2_surge_factor": "9f3b7bcdc8e1",
         "baseline": "2bd7dd114d5c",
-        "bottom_patterns": "76cf78a9d5be",  # v0.218…B2 更新（新增 detect 打包入口槽）
+        "bottom_patterns": "8d4ab26c9670",  # v0.593 阴阳线统一判定（owner 2026-11-25）
         "capital_intent": "b60916945ed9",  # v0.227 更新（ctx 双形态入口接管）
         "distribution": "0e9077b2a317",  # v0.590 涨停 / 涨跌停幅度统一口径（owner 2026-11-25）
         "entry_patterns": "bb7bfe3d1b65",  # v0.227 更新（ctx 打包门面接管）

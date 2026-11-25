@@ -57,8 +57,8 @@
       ]
     },
     "b1_structure": {
-      "version": 6,
-      "source_digest": "28d542f352df5e42c55f",
+      "version": 7,
+      "source_digest": "c3ef6fc14ee7ea2d1b17",
       "history": [
         {
           "version": 1,
@@ -124,6 +124,11 @@
           "version": 6,
           "date": "2026-11-25",
           "change": "顶部 / 次高点放量阴线统一判定（distribution.top_bear_bars），非一波流 / 一波流 v3 改调（owner 2026-11-25）"
+        },
+        {
+          "version": 7,
+          "date": "2026-11-25",
+          "change": "阴阳线统一判定 indicators.candle_side（假阴真阳按区间，一字板按前收）+ 区间唯一判定 price_zone（owner 2026-11-25）"
         }
       ]
     },
@@ -155,8 +160,8 @@
       ]
     },
     "bottom_patterns": {
-      "version": 1,
-      "source_digest": "30011df91c0a4bd4d05e",
+      "version": 2,
+      "source_digest": "68355ccaf2e8fede1824",
       "history": [
         {
           "version": 1,
@@ -167,6 +172,11 @@
           "version": 1,
           "date": "2026-11-16",
           "refactor": "新增 detect_red_green_v2 候选（未接 live）"
+        },
+        {
+          "version": 2,
+          "date": "2026-11-25",
+          "change": "阴阳线统一判定 indicators.candle_side（假阴真阳按区间，一字板按前收）+ 区间唯一判定 price_zone（owner 2026-11-25）"
         }
       ]
     },
@@ -182,8 +192,8 @@
       ]
     },
     "distribution": {
-      "version": 4,
-      "source_digest": "b6327b9765d5ed945b57",
+      "version": 5,
+      "source_digest": "077a361769b219bd7dab",
       "history": [
         {
           "version": 1,
@@ -229,6 +239,11 @@
           "version": 4,
           "date": "2026-11-25",
           "change": "顶部 / 次高点放量阴线统一判定（distribution.top_bear_bars），非一波流 / 一波流 v3 改调（owner 2026-11-25）"
+        },
+        {
+          "version": 5,
+          "date": "2026-11-25",
+          "change": "阴阳线统一判定 indicators.candle_side（假阴真阳按区间，一字板按前收）+ 区间唯一判定 price_zone（owner 2026-11-25）"
         }
       ]
     },
@@ -644,8 +659,8 @@
       ]
     },
     "volume_detectors": {
-      "version": 1,
-      "source_digest": "0d96cc32677766e6fb75",
+      "version": 2,
+      "source_digest": "280e8cc72371b59599c0",
       "history": [
         {
           "version": 1,
@@ -671,6 +686,11 @@
           "version": 1,
           "date": "2026-11-24",
           "refactor": "底部放量候选：底部改为走势三态判断（未接 live）"
+        },
+        {
+          "version": 2,
+          "date": "2026-11-25",
+          "change": "阴阳线统一判定 indicators.candle_side（假阴真阳按区间，一字板按前收）+ 区间唯一判定 price_zone（owner 2026-11-25）"
         }
       ]
     },

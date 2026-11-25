@@ -859,6 +859,17 @@ def check_swing_state(df) -> dict[str, Any]:
     }
 
 
+def price_zone(df) -> Optional[str]:
+    """价格区间（**全项目唯一判定**，v0.593，owner 2026-11-24「走势三态与 N 型结构位置配合」）：
+    走势三态最后一段是上涨 ⇒ ``"top"``（顶部区间）；有下跌段且最后一段不是上涨 ⇒ ``"bottom"``（下跌之后的阶段底部）；其余 ⇒ None。"""
+    st = check_swing_state(df).get("state") or ""
+    if st.endswith("上涨"):
+        return "top"
+    if "下跌" in st:
+        return "bottom"
+    return None
+
+
 def _n_completed_seq(df) -> list[dict[str, Any]]:
     """近 N_LOOKBACK 根内**已完成**平台点（进行中末段不算：其平台值随价格移动，会把破位改写成新低点），
     同类相邻合并取极值（同 macd_platform_points），按时间旧 → 新。"""

@@ -206,3 +206,39 @@ class TestLimitUpSingleRule:
         assert len(wt._limit_up_days(c, len(c), "600000")) == 2
         assert len(wt._limit_up_days(c, len(c), "300750")) == 0  # 创业板 +10% 不是涨停
         assert wt.detect_wave_type(df, "600000")["detail"]["limit_up_count_20d"] == 2
+
+
+class TestCandleSideSingleRule:
+    """v0.593（owner 2026-11-24 / 11-25）：阴阳唯一判定 indicators.candle_side。"""
+
+    def test_fake_yin_by_zone(self):
+        from custos.core.indicators import candle_side
+
+        # 假阴真阳：收 10.5 < 开 10.8，但 > 前收 10.0
+        assert candle_side(10.8, 10.5, 10.0, "bottom") == 1  # 底部区间算阳
+        assert candle_side(10.8, 10.5, 10.0, "top") == -1  # 顶部区间算阴
+        assert candle_side(10.8, 10.5, 10.0) == -1  # 未给区间按实体
+
+    def test_flat_bar_by_prev_close(self):
+        from custos.core.indicators import candle_side
+
+        assert candle_side(11.0, 11.0, 10.0) == 1  # 一字涨停算阳（owner）
+        assert candle_side(9.0, 9.0, 10.0) == -1
+        assert candle_side(10.0, 10.0, 10.0) == 0
+
+    def test_price_zone_from_swing_state(self, monkeypatch):
+        from custos.core.factors import b1_structure as bs
+
+        for st, want in (
+            ("震荡上涨", "top"),
+            ("下跌转上涨", "top"),
+            ("震荡下跌", "bottom"),
+            ("下跌转横盘", "bottom"),
+            ("横盘震荡", None),
+        ):
+            monkeypatch.setattr(
+                bs,
+                "check_swing_state",
+                lambda df, st=st: {"available": True, "state": st},
+            )
+            assert bs.price_zone(None) == want

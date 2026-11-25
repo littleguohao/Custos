@@ -25,7 +25,7 @@ from typing import Any
 import pandas as pd
 
 from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays  # noqa: E402
-from custos.core.indicators import macd_series  # noqa: E402  DIF/DEA 唯一实现
+from custos.core.indicators import candle_side, macd_series  # noqa: E402  DIF/DEA、阴阳唯一实现
 
 FACTOR: dict[str, Any] = {
     "id": "bottom_patterns",
@@ -202,10 +202,22 @@ def detect_w_bottom(df, code: str = "") -> dict[str, Any]:
 def _rf_count_area(close, open_, vol, seg) -> dict[str, Any]:
     """红肥绿瘦窗口内的数量/面积两维统计：①数量（阳多阴少）②面积（阳实体/
     阳量均值 > 阴实体/阴量均值）。"""
-    bulls = [t for t in seg if close[t] > open_[t]]
-    bears = [t for t in seg if close[t] < open_[t]]
-    bull_bodies = [abs(close[t] / open_[t] - 1) * 100 for t in bulls if open_[t]]
-    bear_bodies = [abs(close[t] / open_[t] - 1) * 100 for t in bears if open_[t]]
+    side = {
+        t: candle_side(open_[t], close[t], close[t - 1] if t else None, "bottom")
+        for t in seg
+    }  # v0.593 底部区间
+    bulls = [t for t in seg if side[t] > 0]
+    bears = [t for t in seg if side[t] < 0]
+    bull_bodies = [
+        abs(close[t] / open_[t] - 1) * 100
+        for t in bulls
+        if open_[t] and close[t] != open_[t]
+    ]
+    bear_bodies = [
+        abs(close[t] / open_[t] - 1) * 100
+        for t in bears
+        if open_[t] and close[t] != open_[t]
+    ]
     count_hit = bool(bulls and bears and len(bulls) > len(bears))
     area_hit = bool(
         bull_bodies
@@ -297,8 +309,16 @@ def bull_bear_volume(df, window: int = 10) -> dict[str, Any]:
                 "available": False,
                 "reason": f"少于{window}根K线（{n}）",
             }
-        bull_vol = sum(vol[t] for t in range(n - window, n) if close[t] > open_[t])
-        bear_vol = sum(vol[t] for t in range(n - window, n) if close[t] < open_[t])
+        # v0.593（owner 2026-11-24）：阴阳走 indicators.candle_side，假阴真阳按 b1_structure.price_zone 区间（底部算阳、顶部算阴）
+        from custos.core.factors.b1_structure import price_zone  # noqa: PLC0415
+
+        zone = price_zone(df)
+        sides = {
+            t: candle_side(open_[t], close[t], close[t - 1] if t else None, zone)
+            for t in range(n - window, n)
+        }
+        bull_vol = sum(vol[t] for t, sd in sides.items() if sd > 0)
+        bear_vol = sum(vol[t] for t, sd in sides.items() if sd < 0)
         if bull_vol == 0 and bear_vol == 0:
             return {"available": False, "reason": "窗口内全平盘/无量"}
         return {
@@ -354,8 +374,12 @@ def detect_red_green_v2(df, code: str = "") -> dict[str, Any]:
         vmean = float(vol[n - RG2_WINDOW :].mean())
         burst = [t for t in seg if vmean > 0 and vol[t] >= RG2_BURST * vmean]
         rest = [t for t in seg if t not in burst]
-        bulls = [t for t in rest if close[t] > open_[t]]
-        bears = [t for t in rest if close[t] < open_[t]]
+        side = {
+            t: candle_side(open_[t], close[t], close[t - 1] if t else None, "bottom")
+            for t in rest
+        }  # v0.593 底部区间
+        bulls = [t for t in rest if side[t] > 0]
+        bears = [t for t in rest if side[t] < 0]
         body = lambda t: abs(close[t] / open_[t] - 1) * 100 if open_[t] else 0.0  # noqa: E731
         bv, sv = float(sum(vol[t] for t in bulls)), float(sum(vol[t] for t in bears))
         bb = sum(body(t) for t in bulls) / len(bulls) if bulls else 0.0

@@ -19,7 +19,12 @@ from typing import Any, Optional
 from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays
 
 
-from custos.core.indicators import _infer_price_limit, qsx_series, dks_series  # noqa: E402
+from custos.core.indicators import (
+    _infer_price_limit,
+    candle_side,
+    qsx_series,
+    dks_series,
+)  # noqa: E402
 from custos.core.indicators import amplitude_pct as amplitude_pct_of  # noqa: E402  振幅唯一实现
 
 FACTOR: dict[str, Any] = {
@@ -167,7 +172,9 @@ def _leg_stairstep_vol_decline(close, open_, vol, qsx, dks, n: int) -> dict[str,
         cnt = 0
         cnt_vol_up = 0
         for k in range(t, max(0, t - 8), -1):
-            if close[k] < open_[k]:
+            if (
+                candle_side(open_[k], close[k], close[k - 1], "top") < 0
+            ):  # v0.593 阴阳唯一判定（顶部区间）
                 cnt += 1
                 vrk = _vol_ratio5(vol, k)
                 if vol[k] >= vol[k - 1] or (vrk is not None and vrk >= 1.0):
@@ -205,7 +212,11 @@ def _leg_double_top_vol_bear(close, high, open_, vol, n: int) -> dict[str, Any]:
             def bear_vol_after(p: int) -> bool:
                 for t in range(p + 1, min(n, p + 3)):
                     vrt = _vol_ratio5(vol, t)
-                    if close[t] < open_[t] and vrt is not None and vrt >= 1.5:
+                    if (
+                        candle_side(open_[t], close[t], close[t - 1], "top") < 0
+                        and vrt is not None
+                        and vrt >= 1.5
+                    ):
                         return True
                 return False
 
@@ -219,20 +230,28 @@ def _leg_double_top_vol_bear(close, high, open_, vol, n: int) -> dict[str, Any]:
 
 
 def _top_seg_stats(close, open_, vol, n: int) -> tuple[list, list, list, list]:
-    """⑤ 的顶部区间分段统计：(阴实体%列表, 阳实体%列表, 阴量列表, 阳量列表)。"""
+    """⑤ 的顶部区间分段统计：(阴实体%列表, 阳实体%列表, 阴量列表, 阳量列表)；阴阳走 indicators.candle_side（顶部区间，v0.593）。"""
     seg = range(n - DIST_TOP_WINDOW, n)
+    side = {
+        t: candle_side(open_[t], close[t], close[t - 1] if t else None, "top")
+        for t in seg
+    }
     bear_bodies = [
         abs(close[t] / open_[t] - 1) * 100
         for t in seg
-        if close[t] < open_[t] and open_[t]
+        if side[t] < 0
+        and open_[t]
+        and close[t] != open_[t]  # 一字板实体为 0，不稀释实体均值
     ]
     bull_bodies = [
         abs(close[t] / open_[t] - 1) * 100
         for t in seg
-        if close[t] > open_[t] and open_[t]
+        if side[t] > 0
+        and open_[t]
+        and close[t] != open_[t]  # 一字板实体为 0，不稀释实体均值
     ]
-    bear_vols = [vol[t] for t in seg if close[t] < open_[t]]
-    bull_vols = [vol[t] for t in seg if close[t] > open_[t]]
+    bear_vols = [vol[t] for t in seg if side[t] < 0]
+    bull_vols = [vol[t] for t in seg if side[t] > 0]
     return bear_bodies, bull_bodies, bear_vols, bull_vols
 
 
@@ -298,7 +317,7 @@ def top_bear_bars(df, start: Optional[int] = None) -> list[dict[str, Any]]:
     t 前后 DIST2_NEAR_HIGH 根内有最高价分型高点，且它是本轮顶部或次高点（见 _top_or_second_high）。
     假阴真阳（收 < 开但收 > 前收）：顶部区间算阴量、底部区间算阳量（owner）。顶部区间 = 该高点是次高点（低于它之前 60 根最高），
     或走势三态（截至 t）最后一段是上涨（owner：走势三态与 N 型结构位置配合）。不要求跌幅、不要求阴线前加速（🔄 原 ①② 的大阴 / 加速 / 前日缩量）。"""
-    from custos.core.factors.b1_structure import check_swing_state  # noqa: PLC0415
+    from custos.core.factors.b1_structure import price_zone  # noqa: PLC0415  v0.593 区间唯一判定
 
     c, h, _l, v = _ohlcv_arrays(df)
     o = df["open"].astype(float).to_numpy()
@@ -312,7 +331,11 @@ def top_bear_bars(df, start: Optional[int] = None) -> list[dict[str, Any]]:
             continue
         if v[t] < v[max(0, t - 60) : t].max() * DIST2_MAX60:
             continue
-        yang = [v[j] for j in range(t - DIST2_PREV_YANG, t) if c[j] >= o[j]]
+        yang = [
+            v[j]
+            for j in range(t - DIST2_PREV_YANG, t)
+            if candle_side(o[j], c[j], c[j - 1], "top") > 0
+        ]
         if yang and v[t] <= max(yang):
             continue
         hit_q = None
@@ -329,8 +352,7 @@ def top_bear_bars(df, start: Optional[int] = None) -> list[dict[str, Any]]:
         second = kind == "次高点"
         fake = bool(c[t] > c[t - 1])  # 假阴真阳
         if fake and not second:
-            st = check_swing_state(df.iloc[: t + 1]).get("state") or ""
-            if not st.endswith("上涨"):
+            if price_zone(df.iloc[: t + 1]) != "top":
                 continue  # 底部区间的假阴真阳算阳量
         bars.append(
             {

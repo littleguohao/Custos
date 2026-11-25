@@ -52,6 +52,7 @@ def test_limit_up_flat_bar_counts_as_yang():
     t = 101
     open_[t] = close[t] * 1.03
     vol[t] = 3000
+    close[t - 1] = round(close[t - 2] * 1.10, 2)  # 一字涨停（收 = 开 且 收 > 前收）
     open_[t - 1] = close[t - 1]
     vol[t - 1] = 4000
     assert dm.check_top_bear_volume(_df(close, open_, vol))["hit"] is False

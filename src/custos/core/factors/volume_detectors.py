@@ -222,11 +222,10 @@ BV_STARS = ("", "⭐", "⭐⭐", "⭐⭐⭐")
 def _bv_in_base(df, start: int, memo: dict[int, bool]) -> bool:
     """阶段底部（owner 2026-11-24「下跌之后的底部区域，只要是阶段底部都算」）：截至放量起点前一根的走势三态里有下跌段，
     且最后一段不是上涨（震荡下跌 / X 转下跌 / 下跌转横盘 都算；横盘震荡、震荡上涨、下跌转上涨 不算）。"""
-    from custos.core.factors.b1_structure import check_swing_state  # noqa: PLC0415
+    from custos.core.factors.b1_structure import price_zone  # noqa: PLC0415  v0.593 区间唯一判定
 
     if start not in memo:
-        st = check_swing_state(df.iloc[:start]).get("state") or ""
-        memo[start] = "下跌" in st and not st.endswith("上涨")
+        memo[start] = price_zone(df.iloc[:start]) == "bottom"
     return memo[start]
 
 
