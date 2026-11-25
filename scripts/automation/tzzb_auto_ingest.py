@@ -100,7 +100,7 @@ def run_sync(
     *,
     repo: Path = REPO,
     trading_day_fn: Callable[[str], bool] | None = None,
-    fetch_fn: Callable[[str], tuple[list[dict[str, Any], str]]] | None = None,
+    fetch_fn: Callable[[str], tuple[list[dict[str, Any]], str]] | None = None,
     import_fn: Callable[[Path, str, Path], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """执行一次同步；依赖可注入，测试不触网、不写真实台账。"""
