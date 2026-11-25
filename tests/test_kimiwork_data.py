@@ -66,6 +66,35 @@ def test_cls_adapter_filters_hidden_and_deleted(monkeypatch):
     assert [x["id"] for x in kd.cls_telegraphs(limit=3)] == [1]
 
 
+def test_cls_adapter_paginates_window_and_rejects_truncation(monkeypatch):
+    calls = []
+
+    def fake_call(data_source, api_name, params, **kwargs):
+        calls.append(params)
+        page = params["pageIndex"]
+        payload = {
+            "code": 0,
+            "result": [{"id": page, "status": 1, "content": "正常"}],
+            "splitInfo": {"totalPage": 2},
+        }
+        return {
+            "is_success": True,
+            "result": {"user": [{"type": "text", "text": json.dumps(payload)}]},
+        }
+
+    monkeypatch.setattr(kd, "call_api", fake_call)
+    rows = kd.cls_telegraphs(limit=1, start=100, end=200, max_pages=2)
+    assert [x["id"] for x in rows] == [1, 2]
+    assert [(x["pageIndex"], x["start"], x["end"]) for x in calls] == [
+        (1, 100, 200),
+        (2, 100, 200),
+    ]
+
+    calls.clear()
+    with pytest.raises(kd.KimiWorkDataError, match="拒绝静默截断"):
+        kd.cls_telegraphs(limit=1, start=100, end=200, max_pages=1)
+
+
 def test_yahoo_quote_adapter_reads_structured_row(monkeypatch):
     monkeypatch.setattr(
         kd,
@@ -297,3 +326,35 @@ def test_cls_normalization_keeps_evidence_contract():
     assert item["quality"] == "candidate" and item["confirmed"] is False
     assert item["title"] == "正常" and item["summary"] == "正文"
     assert item["published_at"].startswith("2026-10-30T")
+
+
+def test_cls_priority_columns_and_metadata():
+    src = {
+        "id": "cls_telegraphs",
+        "name": "财联社-电报快讯",
+        "tier": "B",
+        "category": "cn_financial_media",
+        "url": "https://www.cls.cn/telegraph",
+    }
+    entries = [
+        {"id": 1, "status": 1, "ctime": 1793342565, "title": "11月25日股市避雷针"},
+        {"id": 2, "status": 1, "ctime": 1793342565, "title": "11月24日连板股分析"},
+        {"id": 3, "status": 1, "ctime": 1793342565, "title": "11月24日涨停分析"},
+        {"id": 4, "status": 1, "ctime": 1793342565, "title": "今日投资舆情热点"},
+        {"id": 5, "status": 1, "ctime": 1793342565, "title": "市场主线分析"},
+        {"id": 6, "status": 1, "ctime": 1793342565, "title": "收评：热门板块复盘"},
+        {"id": 7, "status": 1, "ctime": 1793342565, "title": "普通快讯"},
+    ]
+    items = rc.parse_cls_telegraphs(entries, src, "2026-11-25T08:50:00+08:00")
+    assert [x["cls_priority"] for x in items[:-1]] == [
+        "盘前避雷针",
+        "连板股分析",
+        "涨停与舆情分析",
+        "涨停与舆情分析",
+        "盘中主线板块分析",
+        "盘后热门板块与逻辑",
+    ]
+    assert "cls_priority" not in items[-1]
+    assert items[0]["source_url"] == "https://www.cls.cn/detail/1"
+    assert items[0]["analysis_focus"]
+    assert "recommend" in items[0] and "stocks" in items[0]

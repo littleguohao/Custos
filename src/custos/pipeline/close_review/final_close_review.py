@@ -192,7 +192,44 @@ def render_news(
     sections = news.get("sections") or {}
     hold_codes = set(hold_codes or [])
     hold_sectors = set(hold_sectors or [])
-    rows = _digest_rows(news, hold_codes, hold_sectors)
+
+    def cell(value) -> str:
+        return str(value or "-").replace("|", "／").replace("\n", " ")
+
+    priority = list(news.get("priority_events") or [])
+    if not priority:  # 兼容 v0.586 之前的 digest 形状
+        priority = [
+            row
+            for name in ("信息", "政策", "风向", "舆情")
+            for row in sections.get(name) or []
+            if row.get("cls_priority")
+        ]
+    priority_titles = {row.get("title") for row in priority}
+    if priority:
+        lines += [
+            "### 财联社重点栏目（原文摘要＋解读重点）",
+            "",
+            "> 五类栏目优先保留；原文摘要与固定分析口径仅作消息解读，不影响交易权限。",
+            "",
+            "| 栏目 | 时间 | 文章与原文摘要 | 解读重点 |",
+            "|---|---|---|---|",
+        ]
+        for row in priority[:6]:
+            title = cell(row.get("title"))
+            if row.get("source_url"):
+                title = f"[{title}]({row['source_url']})"
+            summary = cell(row.get("summary"))[:500]
+            lines.append(
+                f"| {cell(row.get('cls_priority'))} | {cell(row.get('published_at'))} "
+                f"| {title}<br>{summary} | {cell(row.get('analysis_focus'))} |"
+            )
+        lines.append("")
+
+    rows = [
+        row
+        for row in _digest_rows(news, hold_codes, hold_sectors)
+        if row[3].get("title") not in priority_titles
+    ]
     if rows:
         lines += [
             "| 类别 | 时间 | 事件 | 来源/质量 | 与今日操作的交集 | 交易含义 |",
@@ -203,7 +240,7 @@ def render_news(
             lines.append(
                 f"| {name} | {row.get('published_at')} | {row.get('title')} | {row.get('source_name')}/{row.get('fact_status')} | {intersection} | {row.get('trade_meaning')} |"
             )
-    skip_titles = {r.get("title") for _n, _c, _t, r in rows[:8]}
+    skip_titles = priority_titles | {r.get("title") for _n, _c, _t, r in rows[:8]}
     fallback = (
         _evidence_fallback(evidence, hold_keywords or {}, skip_titles)
         if evidence is not None

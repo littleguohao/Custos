@@ -7,6 +7,10 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from custos.datasource.news.source_name_overrides import fix_source_name
+from custos.datasource.news.cls_priority import (
+    analysis_focus as cls_analysis_focus,
+    classify_cls_priority,
+)
 
 
 from custos.core.paths import LOGS, NEWS_DIR, RSS_SOURCE_REGISTRY_FILE, cn_now  # noqa: E402
@@ -442,32 +446,38 @@ def parse_cls_telegraphs(entries, src, fetched, transport_verified=True):
         ).hexdigest()[:24]
         dup = hashlib.sha256(norm.encode()).hexdigest()[:20] if norm else item_id
         title = clean(e.get("title")) or content[:50]
-        items.append(
-            {
-                "item_id": item_id,
-                "published_at": published,
-                "fetched_at": fetched,
-                "source_id": src["id"],
-                "source_name": fix_source_name(src["id"], src["name"]),
-                "source_tier": src["tier"],
-                "category": src["category"],
-                "title": title,
-                "summary": content[:2000],
-                "source_url": "",
-                "feed_url": src["url"],
-                "affected_entities": [],
-                "affected_sectors": [],
-                "direction": "uncertain",
-                "impact_horizon": "unknown",
-                "fact": title,
-                "inference": "",
-                "validation_condition": [],
-                "quality": _tier_quality(src["tier"], transport_verified),
-                "confirmed": src["tier"] in {"S", "A"} and transport_verified,
-                "transport_verified": transport_verified,
-                "duplicate_group_id": dup,
-            }
-        )
+        priority = classify_cls_priority(title, content)
+        item = {
+            "item_id": item_id,
+            "published_at": published,
+            "fetched_at": fetched,
+            "source_id": src["id"],
+            "source_name": fix_source_name(src["id"], src["name"]),
+            "source_tier": src["tier"],
+            "category": src["category"],
+            "title": title,
+            "summary": content[:2000],
+            "source_url": f"https://www.cls.cn/detail/{eid}" if eid else "",
+            "feed_url": src["url"],
+            "affected_entities": [],
+            "affected_sectors": [],
+            "direction": "uncertain",
+            "impact_horizon": "unknown",
+            "fact": title,
+            "inference": "",
+            "validation_condition": [],
+            "quality": _tier_quality(src["tier"], transport_verified),
+            "confirmed": src["tier"] in {"S", "A"} and transport_verified,
+            "transport_verified": transport_verified,
+            "duplicate_group_id": dup,
+            "recommend": e.get("recommend", 0),
+            "stocks": e.get("stocks") or [],
+            "subject_tags": e.get("subject_tags") or [],
+        }
+        if priority:
+            item["cls_priority"] = priority
+            item["analysis_focus"] = cls_analysis_focus(priority)
+        items.append(item)
     return items
 
 
@@ -561,19 +571,40 @@ def main():
             row["transport_verified"] = verified
             if src.get("type") == "kimiwork_cls":
                 from custos.datasource import kimiwork_data  # noqa: PLC0415
+                from custos.core.runtime_guards import (  # noqa: PLC0415
+                    previous_confirmed_trading_day,
+                )
 
-                entries = kimiwork_data.cls_telegraphs(limit=a.limit_per_feed)
+                # 重点栏目可能被午后的高频电报挤出最新 100 条；按上一交易日
+                # 15:00 起分页拉全，下游仍按各 session 窗口过滤。日历缺失时用
+                # 盘前 66 小时兜底窗口，最多 20 页，超出必须显式失败。
+                now = cn_now()
+                previous = previous_confirmed_trading_day(a.date)
+                start_ts = (
+                    int(
+                        datetime.fromisoformat(f"{previous}T15:00:00")
+                        .replace(tzinfo=now.tzinfo)
+                        .timestamp()
+                    )
+                    if previous
+                    else int(now.timestamp()) - 66 * 3600
+                )
+                entries = kimiwork_data.cls_telegraphs(
+                    limit=a.limit_per_feed,
+                    start=start_ts,
+                    end=int(now.timestamp()),
+                    max_pages=20,
+                )
                 raw = json.dumps(entries, ensure_ascii=False).encode("utf-8")
                 row.update(
                     http_status=200,
                     final_url=src["url"],
                     content_type="application/json",
                     bytes=len(raw),
+                    window_start=start_ts,
                 )
                 (day / f"{src['id']}.json").write_bytes(raw)
-                items = parse_cls_telegraphs(entries, src, fetched, verified)[
-                    : a.limit_per_feed
-                ]
+                items = parse_cls_telegraphs(entries, src, fetched, verified)
                 normalized.extend(items)
                 row.update(status="ok", items=len(items))
                 log.append(row)

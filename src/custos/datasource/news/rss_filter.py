@@ -257,8 +257,9 @@ def _score_item(x, cfg, reg, code_pats, names, asof, cutoff, session_type, exclu
 
 
 def _rank_key(x):
-    """排序键：持仓命中 > S/A 档 > 相关性分 > 发布时间（全部倒序）。"""
+    """重点栏目 > 持仓命中 > S/A 档 > 相关性分 > 发布时间（全部倒序）。"""
     return (
+        bool(x.get("cls_priority")),
         bool(
             x["matched_holdings_or_pool"]["names"]
             or x["matched_holdings_or_pool"]["codes"]
@@ -270,15 +271,19 @@ def _rank_key(x):
 
 
 def _select(unique, limit, per_source_limit):
-    """按排序结果截断：总量 limit + 每源 per_source_limit。"""
+    """总量 limit 不变；财联社重点栏目不受单源上限截断。"""
     selected = []
     source_selected = {}
     for x in unique:
         source = x.get("source_id", "unknown")
-        if source_selected.get(source, 0) >= per_source_limit:
+        if (
+            not x.get("cls_priority")
+            and source_selected.get(source, 0) >= per_source_limit
+        ):
             continue
         selected.append(x)
-        source_selected[source] = source_selected.get(source, 0) + 1
+        if not x.get("cls_priority"):
+            source_selected[source] = source_selected.get(source, 0) + 1
         if len(selected) >= limit:
             break
     return selected
@@ -330,6 +335,21 @@ def _build_topic_clusters(
         }
         for x in unique
     ]
+    priority_articles = [
+        {
+            "title": x.get("title"),
+            "summary": x.get("summary"),
+            "published_at": x.get("published_at"),
+            "source_url": x.get("source_url"),
+            "cls_priority": x.get("cls_priority"),
+            "analysis_focus": x.get("analysis_focus"),
+            "recommend": x.get("recommend", 0),
+            "stocks": x.get("stocks") or [],
+            "subject_tags": x.get("subject_tags") or [],
+        }
+        for x in unique
+        if x.get("cls_priority")
+    ]
     return {
         "date": day,
         "session_type": session_type,
@@ -339,6 +359,8 @@ def _build_topic_clusters(
         "clusters": clusters,
         "cross_source_clusters": [c for c in clusters if c["cross_source"]],
         "in_window_brief": brief,
+        "cls_priority_articles": priority_articles,
+        "cls_priority_rule": "财联社重点栏目须逐篇提炼核心逻辑、对持仓/候选的影响及后续验证点；仅作消息分析，不提高交易权限",
         "permission_rule": "主题聚类仅供 LLM 研判参考，不能直接提高交易权限",
     }
 

@@ -102,6 +102,31 @@ class TestRenderNews:
             lines
         )
 
+    def test_cls_priority_rendered_without_holding_intersection(self):
+        """重点栏目独立展示，不因没有持仓交集而被普通事实核对过滤。"""
+        lines = []
+        fcr.render_news(
+            lines,
+            {
+                "priority_events": [
+                    {
+                        "published_at": "2026-11-25T15:20",
+                        "title": "11月25日涨停分析",
+                        "summary": "涨停与连板结构原文",
+                        "cls_priority": "涨停与舆情分析",
+                        "analysis_focus": "看封板率、焦点股与情绪",
+                        "source_url": "https://www.cls.cn/detail/1",
+                    }
+                ],
+                "sections": {},
+            },
+            evidence=[],
+        )
+        text = "\n".join(lines)
+        assert "财联社重点栏目（原文摘要＋解读重点）" in text
+        assert "11月25日涨停分析" in text and "涨停与连板结构原文" in text
+        assert "看封板率、焦点股与情绪" in text
+
     def test_empty_section_says_unavailable_not_blank(self):
         """⚠️ 空节写 `unavailable` 并说明原因（没过时效/来源质量门），
         不是留空 —— 留空分不清「没消息」与「这步没跑」。"""

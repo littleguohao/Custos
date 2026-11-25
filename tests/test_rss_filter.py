@@ -452,6 +452,28 @@ class TestOrderingAndLimits:
         assert rep["per_source_limit"] == 2
         assert sum(1 for x in sel if x["source_id"] == "media1") == 2
 
+    def test_cls_priority_overrides_per_source_limit_not_global(self, env, monkeypatch):
+        """v0.586：重点栏目必须保底，但不能突破全局总量上限。"""
+        _positions(env, [])
+        _items(
+            env,
+            _item(title="普通一", source_url="https://a/1", relevance_score=999),
+            _item(title="普通二", source_url="https://a/2"),
+            _item(title="普通三", source_url="https://a/3"),
+            _item(
+                title="连板股分析", cls_priority="连板股分析", source_url="https://a/4"
+            ),
+            _item(
+                title="股市避雷针", cls_priority="盘前避雷针", source_url="https://a/5"
+            ),
+        )
+        sel, rep = _run(env, monkeypatch)
+        assert [x["title"] for x in sel[:2]] == ["连板股分析", "股市避雷针"]
+        assert len(sel) <= rep["limit"]
+        assert (
+            sum(x.get("source_id") == "media1" for x in sel) > rep["per_source_limit"]
+        )
+
     def test_global_limit_respected(self, env, monkeypatch):
         _positions(env, [])
         items = []
@@ -571,6 +593,28 @@ class TestTopicClusters:
         doc = self._clusters(env)
         assert doc["in_window_count"] == 6
         assert len(doc["in_window_brief"]) == 6, "研判清单不被候选截断"
+
+    def test_cls_priority_reading_packet(self, env, monkeypatch):
+        """重点栏目连同正文与解读口径进入盘前必读材料，不被普通截断吞掉。"""
+        _positions(env, [])
+        _items(
+            env,
+            _item(
+                title="11月25日股市避雷针",
+                summary="减持、解禁与 ST 风险",
+                cls_priority="盘前避雷针",
+                analysis_focus="逐项映射持仓风险",
+                recommend=1,
+                stocks=["600000.SH"],
+            ),
+        )
+        _run(env, monkeypatch)
+        doc = self._clusters(env)
+        article = doc["cls_priority_articles"][0]
+        assert article["summary"] == "减持、解禁与 ST 风险"
+        assert article["analysis_focus"] == "逐项映射持仓风险"
+        assert article["stocks"] == ["600000.SH"]
+        assert "逐篇提炼核心逻辑" in doc["cls_priority_rule"]
 
     def test_no_theme_match_gives_empty_clusters(self, env, monkeypatch):
         _positions(env, [])

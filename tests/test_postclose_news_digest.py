@@ -56,3 +56,33 @@ class TestPremarketIntelligenceNaming:
         result = _run(monkeypatch, tmp_path, [])
         assert "premarket_intelligence" in result["missing"]
         assert result["status"] == "degraded"
+
+
+def test_priority_event_kept_with_summary_and_focus(monkeypatch, tmp_path):
+    rss_dir = tmp_path / "news" / "rss" / "filtered"
+    rss_dir.mkdir(parents=True)
+    (rss_dir / "2026-07-17_postclose_rss_candidates.json").write_text(
+        json.dumps(
+            [
+                {
+                    "published_at": "2026-07-17T15:20:00+08:00",
+                    "title": "7月17日涨停分析",
+                    "source_name": "财联社-电报快讯",
+                    "source_tier": "B",
+                    "cls_priority": "涨停与舆情分析",
+                    "analysis_focus": "看封板率与焦点股",
+                    "summary": "今日全市场涨停与连板结构",
+                    "recommend": 1,
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    result = _run(monkeypatch, tmp_path, [])
+    assert result["priority_count"] == 1
+    row = result["priority_events"][0]
+    assert row["cls_priority"] == "涨停与舆情分析"
+    assert row["summary"] == "今日全市场涨停与连板结构"
+    assert row["analysis_focus"] == "看封板率与焦点股"
+    assert row["recommend"] == 1

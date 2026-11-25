@@ -334,13 +334,8 @@ def wind_cnh_daily() -> list[dict[str, str]]:
     return _csv_records(raw)
 
 
-def cls_telegraphs(*, limit: int = 100) -> list[dict[str, Any]]:
-    """财联社最新快讯；过滤隐藏与删除记录，保留正常状态条目。"""
-    raw = call_api(
-        "cls",
-        "cls_telegraphs",
-        {"classification": 0, "pageIndex": 1, "pageSize": int(limit)},
-    )
+def _cls_telegraph_page(raw: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
+    """解析一页快讯，返回正常状态条目与总页数。"""
     result = raw.get("result") or {}
     texts = result.get("user") or result.get("assistant") or []
     for part in texts:
@@ -349,9 +344,42 @@ def cls_telegraphs(*, limit: int = 100) -> list[dict[str, Any]]:
         payload = json.loads(str(part["text"]))
         entries = payload.get("result")
         if payload.get("code") == 0 and isinstance(entries, list):
-            return [
-                entry
-                for entry in entries
-                if isinstance(entry, dict) and entry.get("status") == 1
-            ]
+            total_pages = int((payload.get("splitInfo") or {}).get("totalPage") or 1)
+            return (
+                [
+                    entry
+                    for entry in entries
+                    if isinstance(entry, dict) and entry.get("status") == 1
+                ],
+                max(1, total_pages),
+            )
     raise KimiWorkDataError("财联社响应缺少正常快讯列表")
+
+
+def cls_telegraphs(
+    *,
+    limit: int = 100,
+    start: int | None = None,
+    end: int | None = None,
+    max_pages: int = 1,
+) -> list[dict[str, Any]]:
+    """财联社快讯；可选时间窗分页，页数不足时显式报错而不静默漏文。"""
+    entries: list[dict[str, Any]] = []
+    for page in range(1, max(1, max_pages) + 1):
+        params: dict[str, Any] = {
+            "classification": 0,
+            "pageIndex": page,
+            "pageSize": int(limit),
+        }
+        if start is not None:
+            params["start"] = int(start)
+        if end is not None:
+            params["end"] = int(end)
+        raw = call_api("cls", "cls_telegraphs", params)
+        page_entries, total_pages = _cls_telegraph_page(raw)
+        entries.extend(page_entries)
+        if page >= total_pages:
+            return entries
+    raise KimiWorkDataError(
+        f"财联社时间窗超过 {max_pages} 页（每页 {limit} 条），拒绝静默截断"
+    )

@@ -121,14 +121,21 @@ def _event_from_item(item: dict) -> dict | None:
         "impact_horizon": item.get("impact_horizon") or "unknown",
         "trade_meaning": "仅作事件发现；需由价格、成交或官方原文确认，不直接提高交易权限",
         "validation_condition": _validation_condition(item),
+        "cls_priority": item.get("cls_priority"),
+        "analysis_focus": item.get("analysis_focus"),
+        "summary": item.get("summary"),
+        "recommend": item.get("recommend"),
+        "stocks": item.get("stocks") or [],
+        "subject_tags": item.get("subject_tags") or [],
     }
 
 
 def _collect_events(rss: list) -> list:
-    """规整、排序（持仓命中 > 高信源 > 发布时间，倒序）并截断到 15 条。"""
+    """重点栏目 > 持仓命中 > 高信源 > 发布时间；总量仍截断到 15 条。"""
     events = [e for e in (_event_from_item(item) for item in rss) if e is not None]
     events.sort(
         key=lambda x: (
+            bool(x.get("cls_priority")),
             bool(x["matched_holdings"] or x["matched_codes"]),
             x["source_tier"] in {"S", "A"},
             x["published_at"],
@@ -166,6 +173,8 @@ def _build_result(
         "status": "degraded" if missing else "complete",
         "sections": sections,
         "event_count": len(events),
+        "priority_events": [x for x in events if x.get("cls_priority")],
+        "priority_count": sum(bool(x.get("cls_priority")) for x in events),
         "premarket_market_event_count": len(intel.get("market_events") or []),
         "missing": missing,
         "permission_rule": "news may add validation or tighten risk; it cannot directly increase trading permissions",
