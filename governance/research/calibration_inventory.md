@@ -8,7 +8,7 @@
 
 ## 现状
 
-- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 99 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
+- **P0H 持仓大形态 18 个**（17 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 233 个模块级数值参数：**P0 107 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
   **P1 live 展示 99 个**（1800 证据标注，不进判定）、P2 研究 67 个。
 - **定义校准：0 / 233**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
 - **清单未覆盖**（需在逐因子校准时一并核）：①函数体内联常量（KDJ 9/3/3、BBI 周期、20 日相对强度窗口等）；
@@ -271,6 +271,9 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
   v0.577：DIST2_PREV_YANG 5 → 3、DIST2_POS 0.7 → 0.65（#18 次高点 0.69）、只报最近一根。三份共 58 张一致 49 → 51（88%）；剩 #1 000568（owner：后面涨上去的新平台低点，不是次高点；加「之后创新高即失效」会让 #24 变错，未采用）、#11 / #19（量 < 20 日均量 1.5 倍；降到 1.3~1.4 净值变差）等。
 - **顶部放量阴线上 live（v0.578，owner 2026-11-24）**：替换旧 ①②。J<13 样本点（挖掘 B 6,618 个）命中 47.7%（旧 ①② 0.1%）⇒ owner 定只提醒不受限、技术分 −15；风险等级只看 ③~⑥。distribution v2（bump）。
 - **三低（owner 2026-11-25）**：出处 cz/03_entry_methods.md §三「三低买入法」（低价格 / 低量 / 低关注度 + 基本面排雷）。v0.583：低量改为近 5 根均量 < 250 日均量 0.4（原当根 < 0.3；原文「地量持续萎缩」）；与基本面「优」（非三无）合取，候选表基本面列显示「优·三低」，只提醒不计分；低关注度不可量价计算、不做。纯数值，退出人工校准，`volume_detectors__mining_v1` 全部隐藏。J<13 样本点量价两条命中约 4.4%。
+- **回调缩量企稳 v2（owner 2026-11-25）**：`ignition__mining_v1` labels10.csv 回调缩量 6 张（对 1 / 错 3 / 不确定 2），错的都是当根放量（#40 2.52、#41 0.96 倍前 5 日均量）或 K 线大（#42 实体 5.2%）。原文（01_swing_rules §5）是「回调段成交量单调收缩，收盘守住 DKS 或前一有效低点」，v1 只比两段均量（< 0.85）。
+  完美 B1 10 例（R36 买点）读数：回调 4~27 根、回撤 6~30%；回调初段常是顶部余量（2~6 倍涨段均量），逐日单调无一满足，末 1/3 / 初 1/3 均量 0.40~0.71；当根阴线量 0.61~0.89、阳线 0.47~1.17，实体 0.3~3.7%；300689 收盘在 DKS 下 0.8% 但守住前一低点。
+  候选（v0.584）：`ignition.check_pullback_shrink_v2`（近 30 根高点；末 / 初 1/3 均量 ≤0.75；阴线 < 0.9、阳线 < 1.5 倍前 5 日均量；实体 < 4%；守 DKS 或前一低点）。完美 B1 10 + owner 4 共 14 张全对（v1 9/14；门槛贴着这 14 张定，须新图集复验）。J<13 样本点命中 22.6%（v1 10.4%）。未接 live。图集 `pullback_v2__mining_v1`；旧图集回调缩量 30 张不再标。
 - **纯数值判定退出人工校准（v0.563，owner 2026-11-23）**：MACD 区间（DIF / DEA 是否在 0 轴上 + 柱体放长 / 缩短 / 转绿）只是数值比较，看图只能核实现，改由钉测管四态；`macd_technics__mining_v1` 的 24 张区间图隐藏，MODULES 去掉该字段。
 - **owner 定（2026-11-23）**：一波流 = ①连续 ②快速（几个交易日内）③大幅（≥50%），之后 A 杀或震荡下跌 / 横盘都算，尽力识别；走势只识别买点前最近 1~2 段，尽力识别。
   落地（v0.561）：`b1_structure.check_one_wave_v4`（120 根内 ≤10 根、途中收盘回撤 <10%、最高价较起点最低价 ≥50%），live 提醒改用 v4（风险列「一波流（提醒）」，不否决不计分）；
@@ -339,7 +342,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `technical_monitor` | `TREND_MIN_BARS` | 60 | 趋势判定最少 K 线数 | - | 未校准 |
 | `technical_monitor` | `QFQ_LOAD_BARS` | 100000 | - | - | 未校准 |
 
-### P0（99 个参数）
+### P0（107 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -412,6 +415,14 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `ignition` | `PULLBACK_LOOKBACK` | 20 | 待回测：回调缩量企稳观察窗口（日） | candidate | 未校准 |
 | `ignition` | `PULLBACK_MIN_DROP` | 3.0 | 待回测：距窗口高点回撤%下限 | candidate | 未校准 |
 | `ignition` | `PULLBACK_VOL_RATIO` | 0.85 | 待回测：回调段/上涨段均量上限 | candidate | 未校准 |
+| `ignition` | `PB2_LOOKBACK` | 30 | - | candidate | 候选（owner 2026-11-25） |
+| `ignition` | `PB2_RUN_BACK` | 40 | 上涨起点 = 高点前 40 根内最低收盘 | candidate | 候选（owner 2026-11-25） |
+| `ignition` | `PB2_MIN_DROP` | 3.0 | 距高点回撤 ≥3%（同 v1） | candidate | 候选（owner 2026-11-25） |
+| `ignition` | `PB2_DECAY` | 0.75 | 量「一路缩」：回调段末 1/3 均量 ≤ 初 1/3 均量 × 0.75（完美 B1 10 例 0.40~0.71；逐日单调太严，10 例无一满足） | candidate | 候选（owner 2026-11-25） |
+| `ignition` | `PB2_YIN_VOL` | 0.9 | 当根是阴线时：量 < 前 5 日均量 × 0.9（owner #40 2.52、#41 0.96 判放量；完美 B1 阴线 0.61~0.89） | candidate | 候选（owner 2026-11-25） |
+| `ignition` | `PB2_YANG_VOL` | 1.5 | 当根是阳线时：量 < 前 5 日均量 × 1.5（完美 B1 阳线 0.47~1.17；缩量回调末端的小阳放一点量正常） | candidate | 候选（owner 2026-11-25） |
+| `ignition` | `PB2_MAX_BODY` | 4.0 | 当根实体 < 前收 × 4%（owner #42 5.2% 判 K 线大；完美 B1 0.3~3.7%） | candidate | 候选（owner 2026-11-25） |
+| `ignition` | `PB2_PIVOT` | 3 | 前一有效低点 = 上涨段内最后一个收盘分型低点（左右各 3 根） | candidate | 候选（owner 2026-11-25） |
 | `macd_technics` | `MACD_SWING_FRACTAL` | 2 | 摆动高/低点分型：左右各 N 根确认 | candidate | 未校准 |
 | `macd_technics` | `MACD_DIV_LOOKBACK` | 60 | 背离观察窗口（日） | candidate | 未校准 |
 | `macd_technics` | `MACD2_MIN_GROUP` | 2 | - | candidate | 已标 · live（v0.567） |

@@ -190,6 +190,19 @@ MODULES: dict[str, dict[str, Any]] = {
             "DIST2_POS",
         ],
     },
+    "pullback_v2": {  # 回调缩量企稳 v2 候选（owner 2026-11-25）
+        "defmod": "custos.core.factors.ignition",
+        "eval": "pullback_v2",
+        "chart_panes": ["vol"],
+        "fields": ["pullback_v2.hit"],
+        "params": [
+            "PB2_DECAY",
+            "PB2_YIN_VOL",
+            "PB2_YANG_VOL",
+            "PB2_MAX_BODY",
+            "PB2_MIN_DROP",
+        ],
+    },
     "base_volume": {  # 底部放量合并候选（owner 2026-11-24：点火 / 龙头量能 / 底部巨量合并，按程度 1~3 星）
         "defmod": "custos.core.factors.volume_detectors",
         "eval": "base_volume",
@@ -467,6 +480,18 @@ def evaluate(
         with patched(defmod, overrides):
             an = {
                 "top_bear_volume": dsm.check_top_bear_volume(df.reset_index(drop=True))
+            }
+        return {f: field_value(an, f) for f in fields}
+    if spec is not None and spec["eval"] == "pullback_v2":
+        from custos.core.factors import ignition as igm  # noqa: PLC0415
+        from custos.core.indicators import dks_series  # noqa: PLC0415
+
+        d0 = df.reset_index(drop=True)
+        with patched(defmod, overrides):
+            an = {
+                "pullback_v2": igm.check_pullback_shrink_v2(
+                    d0, float(dks_series(d0["close"]).iloc[-1])
+                )
             }
         return {f: field_value(an, f) for f in fields}
     if spec is not None and spec["eval"] == "base_volume":
@@ -1308,6 +1333,7 @@ def _csv_rows(rep: dict[str, Any], frames: dict) -> list[list[Any]]:
 FIELD_DEF: dict[str, str] = {
     "top_bear_volume.hit": "顶部 / 次高点放量阴线（出货 ①② v2）：近 60 根内，顶部或次高点（最高价分型、≥ 近 60 根最高 7 成）前后 2 根内出现阴线，量大于前 5 根里最大的阳线量、≥ 20 日均量 1.5 倍、≥ 前 60 根最大量 0.6 倍。假阴真阳（收低于开、高于前收）只在顶部区间算阴量。图上标高点与阴线",
     "base_volume.l1": "底部放量 ⭐（单根放量阳线）：近 20 根内，从阶段低点（前 20 根最低收盘）起 5 根内出现一根放量上涨 K（量 ≥ 前 5 日均量 1.5 倍、涨 ≥3%，阳线或假阴真阳），且没有更强的放量。评价的是量能状态，当根形态不管。图上标阶段低点与放量 K",
+    "pullback_v2.hit": "回调缩量企稳 v2：近 30 根高点之后回调 ≥3%，回调段的量一路缩（后 1/3 均量 ≤ 前 1/3 的 0.75），当根不放量（阴线 < 前 5 日均量 0.9、阳线 < 1.5），当根实体 < 4%，收盘守住多空线 DKS 或上涨段里前一个回踩低点。图上标上涨起点、高点与前一低点",
     "base_volume.l2": "底部放量 ⭐⭐（连续放量）：近 20 根内、下跌之后的阶段底部（放量前走势三态有下跌段、最后一段不是上涨），连续 3 根量都 ≥ 之前 20 根最低日量 1.7 倍，且没有巨量。当根形态不管。图上标底部低点与放量 K",
     "base_volume.l3": "底部放量 ⭐⭐⭐（巨量）：近 20 根内、下跌之后的阶段底部（同上），出现一根量 ≥ 近 250 根均量 2 倍的巨量。当根形态不管。图上标底部低点与放量 K",
     "macd_v2.bottom_divergence.hit": "MACD 底背离 v2（绿柱和绿柱比）：当根在绿柱组，本组股价创新低（低于上一组绿柱时的最低收盘），本波最长绿柱比上一波短（同一组绿柱里有多个柱长波峰时按波比）。图上紫线标两波的最低价",
@@ -2421,6 +2447,41 @@ def top_bear_marks(df: Any) -> list[dict[str, Any]]:
     ]
 
 
+def pullback_v2_marks(df: Any) -> list[dict[str, Any]]:
+    """回调缩量 v2：上涨起点 → 高点一条线（高点价），前一有效低点一条线。"""
+    from custos.core.factors import ignition as igm  # noqa: PLC0415
+    from custos.core.indicators import dks_series  # noqa: PLC0415
+
+    d0 = df.reset_index(drop=True)
+    r = igm.check_pullback_shrink_v2(d0, float(dks_series(d0["close"]).iloc[-1]))
+    det = r.get("detail") or {}
+    if "high_i" not in det:
+        return []
+    ds = [str(x)[:10] for x in df["date"]]
+    c = d0["close"].astype(float).to_numpy()
+    hp, lo = det["high_i"], det["run_low_i"]
+    return [
+        {
+            "kind": "M",
+            "price": round(float(c[hp]), 2),
+            "date": ds[hp],
+            "start": ds[lo],
+            "end": ds[-1],
+            "label": f"高点 回撤{det['drop_from_high_pct']}%",
+            "ongoing": False,
+        },
+        {
+            "kind": "M",
+            "price": round(det["prev_low"], 2),
+            "date": ds[hp],
+            "start": ds[lo],
+            "end": ds[-1],
+            "label": f"前一低点 量缩{det.get('vol_decay')}",
+            "ongoing": False,
+        },
+    ]
+
+
 def base_volume_marks(df: Any) -> list[dict[str, Any]]:
     """底部放量：阶段低点一条线 + 放量 K（起止）一条线，标星级。"""
     from custos.core.factors import volume_detectors as vdm  # noqa: PLC0415
@@ -2561,7 +2622,11 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
                                     else (
                                         top_bear_marks(fr[1])
                                         if rep["module"] == "top_bear_volume"
-                                        else []
+                                        else (
+                                            pullback_v2_marks(fr[1])
+                                            if rep["module"] == "pullback_v2"
+                                            else []
+                                        )
                                     )
                                 )
                             )

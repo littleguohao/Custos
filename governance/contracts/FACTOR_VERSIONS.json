@@ -231,12 +231,17 @@
     },
     "ignition": {
       "version": 1,
-      "source_digest": "012e938af8409bb2f1c7",
+      "source_digest": "ba78f74079323ce2f35a",
       "history": [
         {
           "version": 1,
           "date": "2026-11-03",
           "change": "初始版本（定义校准前基线，TODO #121）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-25",
+          "refactor": "新增回调缩量企稳 v2 候选 check_pullback_shrink_v2（未接 live）"
         }
       ]
     },

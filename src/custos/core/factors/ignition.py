@@ -138,6 +138,79 @@ def check_pullback_shrink(df, dks_last: Optional[float] = None) -> dict[str, Any
     }
 
 
+# --- 回调缩量企稳 v2 候选（owner 2026-11-25：按原文「回调段成交量单调收缩，收盘守住 DKS 或前一有效低点」+ 当根不放量、K 线不大）---
+PB2_LOOKBACK = (
+    30  # 上涨高点 = 近 30 根最高收盘（完美 B1 10 例回调最长 27 根，原 20 根会截断）
+)
+PB2_RUN_BACK = 40  # 上涨起点 = 高点前 40 根内最低收盘
+PB2_MIN_DROP = 3.0  # 距高点回撤 ≥3%（同 v1）
+PB2_DECAY = 0.75  # 量「一路缩」：回调段末 1/3 均量 ≤ 初 1/3 均量 × 0.75（完美 B1 10 例 0.40~0.71；逐日单调太严，10 例无一满足）
+PB2_YIN_VOL = 0.9  # 当根是阴线时：量 < 前 5 日均量 × 0.9（owner #40 2.52、#41 0.96 判放量；完美 B1 阴线 0.61~0.89）
+PB2_YANG_VOL = 1.5  # 当根是阳线时：量 < 前 5 日均量 × 1.5（完美 B1 阳线 0.47~1.17；缩量回调末端的小阳放一点量正常）
+PB2_MAX_BODY = 4.0  # 当根实体 < 前收 × 4%（owner #42 5.2% 判 K 线大；完美 B1 0.3~3.7%）
+PB2_PIVOT = 3  # 前一有效低点 = 上涨段内最后一个收盘分型低点（左右各 3 根）
+
+
+def check_pullback_shrink_v2(df, dks_last: Optional[float] = None) -> dict[str, Any]:
+    """回调缩量企稳 v2（候选，owner 2026-11-25；未接 live）。
+
+    上涨段 = 高点前 PB2_RUN_BACK 根内最低收盘 → 近 PB2_LOOKBACK 根最高收盘；回调段 = 高点之后到当根（≥2 根）。
+    成立 = 回撤 ≥ PB2_MIN_DROP% ∧ 回调段量一路缩（末 1/3 均量 ≤ 初 1/3 × PB2_DECAY）∧ 当根不放量（阴线 < 前 5 日均量 × PB2_YIN_VOL，
+    阳线 < × PB2_YANG_VOL）∧ 当根实体 < PB2_MAX_BODY% ∧ 收盘守住 DKS 或前一有效低点。
+    🔄 v1 的「回调段均量 / 上涨段均量 < 0.85」看不到当根放量与大 K（owner #40~#42），且平均量比较不等于原文的「单调收缩」。"""
+    close, _, _, vol = _ohlcv_arrays(df)
+    open_ = df["open"].astype(float).to_numpy()
+    n = len(df)
+    if n < PB2_LOOKBACK + PB2_RUN_BACK:
+        return {"hit": False, "available": False}
+    hp = n - PB2_LOOKBACK + int(close[-PB2_LOOKBACK:].argmax())
+    a = max(0, hp - PB2_RUN_BACK)
+    lo = a + int(close[a : hp + 1].argmin())
+    pv = vol[hp + 1 :]
+    if len(pv) < 2 or not close[hp]:
+        return {"hit": False, "available": True, "detail": {"pullback_bars": len(pv)}}
+    drop = (1 - close[-1] / close[hp]) * 100
+    k = max(1, len(pv) // 3)
+    head = float(pv[:k].mean())
+    decay = float(pv[-k:].mean() / head) if head else None
+    base5 = float(vol[-6:-1].mean())
+    vr = float(vol[-1] / base5) if base5 else None
+    yin = bool(close[-1] < open_[-1])
+    body = abs(close[-1] - open_[-1]) / close[-2] * 100 if close[-2] else 0.0
+    piv = [
+        t
+        for t in range(lo + PB2_PIVOT, hp - PB2_PIVOT + 1)
+        if close[t] <= close[t - PB2_PIVOT : t + PB2_PIVOT + 1].min()
+    ]
+    prev_low = float(close[piv[-1]]) if piv else float(close[lo])
+    hold = bool(
+        (dks_last is not None and close[-1] >= dks_last) or close[-1] >= prev_low
+    )
+    conds = {
+        "drop": bool(drop >= PB2_MIN_DROP),
+        "decay": bool(decay is not None and decay <= PB2_DECAY),
+        "bar_vol": bool(vr is not None and vr < (PB2_YIN_VOL if yin else PB2_YANG_VOL)),
+        "bar_body": bool(body < PB2_MAX_BODY),
+        "hold": hold,
+    }
+    return {
+        "hit": all(conds.values()),
+        "available": True,
+        "conditions": conds,
+        "detail": {
+            "high_i": hp,
+            "run_low_i": lo,
+            "pullback_bars": len(pv),
+            "drop_from_high_pct": round(drop, 2),
+            "vol_decay": round(decay, 3) if decay is not None else None,
+            "bar_vol_ratio5": round(vr, 3) if vr is not None else None,
+            "bar_yin": yin,
+            "bar_body_pct": round(body, 2),
+            "prev_low": round(prev_low, 3),
+        },
+    }
+
+
 def zx_recent_golden(zx: dict) -> bool:
     """知行金叉"近 N 日"（<= ZX_CROSS_RECENT）：B1 点火复合的知行腿。"""
     return bool(
