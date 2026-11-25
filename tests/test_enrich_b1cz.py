@@ -117,16 +117,20 @@ def test_non_one_wave_confirmed(fixed_rally):
 
 
 def test_non_one_wave_revoked_by_top_big_bear(fixed_rally):
-    # 高点次日 -5% 且量 2x（放量大阴）→ 撤销
-    closes = [10.0] * 30 + [10.0 + i * 0.2 for i in range(1, 11)]
+    """高点次日放量阴线（v0.592 唯一判定 distribution.top_bear_bars：阴线、量 > 前 3 根阳线且 ≥20 日均量 1.5 倍、
+    ≥ 前 60 根最大量 0.6 倍、在顶部或次高点）→ 撤销。"""
+    closes = [10.0] * 60 + [10.0 + i * 0.2 for i in range(1, 11)]
     down = closes[-1] * 0.95
     closes += [down, down * 0.99, down * 0.98, down * 0.97, down * 0.96]
-    vols = [1000.0] * 40 + [2000.0, 500.0, 500.0, 500.0, 500.0]
+    vols = [1000.0] * 70 + [2000.0, 500.0, 500.0, 500.0, 500.0]
     lows = [c * 0.995 for c in closes]
-    lows[29] = 9.8
-    r = ec.check_non_one_wave(make_df(closes, vols=vols, lows=lows))
+    lows[59] = 9.8
+    df = make_df(closes, vols=vols, lows=lows)
+    df.loc[70, "open"] = closes[69]  # 高开低走的阴线
+    r = ec.check_non_one_wave(df)
     assert r["status"] == "revoked"
     assert r["conditions"]["no_top_big_bear"]["hit"] is False
+    assert r["conditions"]["no_top_big_bear"]["top_bear_kind"] == "顶部"
 
 
 def test_non_one_wave_insufficient_when_pullback_not_shrinking(fixed_rally):

@@ -721,7 +721,7 @@ class TestCharacterizationSnapshot:
         "alpha_pvcorr": "effcb178ff26",
         "b1_dual_factor": "2be88ca4242c",  # v0.226 更新（score 规范槽上移接管）
         "b1_pullback_fit": "c73516b95663",  # v0.226 更新（score 规范槽上移接管）
-        "b1_structure": "e03e62801233",  # v0.589 走势统一由 MACD 平台 N 结构推出（owner 2026-11-25）
+        "b1_structure": "a000d4ec2023",  # v0.592 顶部放量阴线统一判定（owner 2026-11-25）
         "b2_surge_factor": "9f3b7bcdc8e1",
         "baseline": "2bd7dd114d5c",
         "bottom_patterns": "76cf78a9d5be",  # v0.218…B2 更新（新增 detect 打包入口槽）

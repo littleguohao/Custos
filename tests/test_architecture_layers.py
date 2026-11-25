@@ -218,6 +218,11 @@ class TestNoCycles:
             "pipeline/screening/enrich_candidates.py",
             "pipeline/screening/signal_labels.py",
         ),
+        # v0.592：同层双向惰性导入——走势三态唯一实现在 b1_structure、顶部放量阴线唯一实现在 distribution，互相调用
+        (
+            "core/factors/b1_structure.py",
+            "core/factors/distribution.py",
+        ),
     }
 
     def test_no_unexpected_cycles(self):

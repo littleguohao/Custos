@@ -58,10 +58,7 @@ FACTOR: dict[str, Any] = {
 # 视为已校准。口径出处见 governance/contracts/SCREENING_WORKFLOW.md "策略对齐"章。
 
 NOW_MILD_VOL_BURST = 2.0  # 待回测参数：上涨段单日量/段均量上限（温和放量）
-NOW_BEAR_DROP_PCT = -3.0  # 待回测参数：放量大阴跌幅%
-NOW_BEAR_VOL_RATIO = 1.5  # 待回测参数：放量大阴量比（量/前5日均量）
 NOW_PULLBACK_VOL_RATIO = 0.7  # 待回测参数：回调段均量/上涨段均量上限
-NOW_TOP_ZONE = 3  # 待回测参数：阶段高点观察区±N日
 
 REPAIR_J_PREV_MAX = 20.0  # 待回测参数：J拐头向上（昨日J上限）
 REPAIR_VOL_SHRINK = 0.7  # 待回测参数：缩量止跌量比上限
@@ -77,22 +74,11 @@ LIQUIDITY_WIN = 20  # 待回测：近N日均成交额窗口
 STOP_LOOKBACK = 10  # 近10日最低价。🔄 v0.528 起 live 不再使用（owner 2026-11-16），只留研究侧 R41 as-of 重算
 
 
-def _now_top_zone_scan(close, vol, i_high: int, n: int):
-    """(b) 阶段高点±NOW_TOP_ZONE 日扫描：最差跌幅 / 最大量比 / 是否放量大阴。"""
-    worst_drop = None
-    worst_vol_ratio = None
-    big_bear = False
-    for t in range(max(1, i_high - NOW_TOP_ZONE), min(n, i_high + NOW_TOP_ZONE + 1)):
-        drop = (close[t] / close[t - 1] - 1) * 100
-        base = vol[max(0, t - 5) : t].mean()
-        vr = float(vol[t] / base) if base else None
-        if worst_drop is None or drop < worst_drop:
-            worst_drop = drop
-        if vr is not None and (worst_vol_ratio is None or vr > worst_vol_ratio):
-            worst_vol_ratio = vr
-        if drop <= NOW_BEAR_DROP_PCT and vr is not None and vr >= NOW_BEAR_VOL_RATIO:
-            big_bear = True
-    return worst_drop, worst_vol_ratio, big_bear
+def _top_bears_since(df, i_low: int) -> list[dict[str, Any]]:
+    """上涨段起点之后的顶部 / 次高点放量阴线（唯一判定在 distribution.top_bear_bars；同层惰性导入）。"""
+    from custos.core.factors.distribution import top_bear_bars  # noqa: PLC0415
+
+    return top_bear_bars(df.reset_index(drop=True), start=i_low + 1)
 
 
 def _now_break_with_volume(
@@ -118,14 +104,9 @@ def _now_status(big_bear: bool, break_with_vol: bool, mild, no_big_bear, shrink)
 
 
 def _now_conditions(
-    mild,
-    max_burst,
-    no_big_bear,
-    worst_drop,
-    worst_vol_ratio,
-    shrink,
-    pull_ratio,
+    mild, max_burst, no_big_bear, top_bears, shrink, pull_ratio
 ) -> dict[str, Any]:
+    last = top_bears[-1] if top_bears else None
     return {
         "mild_volume": {
             "hit": bool(mild),
@@ -133,10 +114,8 @@ def _now_conditions(
         },
         "no_top_big_bear": {
             "hit": bool(no_big_bear),
-            "worst_drop_pct": round(worst_drop, 2) if worst_drop is not None else None,
-            "worst_vol_ratio": round(worst_vol_ratio, 3)
-            if worst_vol_ratio is not None
-            else None,
+            "top_bear_bars_ago": last["bars_ago"] if last else None,
+            "top_bear_kind": last["kind"] if last else None,
         },
         "pullback_shrink": {
             "hit": bool(shrink),
@@ -169,8 +148,9 @@ def check_non_one_wave(df) -> dict[str, Any]:
     # (a) 上涨段温和放量：无单日爆量（单日量/段均量 < 2）
     max_burst = float(up_vol.max() / up_vol_mean) if up_vol_mean else None
     mild = max_burst is not None and max_burst < NOW_MILD_VOL_BURST
-    # (b) 阶段高点±3日内无放量大阴（跌幅>3% 且 量/前5日均量>1.5）
-    worst_drop, worst_vol_ratio, big_bear = _now_top_zone_scan(close, vol, i_high, n)
+    # (b) 上涨段起点之后无顶部 / 次高点放量阴线（v0.592 唯一判定 distribution.top_bear_bars，owner 2026-11-24 校准口径）
+    tb = _top_bears_since(df, i_low)
+    big_bear = bool(tb)
     no_big_bear = not big_bear
     # (c) 回调段缩量：回调段均量/上涨段均量 < 0.7
     pull_vol = vol[i_high + 1 :]
@@ -184,13 +164,7 @@ def check_non_one_wave(df) -> dict[str, Any]:
         "status": status,
         "available": True,
         "conditions": _now_conditions(
-            mild,
-            max_burst,
-            no_big_bear,
-            worst_drop,
-            worst_vol_ratio,
-            shrink,
-            pull_ratio,
+            mild, max_burst, no_big_bear, tb, shrink, pull_ratio
         ),
         "break_with_volume": break_with_vol,
     }
@@ -376,23 +350,6 @@ def _v2_vol_up(vol, t: int) -> bool:
     )
 
 
-def _v2_big_bear_zone(close, opn, vol, center: int, lo: int, hi: int) -> bool:
-    """高点 ±NOW_TOP_ZONE 日内的放量大阴（owner 2026-11-13「都要」）：阴线、跌 ≥3%、量 ≥ 前 5 日均量 1.5 倍，
-    **且**量大于区内最大阳线量（「最高点阳量大于阴量」属正常换手，不算派发）。"""
-    zone = range(max(lo, center - NOW_TOP_ZONE, 1), min(hi, center + NOW_TOP_ZONE + 1))
-    up_max = max((vol[t] for t in zone if close[t] >= opn[t]), default=0.0)
-    for t in zone:
-        drop = (close[t] / close[t - 1] - 1) * 100
-        if (
-            close[t] < opn[t]
-            and drop <= NOW_BEAR_DROP_PCT
-            and _v2_vol_up(vol, t)
-            and vol[t] > up_max
-        ):
-            return True
-    return False
-
-
 def check_non_one_wave_v2(df) -> dict[str, Any]:
     """非一波流 v2 候选（owner 2026-11-13）。相对 v1 的改动：
 
@@ -438,15 +395,9 @@ def check_non_one_wave_v2(df) -> dict[str, Any]:
     one_wave = gain is not None and gain > NOW_V2_MAX_GAIN_PCT
     max_burst = float(up_vol.max() / up_mean) if up_mean else None
     mild = max_burst is not None and max_burst < NOW_MILD_VOL_BURST
-    top_bear = _v2_big_bear_zone(close, opn, vol, i_high, i_low + 1, n)
-    second = None
-    for t in range(i_low + 1, i_high - NOW_TOP_ZONE):
-        w = high[max(i_low, t - 3) : t + 4]
-        if high[t] >= w.max() and (second is None or high[t] > high[second]):
-            second = t
-    second_bear = second is not None and _v2_big_bear_zone(
-        close, opn, vol, second, i_low + 1, i_high
-    )
+    tb = _top_bears_since(df, i_low)  # v0.592 顶部 / 次高点放量阴线唯一判定
+    top_bear = any(b["kind"] == "顶部" for b in tb)
+    second_bear = any(b["kind"] == "次高点" for b in tb)
     pull = vol[i_high + 1 :]
     pull_ratio = float(pull.mean() / up_mean) if len(pull) and up_mean else None
     shrink = pull_ratio is not None and pull_ratio < NOW_PULLBACK_VOL_RATIO
@@ -551,15 +502,9 @@ def check_one_wave_v3(df) -> dict[str, Any]:
     pull = vol[i_high + 1 :]
     pull_ratio = float(pull.mean() / up_mean) if len(pull) and up_mean else None
     shrink = pull_ratio is not None and pull_ratio < NOW_PULLBACK_VOL_RATIO
-    top_bear = _v2_big_bear_zone(close, opn, vol, i_high, i_low + 1, n)
-    second = None
-    for t in range(i_low + 1, i_high - NOW_TOP_ZONE):
-        w = high[max(i_low, t - 3) : t + 4]
-        if high[t] >= w.max() and (second is None or high[t] > high[second]):
-            second = t
-    second_bear = second is not None and _v2_big_bear_zone(
-        close, opn, vol, second, i_low + 1, i_high
-    )
+    tb = _top_bears_since(df, i_low)  # v0.592 顶部 / 次高点放量阴线唯一判定
+    top_bear = any(b["kind"] == "顶部" for b in tb)
+    second_bear = any(b["kind"] == "次高点" for b in tb)
     distribution = bool(top_bear or second_bear)
     brk = any(
         close[t] < close[i_low] and _v2_vol_up(vol, t) for t in range(i_high + 1, n)

@@ -8,9 +8,9 @@
 
 ## 现状
 
-- **P0H 持仓大形态 13 个**（12 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 263 个模块级数值参数：**P0 99 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
+- **P0H 持仓大形态 13 个**（12 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 260 个模块级数值参数：**P0 96 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
   **P1 live 展示 99 个**（1800 证据标注，不进判定）、P2 研究 65 个。
-- **定义校准：0 / 263**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
+- **定义校准：0 / 260**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
 - **清单未覆盖**（需在逐因子校准时一并核）：①函数体内联常量（KDJ 9/3/3、BBI 周期、20 日相对强度窗口等）；
   ②打分权重与分档（`DEFAULT_TECH_WEIGHTS`、`tech_strong/mid` 60/30、资金意图 `ci_*` 与 `CAP_STRONG/MID`——属打分，R35 终局 A 已收口，
   不在 A 类范围，只在因子定义改动时同步核对）；③出场规则（`EXIT_RULES.json`，R10/R44/R47 测过效果）与 0AMV 状态机（R4），另议。
@@ -277,6 +277,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
   候选（v0.584）：`ignition.check_pullback_shrink_v2`（近 30 根高点；末 / 初 1/3 均量 ≤0.75；阴线 < 0.9、阳线 < 1.5 倍前 5 日均量；实体 < 4%；守 DKS 或前一低点）。完美 B1 10 + owner 4 共 14 张全对（v1 9/14；门槛贴着这 14 张定，须新图集复验）。J<13 样本点命中 22.6%（v1 10.4%）。未接 live。「守住 DKS 或前一低点」是数值判断，退出人工校准（owner 2026-11-25），由钉测管；图集只判量与当根 K 线。图集 `pullback_v2__mining_v1`；旧图集回调缩量 30 张不再标。
 - **涨停 / 涨跌停幅度统一（v0.590，owner 2026-11-25）**：涨停唯一口径 `code_utils.is_limit_up`（owner 通达信公式 ZT：收盘 = ZTPRICE 或涨幅在 限幅 ± 0.2%，限幅按代码前缀）；删 WAVE_LIMIT_UP_PCT（写死 9.8，20cm 票 J<13 样本冲刺波 83 → 20）与 QN_LIMIT_TOL。涨跌停幅度 `indicators.price_limit_from`：有代码只看前缀，🔄 去掉行情自纠（主板 J<13 样本 24% 被升 20%、50% 被降 ST 5%，持仓中大阳 / 中大阴门槛乱跳）。
 - **上涨段统一（v0.591，owner 2026-11-25）**：`b1_structure.rally_segment` 为唯一定位（最近平台顶 H 与前一平台底 L；H 之后 = 回调段）。波段类型、非一波流 v1/v2、一波流 v3、回调缩量 v1（live）/ v2 都改用它；🔄 停用 wave_type「近 60 根最低价 → 其后最高价」、非一波流 v2 / 一波流 v3 的「窗口最高价」兜底、回调缩量的 20 / 30 / 40 根窗口（删 PULLBACK_LOOKBACK、PB2_LOOKBACK、PB2_RUN_BACK）。b1_pullback_fit（live_use none）未动。
+- **顶部放量阴线统一（v0.592，owner 2026-11-25）**：唯一判定 `distribution.top_bear_bars`（owner 11-24 校准口径）；非一波流 v1 的「阶段高点 ±3 日放量大阴（跌 ≥3%、量 ≥1.5 倍）」、v2 / 一波流 v3 的「高点 / 次高点 ±3 日放量大阴 + 自找次高点分型」改为调它（上涨段起点之后）。删 NOW_BEAR_DROP_PCT / NOW_BEAR_VOL_RATIO / NOW_TOP_ZONE。J<13 样本：非一波流撤销 33.9% → 43.2%、一波流 v3 出货标记 9.7% → 25.0%。wave_type 的「顶部放量」是冲刺波的高点放量（不分阴阳），概念不同，保留。
 - **纯数值判定退出人工校准（v0.563，owner 2026-11-23）**：MACD 区间（DIF / DEA 是否在 0 轴上 + 柱体放长 / 缩短 / 转绿）只是数值比较，看图只能核实现，改由钉测管四态；`macd_technics__mining_v1` 的 24 张区间图隐藏，MODULES 去掉该字段。
 - **owner 定（2026-11-23）**：一波流 = ①连续 ②快速（几个交易日内）③大幅（≥50%），之后 A 杀或震荡下跌 / 横盘都算，尽力识别；走势只识别买点前最近 1~2 段，尽力识别。
   落地（v0.561）：`b1_structure.check_one_wave_v4`（120 根内 ≤10 根、途中收盘回撤 <10%、最高价较起点最低价 ≥50%），live 提醒改用 v4（风险列「一波流（提醒）」，不否决不计分）；
@@ -340,7 +341,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `technical_monitor` | `TREND_MIN_BARS` | 60 | 趋势判定最少 K 线数 | - | 未校准 |
 | `technical_monitor` | `QFQ_LOAD_BARS` | 100000 | - | - | 未校准 |
 
-### P0（99 个参数）
+### P0（96 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -350,10 +351,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `b1_thresholds` | `REVERSAL_CHANGE_PCT` | 2.0 | - | - | 未校准 |
 | `b1_thresholds` | `REVERSAL_AMPLITUDE_PCT` | 7.0 | - | - | 未校准 |
 | `b1_structure` | `NOW_MILD_VOL_BURST` | 2.0 | 待回测参数：上涨段单日量/段均量上限（温和放量） | candidate | 未校准 |
-| `b1_structure` | `NOW_BEAR_DROP_PCT` | -3.0 | 待回测参数：放量大阴跌幅% | candidate | 未校准 |
-| `b1_structure` | `NOW_BEAR_VOL_RATIO` | 1.5 | 待回测参数：放量大阴量比（量/前5日均量） | candidate | 未校准 |
 | `b1_structure` | `NOW_PULLBACK_VOL_RATIO` | 0.7 | 待回测参数：回调段均量/上涨段均量上限 | candidate | 未校准 |
-| `b1_structure` | `NOW_TOP_ZONE` | 3 | 待回测参数：阶段高点观察区±N日 | candidate | 未校准 |
 | `b1_structure` | `REPAIR_J_PREV_MAX` | 20.0 | 待回测参数：J拐头向上（昨日J上限） | candidate | 未校准 |
 | `b1_structure` | `REPAIR_VOL_SHRINK` | 0.7 | 待回测参数：缩量止跌量比上限 | candidate | 未校准 |
 | `b1_structure` | `REPAIR_CHANGE_PCT` | 2.0 | 待回测参数：止跌涨跌幅区间±% | candidate | 未校准 |

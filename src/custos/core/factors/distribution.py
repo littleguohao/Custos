@@ -290,8 +290,9 @@ def _top_or_second_high(h, low, q: int) -> Optional[str]:
     return "次高点" if h[q] >= hi * DIST2_POS else None
 
 
-def check_top_bear_volume(df) -> dict[str, Any]:
-    """顶部 / 次高点放量阴线（①② v2 候选，owner 2026-11-24；未接 live）。
+def top_bear_bars(df, start: Optional[int] = None) -> list[dict[str, Any]]:
+    """顶部 / 次高点放量阴线（**全项目唯一判定**，v0.592；①② owner 2026-11-24 校准，v0.578 上 live）。
+    ``start`` 起逐根判（缺省 = 近 DIST2_LOOKBACK 根），返回全部命中（时间顺序）；非一波流 v1/v2、一波流 v3 也调这里。
 
     近 DIST2_LOOKBACK 根内任一根 t：阴线（收 < 开），量 > 前 DIST2_PREV_YANG 根阳线（收 ≥ 开）的最大量、≥ 20 日均量 × DIST2_VOL_MA、≥ 前 60 根最大量 × DIST2_MAX60，
     t 前后 DIST2_NEAR_HIGH 根内有最高价分型高点，且它是本轮顶部或次高点（见 _top_or_second_high）。
@@ -303,9 +304,10 @@ def check_top_bear_volume(df) -> dict[str, Any]:
     o = df["open"].astype(float).to_numpy()
     n = len(c)
     if n < 61:
-        return {"available": False, "hit": False, "bars": []}
+        return []
     bars: list[dict[str, Any]] = []
-    for t in range(max(60, n - DIST2_LOOKBACK), n):
+    t0 = n - DIST2_LOOKBACK if start is None else int(start)
+    for t in range(max(60, t0), n):
         if c[t] >= o[t] or v[t] < v[t - 20 : t].mean() * DIST2_VOL_MA:
             continue
         if v[t] < v[max(0, t - 60) : t].max() * DIST2_MAX60:
@@ -342,7 +344,14 @@ def check_top_bear_volume(df) -> dict[str, Any]:
                 "vs_prev_yang": round(float(v[t] / max(yang)), 2) if yang else None,
             }
         )
-    # owner 2026-11-24「找最近的就行」：多根命中只报最近一根
+    return bars
+
+
+def check_top_bear_volume(df) -> dict[str, Any]:
+    """顶部 / 次高点放量阴线（判法见 top_bear_bars）；owner 2026-11-24「找最近的就行」：多根命中只报最近一根。"""
+    if df is None or len(df) < 61:
+        return {"available": False, "hit": False, "bars": []}
+    bars = top_bear_bars(df)
     return {
         "available": True,
         "hit": bool(bars),

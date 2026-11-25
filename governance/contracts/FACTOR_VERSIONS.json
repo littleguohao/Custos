@@ -57,8 +57,8 @@
       ]
     },
     "b1_structure": {
-      "version": 5,
-      "source_digest": "3dd5afb7b389d7a9cb68",
+      "version": 6,
+      "source_digest": "28d542f352df5e42c55f",
       "history": [
         {
           "version": 1,
@@ -119,6 +119,11 @@
           "version": 5,
           "date": "2026-11-25",
           "change": "上涨段统一由 MACD 平台 N 结构定位（rally_segment 唯一实现，owner 2026-11-25）"
+        },
+        {
+          "version": 6,
+          "date": "2026-11-25",
+          "change": "顶部 / 次高点放量阴线统一判定（distribution.top_bear_bars），非一波流 / 一波流 v3 改调（owner 2026-11-25）"
         }
       ]
     },
@@ -177,8 +182,8 @@
       ]
     },
     "distribution": {
-      "version": 3,
-      "source_digest": "ef8d8cc1faf052d595d6",
+      "version": 4,
+      "source_digest": "b6327b9765d5ed945b57",
       "history": [
         {
           "version": 1,
@@ -219,6 +224,11 @@
           "version": 3,
           "date": "2026-11-25",
           "change": "依赖的涨跌停幅度改为按代码前缀（owner 2026-11-25），输出随之变化"
+        },
+        {
+          "version": 4,
+          "date": "2026-11-25",
+          "change": "顶部 / 次高点放量阴线统一判定（distribution.top_bear_bars），非一波流 / 一波流 v3 改调（owner 2026-11-25）"
         }
       ]
     },

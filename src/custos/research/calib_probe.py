@@ -79,10 +79,7 @@ MODULES: dict[str, dict[str, Any]] = {
         ],
         "params": [
             "NOW_MILD_VOL_BURST",
-            "NOW_BEAR_DROP_PCT",
-            "NOW_BEAR_VOL_RATIO",
             "NOW_PULLBACK_VOL_RATIO",
-            "NOW_TOP_ZONE",
             "REPAIR_J_PREV_MAX",
             "REPAIR_VOL_SHRINK",
             "REPAIR_CHANGE_PCT",
