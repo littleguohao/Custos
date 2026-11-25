@@ -57,8 +57,8 @@
       ]
     },
     "b1_structure": {
-      "version": 4,
-      "source_digest": "3fe2bbbacd2b1d80dd86",
+      "version": 5,
+      "source_digest": "3dd5afb7b389d7a9cb68",
       "history": [
         {
           "version": 1,
@@ -114,6 +114,11 @@
           "version": 4,
           "date": "2026-11-25",
           "change": "走势三态 / 上升 N / 下降 N 统一由 MACD 平台 N 结构推出（owner 2026-11-25 唯一底座）；停用 SW4 拟合、收盘分型 N、均线三态"
+        },
+        {
+          "version": 5,
+          "date": "2026-11-25",
+          "change": "上涨段统一由 MACD 平台 N 结构定位（rally_segment 唯一实现，owner 2026-11-25）"
         }
       ]
     },
@@ -240,8 +245,8 @@
       ]
     },
     "ignition": {
-      "version": 1,
-      "source_digest": "ba78f74079323ce2f35a",
+      "version": 2,
+      "source_digest": "5596909708809f691d81",
       "history": [
         {
           "version": 1,
@@ -252,6 +257,11 @@
           "version": 1,
           "date": "2026-11-25",
           "refactor": "新增回调缩量企稳 v2 候选 check_pullback_shrink_v2（未接 live）"
+        },
+        {
+          "version": 2,
+          "date": "2026-11-25",
+          "change": "上涨段统一由 MACD 平台 N 结构定位（rally_segment 唯一实现，owner 2026-11-25）"
         }
       ]
     },
@@ -655,8 +665,8 @@
       ]
     },
     "wave_type": {
-      "version": 2,
-      "source_digest": "275843576d25bb243f94",
+      "version": 3,
+      "source_digest": "80c776971b13b20cb6f2",
       "history": [
         {
           "version": 1,
@@ -667,6 +677,11 @@
           "version": 2,
           "date": "2026-11-25",
           "change": "涨停 / 涨跌停幅度统一口径（owner 2026-11-25：通达信 ZT 公式，限幅按代码前缀，去掉行情自纠）"
+        },
+        {
+          "version": 3,
+          "date": "2026-11-25",
+          "change": "上涨段统一由 MACD 平台 N 结构定位（rally_segment 唯一实现，owner 2026-11-25）"
         }
       ]
     },

@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 
 from custos.research import b1_fingerprint_study as bf  # noqa: E402
+from helpers_rally import fixed_rally  # noqa: F401  v0.591 合成序列无平台点，固定上涨段
 
 
 def _synth_hit_df():
@@ -86,7 +87,7 @@ class TestLoadB1Csv:
 
 
 class TestScanCode:
-    def test_composite_hit_and_forward_hand_calc(self):
+    def test_composite_hit_and_forward_hand_calc(self, fixed_rally):
         df = _synth_hit_df()
         r = bf.scan_code(df, "600000")
         assert r["n_hits"] >= 1, "合成序列应命中（点火+回调缩量+J 低同窗）"

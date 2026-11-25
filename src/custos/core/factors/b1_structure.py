@@ -33,10 +33,6 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays  # noqa: E402
-from custos.core.factors.wave_type import (
-    WAVE_MIN_BARS,
-    _find_rally_segment,  # noqa: E402
-)
 from custos.core.indicators import kdj, macd_series, pct_change  # noqa: E402
 
 FACTOR: dict[str, Any] = {
@@ -158,15 +154,15 @@ def check_non_one_wave(df) -> dict[str, Any]:
     """
     close, _, _, vol = _ohlcv_arrays(df)
     n = len(df)
-    seg = _find_rally_segment(df)
-    if seg is None or n < WAVE_MIN_BARS or seg[2] >= n - 2:
+    seg = _rally_pair(df)  # v0.591 上涨段唯一定位（MACD 平台 N 结构）
+    if seg is None:
         return {
             "status": "insufficient",
             "available": False,
             "conditions": {},
             "reason": "无完整上涨段+回调段",
         }
-    _, i_low, i_high, _ = seg
+    i_low, i_high = seg
 
     up_vol = vol[i_low : i_high + 1]
     up_vol_mean = float(up_vol.mean()) if len(up_vol) else 0.0
@@ -407,29 +403,21 @@ def check_non_one_wave_v2(df) -> dict[str, Any]:
     - 上涨段累计涨幅（阶段高点最高价 / 启动低点最低价 − 1）> 50% ⇒ 一波流：不能判确认，按证据不足（owner 定）；
     - 放量大阴另须量大于该高点区内最大阳线量（owner 定）。
     温和放量（单日量 < 段均量 2 倍）与回调缩量（< 0.7 倍）沿用 v1。"""
-    from custos.core.factors.wave_type import WAVE_LOOKBACK  # noqa: PLC0415
-
     close, opn, high, low, vol = (
         df[k].astype(float).to_numpy()
         for k in ("close", "open", "high", "low", "volume")
     )
     n = len(df)
-    start = max(0, n - WAVE_LOOKBACK)
-    if n < WAVE_MIN_BARS:
-        return {"status": "insufficient", "available": False, "reason": "K 线不足"}
-    seg = _find_rally_segment(df)
-    if seg is not None and seg[2] < n - 2:
-        _, i_low, i_high, _ = seg  # 沿用 v1 段识别
-    else:
-        # v1 找不到段（价格已跌到窗口最低）：取窗口最高价日为阶段高点、其前最低价日为启动低点
-        i_high = start + int(high[start:].argmax())
-        if i_high <= start or i_high >= n - 2:
-            return {
-                "status": "insufficient",
-                "available": False,
-                "reason": "阶段高点后无回调段",
-            }
-        i_low = start + int(low[start:i_high].argmin())
+    seg = _rally_pair(
+        df
+    )  # v0.591 上涨段唯一定位；🔄 原「找不到段时取窗口最高价日」兜底停用
+    if seg is None:
+        return {
+            "status": "insufficient",
+            "available": False,
+            "reason": "无 MACD 平台上涨段 + 回调段",
+        }
+    i_low, i_high = seg
     up_vol = vol[i_low : i_high + 1]
     up_mean = float(up_vol.mean()) if len(up_vol) else 0.0
     gain = pct_change(
@@ -536,28 +524,19 @@ def check_one_wave_v3(df) -> dict[str, Any]:
 
     另报 ``distribution``（出货）：阶段高点或次高点前后 3 日有放量大阴（阴线、跌 ≥3%、量 ≥ 前 5 日均量 1.5 倍且大于区内最大阳线量）；
     ``break_with_volume``（放量跌破启动低点）只作标注，不改结论。上涨段识别同 v2。"""
-    from custos.core.factors.wave_type import WAVE_LOOKBACK  # noqa: PLC0415
-
     close, opn, high, low, vol = (
         df[k].astype(float).to_numpy()
         for k in ("close", "open", "high", "low", "volume")
     )
     n = len(df)
-    start = max(0, n - WAVE_LOOKBACK)
-    if n < WAVE_MIN_BARS:
-        return {"status": "unclear", "available": False, "reason": "K 线不足"}
-    seg = _find_rally_segment(df)
-    if seg is not None and seg[2] < n - 2:
-        _, i_low, i_high, _ = seg
-    else:
-        i_high = start + int(high[start:].argmax())
-        if i_high <= start or i_high >= n - 2:
-            return {
-                "status": "unclear",
-                "available": False,
-                "reason": "阶段高点后无回调段",
-            }
-        i_low = start + int(low[start:i_high].argmin())
+    seg = _rally_pair(df)  # v0.591 上涨段唯一定位
+    if seg is None:
+        return {
+            "status": "unclear",
+            "available": False,
+            "reason": "无 MACD 平台上涨段 + 回调段",
+        }
+    i_low, i_high = seg
     gain = pct_change(float(high[i_high]), float(low[i_low]), digits=2)
     fast = None
     for t in range(i_low, i_high + 1):
@@ -752,6 +731,8 @@ def macd_platform_segments(df) -> list[dict[str, Any]]:
                         "date": _n_date(x, k),
                         "start": _n_date(x, i),
                         "end": _n_date(x, j),
+                        "start_i": int(i),
+                        "end_i": int(j),
                         "ongoing": bool(j == n - 1),
                     }
                 )
@@ -843,6 +824,54 @@ def macd_platform_structure(df) -> dict[str, Any]:
         "reclaimed": bool(state == "下降" and cur > h3["price"]),
         "definition": "macd_platform_v2（往回交替匹配三组，同类合并取极值；最近两组定状态，第三组判延续 / 转折）",
     }
+
+
+def rally_segment(df) -> Optional[dict[str, Any]]:
+    """上涨段（**全项目唯一定位**，v0.591，owner 2026-11-25「所有波段识别都建立在 N 型结构上」）：
+    最近一个平台顶 H 与它前面的平台底 L 组成上涨段（含进行中的末段）。
+    起点 ``i_low`` = 从 L 之前那个平台顶（没有则 L 前 60 根）到 H 之间的最低价；高点 ``i_high`` = 从 ``i_low`` 到 H 之后那个平台底
+    （没有则当根）之间的最高价；``i_high`` 之后到当根 = 回调段。找不到「L → H」⇒ None。
+    🔄 停用：wave_type 的「近 60 根最低价 → 其后最高价」、回调缩量 v1 的「近 20 根最高收盘」、v2 的「近 30 根最高 / 前 40 根最低」。"""
+    if df is None or len(df) < 30:
+        return None
+    x = df.reset_index(drop=True)
+    hi = x["high"].astype(float).to_numpy()
+    lo = x["low"].astype(float).to_numpy()
+    n = len(x)
+    seq = macd_platform_points(macd_platform_segments(x), groups=10**9)[::-1]  # 旧 → 新
+    jh = next(
+        (
+            j
+            for j in range(len(seq) - 1, 0, -1)
+            if seq[j]["kind"] == "H" and seq[j - 1]["kind"] == "L"
+        ),
+        None,
+    )
+    if jh is None:
+        return None
+    left = int(seq[jh - 2]["idx"]) if jh >= 2 else max(0, int(seq[jh - 1]["idx"]) - 60)
+    h_idx = int(seq[jh]["idx"])
+    right = int(seq[jh + 1]["idx"]) if jh + 1 < len(seq) else n - 1
+    i_low = left + int(lo[left : h_idx + 1].argmin())
+    i_high = i_low + int(hi[i_low : max(right, h_idx) + 1].argmax())
+    if i_high <= i_low:
+        return None
+    return {
+        "start": left,
+        "i_low": i_low,
+        "i_high": i_high,
+        "n": n,
+        "pullback_bars": n - 1 - i_high,
+        "basis": "macd_platform",
+    }
+
+
+def _rally_pair(df) -> Optional[tuple[int, int]]:
+    """rally_segment 的 (i_low, i_high)，并要求高点之后至少 2 根回调；否则 None。"""
+    seg = rally_segment(df)
+    if seg is None or seg["i_high"] >= seg["n"] - 2:
+        return None
+    return int(seg["i_low"]), int(seg["i_high"])
 
 
 def check_swing_state(df) -> dict[str, Any]:

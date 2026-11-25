@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from custos.core.factors import b1_structure as bs
+from helpers_rally import fixed_rally  # noqa: F401  v0.591 合成序列无平台点，固定上涨段
 
 
 def _df(close, vol, opn=None):
@@ -44,7 +45,7 @@ def test_five_day_v2_needs_up_days_rising_volume_and_bullish_2x_spike():
     assert not bs.check_five_day_entry_v2(bear_spike)["hit"]
 
 
-def test_non_one_wave_v2_one_wave_gain_and_fallback_segment():
+def test_non_one_wave_v2_one_wave_gain_and_fallback_segment(fixed_rally):
     n = 80
     c = (
         list(np.linspace(10, 10, 20))
@@ -54,13 +55,12 @@ def test_non_one_wave_v2_one_wave_gain_and_fallback_segment():
     v = [100] * 20 + [120] * 30 + [60] * 30
     o = bs.check_non_one_wave_v2(_df(c[:n], v[:n]))
     assert o["rally"]["gain_pct"] > 50 and o["status"] == bs.NOW_V2_ONE_WAVE_STATUS
-    # 价格跌穿启动位到窗口最低（v1 找不到段）且放量 ⇒ v2 回退段识别判放量破位
+    # 价格跌穿启动位到窗口最低（找不到上涨段）：🔄 v0.591 起 v2 不再回退「窗口最高价」另找一段，同 v1 判证据不足
     c2 = list(np.linspace(10, 12, 30)) + list(np.linspace(12, 9.0, 28)) + [8.5, 8.3]
     v2 = [100] * 58 + [400, 420]
     d2 = _df(c2, v2)
     assert bs.check_non_one_wave(d2)["status"] == "insufficient"
-    assert bs.check_non_one_wave_v2(d2)["status"] == "revoked"
-    assert "break_with_volume" in bs.check_non_one_wave_v2(d2)["revoke_reasons"]
+    assert bs.check_non_one_wave_v2(d2)["status"] == "insufficient"
 
 
 def test_v2_not_wired_into_live():
@@ -68,7 +68,7 @@ def test_v2_not_wired_into_live():
     assert "_v2" not in src
 
 
-def test_one_wave_v3_three_states_positive_wording():
+def test_one_wave_v3_three_states_positive_wording(fixed_rally):
     """owner 2026-11-17：一波流 = 20 根左右涨 ≥50% 后下跌；明显上涨 ≥45%；结论正面表述。"""
     fast = (
         list(np.linspace(10, 10, 20))
@@ -91,7 +91,7 @@ def test_one_wave_v3_three_states_positive_wording():
     assert {"one_wave", "healthy", "unclear"} >= {o["status"], h["status"]}
 
 
-def test_one_wave_v3_shrinking_pullback_not_one_wave_and_n_floor():
+def test_one_wave_v3_shrinking_pullback_not_one_wave_and_n_floor(fixed_rally):
     fast = (
         list(np.linspace(10, 10, 20))
         + list(np.linspace(10, 16, 15))

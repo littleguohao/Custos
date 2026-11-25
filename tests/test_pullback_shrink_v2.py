@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 from custos.core.factors import ignition as ig
+from helpers_rally import fixed_rally  # noqa: F401  v0.591 合成序列无平台点，固定上涨段
 
 
 def _df(bar_vol=500.0, bar_body=0.005):
@@ -29,23 +30,23 @@ def _df(bar_vol=500.0, bar_body=0.005):
     )
 
 
-def test_v2_hit_on_decaying_pullback():
+def test_v2_hit_on_decaying_pullback(fixed_rally):
     assert ig.check_pullback_shrink_v2(_df(), dks_last=12.0)["hit"] is True
 
 
-def test_v2_miss_when_bar_volume_spikes():
+def test_v2_miss_when_bar_volume_spikes(fixed_rally):
     """owner #40：当根放量（阴线量 ≥ 前 5 日均量 0.9 倍）不算。"""
     r = ig.check_pullback_shrink_v2(_df(bar_vol=1500.0), dks_last=12.0)
     assert r["hit"] is False and r["conditions"]["bar_vol"] is False
 
 
-def test_v2_miss_when_bar_body_large():
+def test_v2_miss_when_bar_body_large(fixed_rally):
     """owner #42：缩量但 K 线大（实体 ≥4%）不算。"""
     r = ig.check_pullback_shrink_v2(_df(bar_body=0.05), dks_last=12.0)
     assert r["hit"] is False and r["conditions"]["bar_body"] is False
 
 
-def test_v2_hold_dks_or_prev_low_pinned_v0585():
+def test_v2_hold_dks_or_prev_low_pinned_v0585(fixed_rally):
     """owner 2026-11-25：守住支撑是数值判断，退出人工校准，由本钉测管——DKS 或前一低点守住其一即可。"""
     df = _df()
     assert (

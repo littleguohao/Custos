@@ -53,7 +53,6 @@ ZX_CROSS_RECENT = 10  # 待回测：知行金叉"近N日"窗口
 IGNITION_WINDOW = 10  # 待回测：放量点火扫描窗口（日）
 IGNITION_VOL_RATIO = 1.5  # 待回测：点火量比（当日量/前5日均量）
 IGNITION_MIN_GAIN = 3.0  # 待回测：点火单日涨幅%下限
-PULLBACK_LOOKBACK = 20  # 待回测：回调缩量企稳观察窗口（日）
 PULLBACK_MIN_DROP = 3.0  # 待回测：距窗口高点回撤%下限
 PULLBACK_VOL_RATIO = 0.85  # 待回测：回调段/上涨段均量上限
 # v0.61（owner 定向，2026-08-15）：0.8 -> 0.85。正例 002074@2025-08-01 的
@@ -102,19 +101,26 @@ def check_ignition(df) -> dict[str, Any]:
 def check_pullback_shrink(df, dks_last: Optional[float] = None) -> dict[str, Any]:
     """回调缩量企稳（good_b1 回调段）：自窗口高点回撤 + 回调段缩量 + 收盘守多空线。
 
-    窗口 PULLBACK_LOOKBACK 内：距最高收盘回撤 >= PULLBACK_MIN_DROP%，回调段均量 /
+    上涨段由 b1_structure.rally_segment（MACD 平台 N 结构，v0.591）定位：距高点回撤 >= PULLBACK_MIN_DROP%，回调段均量 /
     上涨段均量 < PULLBACK_VOL_RATIO，且（无 DKS 时忽略）收盘 >= DKS。
     """
     close, _, _, vol = _ohlcv_arrays(df)
     n = len(df)
-    if n < PULLBACK_LOOKBACK + 5:
+    if n < 30:  # v0.591 同 rally_segment 最少根数
         return {"hit": False, "available": False}
-    seg_close = close[-PULLBACK_LOOKBACK:]
-    hi_rel = int(seg_close.argmax())
-    hi_pos = n - PULLBACK_LOOKBACK + hi_rel
+    from custos.core.factors.b1_structure import rally_segment  # noqa: PLC0415  v0.591 上涨段唯一定位
+
+    seg = rally_segment(df)
+    if seg is None:
+        return {
+            "hit": False,
+            "available": True,
+            "detail": {"reason": "无 MACD 平台上涨段"},
+        }
+    hi_pos, lo_pos = seg["i_high"], seg["i_low"]
     high = float(close[hi_pos])
     drop_pct = (1 - close[-1] / high) * 100 if high else 0.0
-    run_vol = vol[n - PULLBACK_LOOKBACK : hi_pos + 1]
+    run_vol = vol[lo_pos : hi_pos + 1]
     pull_vol = vol[hi_pos + 1 :]
     run_mean = float(run_vol.mean()) if len(run_vol) else 0.0
     pull_ratio = (
@@ -139,10 +145,6 @@ def check_pullback_shrink(df, dks_last: Optional[float] = None) -> dict[str, Any
 
 
 # --- 回调缩量企稳 v2 候选（owner 2026-11-25：按原文「回调段成交量单调收缩，收盘守住 DKS 或前一有效低点」+ 当根不放量、K 线不大）---
-PB2_LOOKBACK = (
-    30  # 上涨高点 = 近 30 根最高收盘（完美 B1 10 例回调最长 27 根，原 20 根会截断）
-)
-PB2_RUN_BACK = 40  # 上涨起点 = 高点前 40 根内最低收盘
 PB2_MIN_DROP = 3.0  # 距高点回撤 ≥3%（同 v1）
 PB2_DECAY = 0.75  # 量「一路缩」：回调段末 1/3 均量 ≤ 初 1/3 均量 × 0.75（完美 B1 10 例 0.40~0.71；逐日单调太严，10 例无一满足）
 PB2_YIN_VOL = 0.9  # 当根是阴线时：量 < 前 5 日均量 × 0.9（owner #40 2.52、#41 0.96 判放量；完美 B1 阴线 0.61~0.89）
@@ -154,18 +156,25 @@ PB2_PIVOT = 3  # 前一有效低点 = 上涨段内最后一个收盘分型低点
 def check_pullback_shrink_v2(df, dks_last: Optional[float] = None) -> dict[str, Any]:
     """回调缩量企稳 v2（候选，owner 2026-11-25；未接 live）。
 
-    上涨段 = 高点前 PB2_RUN_BACK 根内最低收盘 → 近 PB2_LOOKBACK 根最高收盘；回调段 = 高点之后到当根（≥2 根）。
+    上涨段 = b1_structure.rally_segment（MACD 平台 N 结构，v0.591 唯一定位）；回调段 = 高点之后到当根（≥2 根）。
     成立 = 回撤 ≥ PB2_MIN_DROP% ∧ 回调段量一路缩（末 1/3 均量 ≤ 初 1/3 × PB2_DECAY）∧ 当根不放量（阴线 < 前 5 日均量 × PB2_YIN_VOL，
     阳线 < × PB2_YANG_VOL）∧ 当根实体 < PB2_MAX_BODY% ∧ 收盘守住 DKS 或前一有效低点。
     🔄 v1 的「回调段均量 / 上涨段均量 < 0.85」看不到当根放量与大 K（owner #40~#42），且平均量比较不等于原文的「单调收缩」。"""
     close, _, _, vol = _ohlcv_arrays(df)
     open_ = df["open"].astype(float).to_numpy()
     n = len(df)
-    if n < PB2_LOOKBACK + PB2_RUN_BACK:
+    if n < 30:  # v0.591 同 rally_segment 最少根数
         return {"hit": False, "available": False}
-    hp = n - PB2_LOOKBACK + int(close[-PB2_LOOKBACK:].argmax())
-    a = max(0, hp - PB2_RUN_BACK)
-    lo = a + int(close[a : hp + 1].argmin())
+    from custos.core.factors.b1_structure import rally_segment  # noqa: PLC0415  v0.591 上涨段唯一定位
+
+    seg = rally_segment(df)
+    if seg is None:
+        return {
+            "hit": False,
+            "available": True,
+            "detail": {"reason": "无 MACD 平台上涨段"},
+        }
+    hp, lo = seg["i_high"], seg["i_low"]
     pv = vol[hp + 1 :]
     if len(pv) < 2 or not close[hp]:
         return {"hit": False, "available": True, "detail": {"pullback_bars": len(pv)}}

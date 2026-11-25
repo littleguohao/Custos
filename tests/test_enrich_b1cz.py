@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from custos.pipeline.screening import enrich_candidates as ec
+from helpers_rally import fixed_rally  # noqa: F401  v0.591 合成序列无平台点，固定上涨段
 
 
 def make_df(closes, vols=None, highs=None, lows=None):
@@ -29,7 +30,7 @@ def make_df(closes, vols=None, highs=None, lows=None):
 # ---------- wave_type（B1 §四.0 拉升波三分类） ----------
 
 
-def test_wave_buildup():
+def test_wave_buildup(fixed_rally):
     # 50 平盘 + 启动放量长阳(+6%, 量2x) + 10日温和上行至13（段涨幅约31%）
     closes = [10.0] * 50 + [10.6] + [10.6 + i * 0.27 for i in range(1, 10)]
     lows = [c * 0.995 for c in closes]
@@ -41,7 +42,7 @@ def test_wave_buildup():
     assert r["detail"]["start_bull_candle"] is True
 
 
-def test_wave_rally():
+def test_wave_rally(fixed_rally):
     # 前一段 10.5→12.2（摆动>15%）→ 回踩 10.6（窗口最低）→ 二段至 14.5（段涨幅约37%）
     closes = [11.0] * 20
     closes += [10.5 + i * 0.19 for i in range(10)]  # 10.5→12.21
@@ -55,7 +56,7 @@ def test_wave_rally():
     assert 35 <= r["detail"]["seg_gain_pct"] <= 50
 
 
-def test_wave_sprint():
+def test_wave_sprint(fixed_rally):
     # 近20日2次涨停(+10%)、近10日涨幅>25%、顶部放量3x → 冲刺波（优先级最高）
     closes = [10.0] * 40 + [11.0, 11.0, 12.1, 12.5, 13.5, 14.5, 15.5]
     vols = [1000.0] * 46 + [3000.0]
@@ -107,7 +108,7 @@ def _now_base_df(pull_vols, top_drop=None):
     return df
 
 
-def test_non_one_wave_confirmed():
+def test_non_one_wave_confirmed(fixed_rally):
     r = ec.check_non_one_wave(_now_base_df([500.0] * 5))
     assert r["available"] and r["status"] == "confirmed"
     assert r["conditions"]["mild_volume"]["hit"] is True
@@ -115,7 +116,7 @@ def test_non_one_wave_confirmed():
     assert r["conditions"]["pullback_shrink"]["hit"] is True
 
 
-def test_non_one_wave_revoked_by_top_big_bear():
+def test_non_one_wave_revoked_by_top_big_bear(fixed_rally):
     # 高点次日 -5% 且量 2x（放量大阴）→ 撤销
     closes = [10.0] * 30 + [10.0 + i * 0.2 for i in range(1, 11)]
     down = closes[-1] * 0.95
@@ -128,7 +129,7 @@ def test_non_one_wave_revoked_by_top_big_bear():
     assert r["conditions"]["no_top_big_bear"]["hit"] is False
 
 
-def test_non_one_wave_insufficient_when_pullback_not_shrinking():
+def test_non_one_wave_insufficient_when_pullback_not_shrinking(fixed_rally):
     r = ec.check_non_one_wave(_now_base_df([900.0] * 5))
     assert r["status"] == "insufficient"
     assert r["conditions"]["pullback_shrink"]["hit"] is False
@@ -350,7 +351,7 @@ def test_bottom_volume_miss_when_today_makes_new_20d_low():
     assert r["conditions"]["no_new_low"]["hit"] is False
 
 
-def test_wave_sprint_survives_pullback_after_top():
+def test_wave_sprint_survives_pullback_after_top(fixed_rally):
     # #2：冲刺到顶后回调约 8%（B1 回调时点），段内加速口径仍判 sprint
     closes = [10.0] * 40 + [11.0, 11.0, 12.1, 12.5, 13.5, 14.5, 15.5]
     closes += [15.0, 14.5, 14.26]  # 顶部后回调 ~8%
@@ -369,7 +370,7 @@ def test_volume_sustain_daily_breach_not_confirmed():
     assert r["post_min_ratio"] < 0.55
 
 
-def test_limit_up_mask_ignores_zero_close_bars():
+def test_limit_up_mask_ignores_zero_close_bars(fixed_rally):
     # #11a：close=0 脏数据 bar 不产生假性涨停（11/0=inf 不得计入）
     closes = [10.0] * 40 + [0.0, 11.0, 11.0, 12.1, 12.5, 13.5, 14.5, 15.5]
     r = ec.detect_wave_type(make_df(closes))

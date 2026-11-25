@@ -29,6 +29,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 from custos.core.code_utils import price_limit_pct  # noqa: E402
+from helpers_rally import fixed_rally  # noqa: F401  v0.591 合成序列无平台点，固定上涨段
 
 
 class TestCanonicalTable:
@@ -190,7 +191,7 @@ class TestLimitUpSingleRule:
             "600000", (1.16 / 1.05 - 1) * 100, close=1.16, prev_close=1.05
         )
 
-    def test_wave_type_uses_single_rule(self):
+    def test_wave_type_uses_single_rule(self, fixed_rally):
         import numpy as np
         import pandas as pd
 

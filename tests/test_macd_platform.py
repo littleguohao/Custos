@@ -152,3 +152,30 @@ def test_state_and_transition_from_three_groups_v0512(monkeypatch):
     assert [st[k]["price"] for k in ("L1", "L2", "L3")] == [10.0, 9.0, 9.5]
     monkeypatch.setattr(bs, "macd_platform_segments", lambda df: segs[2:])
     assert tm.macd_platform_structure(df)["available"] is False  # 只剩两组
+
+
+def test_rally_segment_from_platform_points_v0591(monkeypatch):
+    """owner 2026-11-25：上涨段唯一定位 = 最近一个平台顶 H 与它前面的平台底 L（H 之后到当根 = 回调段）。"""
+    import numpy as np
+
+    df = _df(
+        np.r_[
+            np.linspace(12, 10, 20), np.linspace(10, 15, 20), np.linspace(15, 13.5, 20)
+        ]
+    )
+    segs = [
+        {"kind": "H", "price": 12.0, "idx": 2, "ongoing": False},
+        {"kind": "L", "price": 10.2, "idx": 18, "ongoing": False},
+        {"kind": "H", "price": 14.8, "idx": 38, "ongoing": False},
+        {"kind": "L", "price": 13.6, "idx": 59, "ongoing": True},
+    ]
+    monkeypatch.setattr(bs, "macd_platform_segments", lambda d: segs)
+    r = bs.rally_segment(df)
+    lo, hi = df["low"].to_numpy(), df["high"].to_numpy()
+    assert r["i_low"] == 2 + int(lo[2:39].argmin())  # 前一个平台顶 → H 之间最低价
+    assert r["i_high"] == r["i_low"] + int(
+        hi[r["i_low"] : 60].argmax()
+    )  # 到下一个平台底之间最高价
+    assert r["pullback_bars"] == 59 - r["i_high"]
+    monkeypatch.setattr(bs, "macd_platform_segments", lambda d: segs[:1])
+    assert bs.rally_segment(df) is None  # 没有「L → H」

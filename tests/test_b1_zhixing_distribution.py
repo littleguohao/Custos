@@ -8,6 +8,7 @@ import pandas as pd
 
 from custos.pipeline.screening import enrich_candidates as ec
 from custos.pipeline.screening import score_candidates as sc
+from helpers_rally import fixed_rally  # noqa: F401  v0.591 合成序列无平台点，固定上涨段
 
 
 def make_df(closes, vols=None, opens=None, highs=None, lows=None):
@@ -82,7 +83,7 @@ def test_ignition_miss_on_flat():
 # ---------- 回调缩量企稳 check_pullback_shrink ----------
 
 
-def test_pullback_shrink_hit():
+def test_pullback_shrink_hit(fixed_rally):
     closes = (
         [10.0] * 10
         + [10 + i * 0.33 for i in range(15)]

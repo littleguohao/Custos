@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-import numpy as np
+from custos.core.factors import b1_structure as _bs  # v0.591 上涨段唯一定位
 from custos.core.factors._util import ohlcv_arrays as _ohlcv_arrays
 
 
@@ -48,23 +48,14 @@ WAVE_SECOND_START_GAIN = 15.0  # 待回测参数：二次启动（前一段摆�
 def _find_rally_segment(
     df, lookback: int = WAVE_LOOKBACK
 ) -> Optional[tuple[int, int, int, int]]:
-    """在近 lookback 日内定位"有效启动低点→阶段高点"拉升段。
-
-    返回 (seg_start, i_low, i_high, n)（df 内绝对位置）；找不到返回 None。
-    口径（待回测）：窗口内最低价日为启动低点，其后最高价为阶段高点。
-    """
-    n = len(df)
-    if n < 10:
+    """拉升段 → (seg_start, i_low, i_high, n)；找不到返回 None。
+    v0.591 起委托唯一实现 ``b1_structure.rally_segment``（MACD 平台 N 结构，owner 2026-11-25）；
+    ``seg_start`` 取 max(段左界, n − lookback)，供「二次启动」看段前摆动。🔄 原「窗口最低价 → 其后最高价」停用。"""
+    seg = _bs.rally_segment(df)
+    if seg is None or seg["i_low"] >= seg["n"] - 2:
         return None
-    start = max(0, n - lookback)
-    _, high, low, _ = _ohlcv_arrays(df)
-    i_low = start + int(low[start:].argmin())
-    if i_low >= n - 2:
-        return None
-    i_high = i_low + int(high[i_low:].argmax())
-    if i_high <= i_low:
-        return None
-    return start, i_low, i_high, n
+    n = seg["n"]
+    return min(seg["start"], max(0, n - lookback)), seg["i_low"], seg["i_high"], n
 
 
 def _limit_up_days(close, n: int, code: str = "") -> list[int]:
