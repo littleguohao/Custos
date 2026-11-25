@@ -345,7 +345,7 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 - 08:50：预采集公告、海外行情和RSS候选，不生成正式报告（每日执行；非交易日只跑海外/RSS 发现采集，行情底座不落休市日文件）
 - 09:05：复用08:50采集结果，执行质量门、决策、渲染、校验和投递（每日执行；非交易日出休市版：跳过门控/决策链，沿用最近交易日口径，省略 §4）
 - 14:45：采集尾盘行情，运行严格持仓检查并投递尾盘报告
-- 15:15：单个补数任务先接收入站回复（按**消息发送日**归属登记，|0AMV|>±15% 拒自动登记转人工；「无/有交易」短语外仅剩一个纯数字时按 0AMV），再检查当天 confirmed 且未 superseded 的 0AMV 与成交/no_trades 记录；「有交易」由纯 Python OAuth 直连投资账本 MCP，PC `lastSyncTime` 须覆盖当日 15:00，标准 CSV 缓存后经 `incremental_ledger` 幂等入库，同日不得与券商表格混用；已齐则不提醒不轮询，缺项只提醒一次，随后每 10 分钟接收入站回复并复查，两项收齐立即停止本轮，最多 11 轮至 17:00 截止并留痕。各阶段即时追加 `artifacts/logs/feishu_postclose_reminder.log`，异常留最后步骤。无常驻轮询（0AMV 录入：`market_timing_collector --amv <值>`，录入即确认；超 ±15% 需 `--confirm-extreme` 二次确认）
+- 15:15：单个补数任务先接收入站回复（按**消息发送日**归属登记，|0AMV|>±15% 拒自动登记转人工；「无/有交易」短语外仅剩一个纯数字时按 0AMV），再检查当天 confirmed 且未 superseded 的 0AMV 与成交/no_trades 记录；当日 16:50 前「有交易」只回执等待自动同步（v0.588），16:50 后或跨日补录由纯 Python OAuth 直连投资账本 MCP，PC `lastSyncTime` 须覆盖当日 15:00，标准 CSV 缓存后经 `incremental_ledger` 幂等入库，同日不得与券商表格混用；已齐则不提醒不轮询，缺项只提醒一次，随后每 10 分钟接收入站回复并复查，两项收齐立即停止本轮，最多 11 轮至 17:00 截止并留痕。各阶段即时追加 `artifacts/logs/feishu_postclose_reminder.log`，异常留最后步骤。无常驻轮询（0AMV 录入：`market_timing_collector --amv <值>`，录入即确认；超 ±15% 需 `--confirm-extreme` 二次确认）
 - 16:50：投资账本自动同步（`tzzb_auto_ingest.py`，无聊天、无看板）：先检查交易日，再要求 lastSyncTime 覆盖当日 15:00；有成交才写标准 CSV 并经 incremental_ledger 幂等入库，零成交不写无交易确认，未覆盖收盘只返回 waiting_sync；不能触发 PC 同步，每日插件调用消耗 credits
 - 17:00：主管线前先以独立 420 秒超时子进程检查交易日并补收一次飞书；补收异常记 WARN 和 artifact step，主链仍运行并由既有硬门控判定。随后运行确定性盘后流水线和最终复盘；18:00 独立运行每日选股链
 - 周六 10:07：周度复盘

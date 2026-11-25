@@ -445,9 +445,17 @@ def _assert_trade_source_compatible(day: str, incoming_source: str) -> None:
         )
 
 
+def _wait_for_tzzb_auto_sync(day: str) -> bool:
+    """当日 16:50 前不重复取数，等待自动同步；跨日补录不受此限。"""
+    now = datetime.now(CST)
+    return day == now.date().isoformat() and (now.hour, now.minute) < (16, 50)
+
+
 def _refresh_tzzb_trades(day: str) -> str:
     """飞书「有交易」→ 投资账本标准 CSV → incremental_ledger 唯一入库口。"""
     _assert_trade_source_compatible(day, "tzzb")
+    if _wait_for_tzzb_auto_sync(day):
+        return f"{day} 有交易补数已收到，等待 16:50 自动同步投资账本（不提前取数）"
     csv_path = REPO / "artifacts" / "cache" / "tzzb" / f"{day}_trades.csv"
     fetched = subprocess.run(
         [
@@ -574,8 +582,9 @@ def run(ctx) -> dict:
                 ValueError,
                 subprocess.SubprocessError,
             ) as exc:
+                detail = str(exc).strip().splitlines()[-1][:240]
                 notes.append(
-                    f"投资账本刷新失败（未写台账）：{str(exc)[:300]}；"
+                    f"投资账本刷新失败（未写台账）：{detail}；"
                     "请确认 PC 已同步当日收盘后，再回复「有交易」"
                 )
         if kind in ("amv", "both", "trade_amv") and amv is not None:

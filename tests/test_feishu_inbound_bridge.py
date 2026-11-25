@@ -178,6 +178,36 @@ def test_has_trade_refreshes_tzzb_on_message_day(env, monkeypatch):
     assert not bridge.CONFIRM_PATH.exists()
 
 
+def test_has_trade_before_1650_waits_without_calling_tzzb(env, monkeypatch):
+    class FakeDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 11, 25, 15, 25, tzinfo=tz)
+
+    monkeypatch.setattr(bridge, "datetime", FakeDatetime)
+    monkeypatch.setattr(
+        bridge.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("16:50 前不得调用投资账本")
+        ),
+    )
+    text = bridge._refresh_tzzb_trades("2026-11-25")
+    assert "等待 16:50 自动同步" in text
+    assert "不提前取数" in text
+
+
+def test_has_trade_other_day_does_not_wait_for_1650(env, monkeypatch):
+    class FakeDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 11, 25, 15, 25, tzinfo=tz)
+
+    monkeypatch.setattr(bridge, "datetime", FakeDatetime)
+    assert bridge._wait_for_tzzb_auto_sync("2026-11-24") is False
+    assert bridge._wait_for_tzzb_auto_sync("2026-11-25") is True
+
+
 def test_tzzb_failure_leaves_trade_fact_unwritten_and_notifies(env, monkeypatch):
     ts = _ts_days_ago(0, 16)
 

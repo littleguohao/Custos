@@ -146,6 +146,7 @@ uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 �
 - **16:50 投资账本自动同步**（v0.579）：`automation_214f37e1-33f2-417f-8919-82a7f6b7c79e`
   交易日检查 lastSyncTime，覆盖 15:00 且有成交才走 `incremental_ledger`；零成交不写 no_trades，
   未覆盖仅 waiting_sync。不能触发 PC 同步；每个交易日调用插件消耗 credits，无聊天、无看板。
+  v0.588 起当日 16:50 前飞书「有交易」只回执等待，不提前取数；跨日补录与 16:50 后即时补刷不变。
 
 ## 4. 治理纪律（全部有测试钉着，违反必红）
 
