@@ -43,3 +43,20 @@ def test_v2_miss_when_bar_body_large():
     """owner #42：缩量但 K 线大（实体 ≥4%）不算。"""
     r = ig.check_pullback_shrink_v2(_df(bar_body=0.05), dks_last=12.0)
     assert r["hit"] is False and r["conditions"]["bar_body"] is False
+
+
+def test_v2_hold_dks_or_prev_low_pinned_v0585():
+    """owner 2026-11-25：守住支撑是数值判断，退出人工校准，由本钉测管——DKS 或前一低点守住其一即可。"""
+    df = _df()
+    assert (
+        ig.check_pullback_shrink_v2(df, dks_last=12.0)["conditions"]["hold"] is True
+    )  # 守 DKS
+    assert (
+        ig.check_pullback_shrink_v2(df, dks_last=20.0)["conditions"]["hold"] is True
+    )  # 破 DKS 但守前低（上涨起点 10）
+    low = df.copy()
+    low.loc[low.index[-1], "close"] = 9.5
+    low.loc[low.index[-1], "open"] = 9.5 * 1.005
+    assert (
+        ig.check_pullback_shrink_v2(low, dks_last=20.0)["conditions"]["hold"] is False
+    )  # 两者都破
