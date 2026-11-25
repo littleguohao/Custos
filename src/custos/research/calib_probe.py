@@ -2291,7 +2291,7 @@ function kcDraw(el) {
   ch.createIndicator({ name: 'CVOL', paneId: 'p_vol' });
   const PN = p.panes;  // v0.560：按模块只画指定副图（缺省 = 全画）
   const want = k => !PN || PN.includes(k);
-  if (want('j')) ch.createIndicator({ name: 'CJ', paneId: 'p_j' });
+  if (PN && PN.includes('j')) ch.createIndicator({ name: 'CJ', paneId: 'p_j' });  // v0.582（owner 2026-11-25）：图集默认不画 J，模块显式要才画
   if (want('macd')) ch.createIndicator({ name: 'CMACD', paneId: 'p_macd' });
   if (p.rsi && want('rsi')) ch.createIndicator({ name: 'CRSI', paneId: 'p_rsi' });  // v0.531：RD 校准用
   const ts = d => Date.parse(d + 'T15:00:00+08:00');
