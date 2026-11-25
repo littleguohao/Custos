@@ -29,6 +29,10 @@ from custos.core.code_utils import bare_code as bare  # noqa: E402
 from custos.core.code_utils import finite  # noqa: E402
 from custos.core.code_utils import fnum as optional_finite  # noqa: E402
 from custos.core.fmt import pct_text  # noqa: E402
+from custos.datasource.news.cls_priority import (  # noqa: E402
+    presented_cls_priority,
+    render_cls_article,
+)
 from custos.core.contracts import require  # noqa: E402
 from custos.core.exit_rules import LOSS_REDUCTION_PCT  # noqa: E402  L0，−7% 减仓线唯一来源
 from custos.core.trades.position_plans import load_plans  # noqa: E402  L2，持仓计划影子读取
@@ -196,32 +200,21 @@ def render_news(
     def cell(value) -> str:
         return str(value or "-").replace("|", "／").replace("\n", " ")
 
-    priority = list(news.get("priority_events") or [])
-    if not priority:  # 兼容 v0.586 之前的 digest 形状
-        priority = [
-            row
-            for name in ("信息", "政策", "风向", "舆情")
-            for row in sections.get(name) or []
-            if row.get("cls_priority")
-        ]
+    priority = presented_cls_priority(news)
     priority_titles = {row.get("title") for row in priority}
     if priority:
         lines += [
-            "### 财联社重点栏目（原文摘要＋解读重点）",
+            "### 财联社重点栏目（内容总结＋解读）",
             "",
-            "> 五类栏目优先保留；原文摘要与固定分析口径仅作消息解读，不影响交易权限。",
+            "> 仅展示当日 15:00 后、当日 0905 未收录的文章；总结与规则解读不影响交易权限。",
             "",
-            "| 栏目 | 时间 | 文章与原文摘要 | 解读重点 |",
-            "|---|---|---|---|",
+            "| 栏目 | 时间 | 文章、内容总结与解读 |",
+            "|---|---|---|",
         ]
-        for row in priority[:6]:
-            title = cell(row.get("title"))
-            if row.get("source_url"):
-                title = f"[{title}]({row['source_url']})"
-            summary = cell(row.get("summary"))[:500]
+        for row in priority:
             lines.append(
                 f"| {cell(row.get('cls_priority'))} | {cell(row.get('published_at'))} "
-                f"| {title}<br>{summary} | {cell(row.get('analysis_focus'))} |"
+                f"| {render_cls_article(row)} |"
             )
         lines.append("")
 

@@ -616,6 +616,95 @@ class TestTopicClusters:
         assert article["stocks"] == ["600000.SH"]
         assert "逐篇提炼核心逻辑" in doc["cls_priority_rule"]
 
+    def test_premarket_rebuild_is_capped_at_0900(self, env, monkeypatch):
+        """v0.598：盘后重建 0905 材料也不得混入当天收盘后的文章。"""
+        _positions(env, [])
+        _items(
+            env,
+            _item(title="盘前避雷针", published_at="2026-08-07T08:30:00+08:00"),
+            _item(title="午后收评", published_at="2026-08-07T15:20:00+08:00"),
+        )
+        _run(
+            env,
+            monkeypatch,
+            session="premarket",
+            as_of="2026-08-07T17:00:00+08:00",
+        )
+        doc = self._clusters(env)
+        titles = {x["title"] for x in doc["in_window_brief"]}
+        assert titles == {"盘前避雷针"}
+        assert doc["as_of"] == "2026-08-07T01:00:00+00:00"
+
+    def test_premarket_excludes_previous_1700_presented_article(self, env, monkeypatch):
+        """同一详情页 ID 即使域名不同也排除；只排除前次实际展示的栏目文章。"""
+        post = env / "data" / "news" / "postclose"
+        post.mkdir(parents=True)
+        (post / "2026-08-06_postclose_news_digest.json").write_text(
+            json.dumps(
+                {
+                    "priority_events": [
+                        {
+                            "title": "前日连板股分析",
+                            "source_url": "https://www.cls.cn/detail/100?utm_source=x",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        _positions(env, [])
+        _items(
+            env,
+            _item(
+                title="前日连板股分析",
+                published_at="2026-08-06T16:00:00+08:00",
+                cls_priority="连板股分析",
+                source_url="https://m.cls.cn/detail/100",
+            ),
+            _item(
+                title="当日股市避雷针",
+                published_at="2026-08-07T08:30:00+08:00",
+                cls_priority="盘前避雷针",
+                source_url="https://www.cls.cn/detail/101",
+            ),
+        )
+        _run(env, monkeypatch, as_of="2026-08-07T17:00:00+08:00")
+        doc = self._clusters(env)
+        assert [x["title"] for x in doc["cls_priority_articles"]] == ["当日股市避雷针"]
+        assert doc["cls_priority_previous_postclose_excluded"] == 1
+
+    def test_postclose_window_starts_at_same_day_1500(self, env, monkeypatch):
+        _positions(env, [])
+        _items(
+            env,
+            _item(title="上午已收录", published_at="2026-08-07T08:30:00+08:00"),
+            _item(title="收盘前文章", published_at="2026-08-07T14:59:00+08:00"),
+            _item(title="收盘后文章", published_at="2026-08-07T15:20:00+08:00"),
+        )
+        sel, rep = _run(
+            env,
+            monkeypatch,
+            session="postclose",
+            as_of="2026-08-07T17:00:00+08:00",
+        )
+        assert [x["title"] for x in sel] == ["收盘后文章"]
+        assert rep["window_start"] == "2026-08-07T07:00:00+00:00"
+
+    def test_cls_article_cell_contains_summary_and_rule_interpretation(self):
+        from custos.datasource.news.cls_priority import render_cls_article
+
+        cell = render_cls_article(
+            {
+                "title": "11月25日涨停分析",
+                "summary": "财联社11月25日电，今日全市场共51股涨停。封板率为63%，30股封板未遂。",
+                "cls_priority": "涨停与舆情分析",
+                "source_url": "https://www.cls.cn/detail/2544033",
+            }
+        )
+        assert "**内容总结**：" in cell and "**解读**：" in cell
+        assert "封板率 63%，仍有分歧" in cell
+        assert "舆情热度不等于持续性" in cell
+
     def test_no_theme_match_gives_empty_clusters(self, env, monkeypatch):
         _positions(env, [])
         _items(env, _item(title="国际金价小幅波动", source_url="https://x.com/9"))

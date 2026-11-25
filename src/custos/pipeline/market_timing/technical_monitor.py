@@ -487,9 +487,9 @@ def trend_state(df: pd.DataFrame) -> dict[str, Any]:
 def analyze(df: pd.DataFrame, code: str = "") -> dict[str, Any]:
     """全套技术面分析。
 
-    ``code`` 必须传:涨跌停幅度按代码前缀推断,不传等于让 300/301/688/920 一律按
-    10% 判定,再被 ST 规则(近20日波动 ≤5.2% ⇒ 降为 5%)进一步误降,
-    使 two_medium_large_bull 误触发 B1 第五层止盈(审计 B2)。
+    ``code`` 必须传：v0.590 起涨跌停幅度只看代码前缀；不传会让 300/301/688/920
+    等宽幅品种按默认 10% 判定，可能使 two_medium_large_bull 误触发 B1 第五层止盈。
+    无代码时不再按近 20 日波动推断 ST 5%。
     """
     if df.empty:
         return {"available": False, "error": "no kline data"}

@@ -56,7 +56,7 @@ def _find_rally_segment(
     if seg is None or seg["i_low"] >= seg["n"] - 2:
         return None
     n = seg["n"]
-    return min(seg["start"], max(0, n - lookback)), seg["i_low"], seg["i_high"], n
+    return max(seg["start"], max(0, n - lookback)), seg["i_low"], seg["i_high"], n
 
 
 def _limit_up_days(close, n: int, code: str = "") -> list[int]:

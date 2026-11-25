@@ -86,3 +86,47 @@ def test_priority_event_kept_with_summary_and_focus(monkeypatch, tmp_path):
     assert row["summary"] == "今日全市场涨停与连板结构"
     assert row["analysis_focus"] == "看封板率与焦点股"
     assert row["recommend"] == 1
+
+
+def test_priority_event_excludes_same_day_premarket(monkeypatch, tmp_path):
+    """v0.598：1700 不重复展示 0905 已收录文章，但保留收盘后的新文章。"""
+    rss_dir = tmp_path / "news" / "rss" / "filtered"
+    rss_dir.mkdir(parents=True)
+    morning = {
+        "cls_priority_articles": [
+            {
+                "title": "7月17日股市避雷针",
+                "source_url": "https://www.cls.cn/detail/100",
+            }
+        ]
+    }
+    (rss_dir / "2026-07-17_premarket_rss_topic_clusters.json").write_text(
+        json.dumps(morning), encoding="utf-8"
+    )
+    rows = [
+        {
+            "published_at": "2026-07-17T08:30:00+08:00",
+            "title": "7月17日股市避雷针",
+            "source_name": "财联社-电报快讯",
+            "source_tier": "B",
+            "source_url": "https://m.cls.cn/detail/100",
+            "cls_priority": "盘前避雷针",
+            "summary": "早间已收录",
+        },
+        {
+            "published_at": "2026-07-17T15:20:00+08:00",
+            "title": "7月17日涨停分析",
+            "source_name": "财联社-电报快讯",
+            "source_tier": "B",
+            "source_url": "https://www.cls.cn/detail/101",
+            "cls_priority": "涨停与舆情分析",
+            "summary": "收盘后新增",
+        },
+    ]
+    (rss_dir / "2026-07-17_postclose_rss_candidates.json").write_text(
+        json.dumps(rows, ensure_ascii=False), encoding="utf-8"
+    )
+    result = _run(monkeypatch, tmp_path, [])
+    assert [x["title"] for x in result["priority_events"]] == ["7月17日涨停分析"]
+    assert result["premarket_excluded_count"] == 1
+    assert result["premarket_dedup_articles"] == 1

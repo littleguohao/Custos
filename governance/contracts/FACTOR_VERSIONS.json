@@ -755,8 +755,8 @@
       ]
     },
     "wave_type": {
-      "version": 3,
-      "source_digest": "19eb78124cbebacaa0bd",
+      "version": 4,
+      "source_digest": "fea66378e073a6487007",
       "history": [
         {
           "version": 1,
@@ -777,6 +777,11 @@
           "version": 3,
           "date": "2026-11-25",
           "refactor": "量比分母改调 indicators.vol_ma_prev / vol_ratio 唯一实现（输出逐位不变，快照钉测通过）"
+        },
+        {
+          "version": 4,
+          "date": "2026-11-25",
+          "change": "修复二次启动窗口起点取反：取段左界与近60根起点的较晚者，防止窗口向历史扩张（owner review 2026-11-25）"
         }
       ]
     },

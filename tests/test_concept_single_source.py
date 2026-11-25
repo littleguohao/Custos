@@ -141,7 +141,13 @@ def _files():
 
 
 def _rel(p):
-    return str(p.relative_to(ROOT))
+    # 注册表 / 白名单统一用 POSIX 相对路径；Windows 的 str(Path) 会返回反斜杠。
+    return p.relative_to(ROOT).as_posix()
+
+
+def test_rel_uses_posix_separators_on_every_platform():
+    """v0.597：Windows 也不得把反斜杠带进 REGISTRY / ALLOWED 比较。"""
+    assert _rel(ROOT / "core" / "code_utils.py") == "core/code_utils.py"
 
 
 def _defs():

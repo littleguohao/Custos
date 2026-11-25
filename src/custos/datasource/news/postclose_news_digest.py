@@ -11,6 +11,10 @@ from custos.core.paths import DATA  # noqa: E402
 from custos.core.paths import read_json as load  # noqa: E402
 from custos.core.paths import write_json as dump  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
+from custos.datasource.news.cls_priority import (  # noqa: E402
+    cls_article_key,
+    exclude_presented_cls,
+)
 
 # ⚠️ **必须包限定导入** `news.premarket_intel_schema`。它持有可变的模块级状态
 # （`PREMARKET_DIR`，测试要 monkeypatch）。`src` 与 `src/custos/datasource/news` 都在
@@ -198,8 +202,18 @@ def main():
     )
     # 命名兼容与 daily_report 对齐:带连字符优先、无连字符回退
     intel_path = premarket_intelligence_path(day)
-    rss = load(rss_path, [])
+    raw_rss = load(rss_path, [])
     intel = load_premarket_intelligence(day)
+    morning_path = (
+        DATA / "news" / "rss" / "filtered" / f"{day}_premarket_rss_topic_clusters.json"
+    )
+    morning = load(morning_path, {})
+    morning_articles = morning.get("cls_priority_articles") or []
+    # v0.598：1700 不再展示 0905 已收录的文章；按详情页 ID / URL 去重，不靠标题猜测。
+    morning_keys = {key for row in morning_articles if (key := cls_article_key(row))}
+    # 先去掉盘前已展示项再截断 digest，避免重复文章占用 15 条名额。
+    rss = exclude_presented_cls(raw_rss, morning_articles)
+    premarket_excluded = len(raw_rss) - len(rss)
     events = _collect_events(rss)
     sections = {
         name: [x for x in events if x["category"] == name]
@@ -207,6 +221,9 @@ def main():
     }
     missing = _collect_missing(rss_path, intel_path, intel, sections)
     result = _build_result(day, rss_path, intel_path, intel, sections, events, missing)
+    result["premarket_excluded_count"] = premarket_excluded
+    result["premarket_dedup_articles"] = len(morning_keys)
+    result["sources"].append(str(morning_path))
     require("postclose_news_digest", result)
     dump(DATA / "news" / "postclose" / f"{day}_postclose_news_digest.json", result)
     print(json.dumps(result, ensure_ascii=True))

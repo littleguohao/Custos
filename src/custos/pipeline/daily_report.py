@@ -16,6 +16,7 @@ from custos.pipeline.close_review.holding_structure import n_structure_basis
 from custos.datasource.news.premarket_intel_schema import (
     validate_premarket_intelligence,
 )
+from custos.datasource.news.cls_priority import render_cls_article
 
 from custos.core.paths import DATA, PLANS, REVIEW_DIR, REVIEWS, cn_now, daily_report_dir
 from custos.core.paths import read_json as load
@@ -482,36 +483,34 @@ def _section_market_outlook(outlook: dict[str, Any]) -> list[str]:
 
 
 def _section_cls_priority(articles: list[dict[str, Any]], available: bool) -> list[str]:
-    """§2.4 财联社重点栏目：0905 正式报告的确定性展示层。"""
+    """§2.4 财联社重点栏目：只展示盘前新增文章的内容总结与规则解读。"""
     lines = [
         "",
-        "### 2.4 财联社重点栏目（原文摘要＋解读重点）",
+        "### 2.4 财联社重点栏目（内容总结＋解读）",
         "",
-        "> 五类栏目优先保留；原文摘要与固定分析口径仅作消息解读，不影响交易权限。",
+        "> 仅展示盘前窗口内、上一交易日 1700 未收录的文章；总结与规则解读不影响交易权限。",
         "",
     ]
     if not available:
         lines.append("- 重点栏目材料缺失：当日 `premarket_rss_topic_clusters` 未生成。")
         return lines
     if not articles:
-        lines.append("- 本窗口未检索到五类财联社重点栏目。")
+        lines.append(
+            "- 盘前窗口内无新增财联社重点栏目（已排除上一交易日 1700 收录文章）。"
+        )
         return lines
 
     def cell(value) -> str:
         return clean(value).replace("|", "／").replace("\n", " ")
 
     lines += [
-        "| 栏目 | 时间 | 文章与原文摘要 | 解读重点 |",
-        "|---|---|---|---|",
+        "| 栏目 | 时间 | 文章、内容总结与解读 |",
+        "|---|---|---|",
     ]
     for row in articles:
-        title = cell(row.get("title"))
-        if row.get("source_url"):
-            title = f"[{title}]({row['source_url']})"
-        summary = cell(row.get("summary"))[:500]
         lines.append(
             f"| {cell(row.get('cls_priority'))} | {cell(row.get('published_at'))} "
-            f"| {title}<br>{summary} | {cell(row.get('analysis_focus'))} |"
+            f"| {render_cls_article(row)} |"
         )
     return lines
 

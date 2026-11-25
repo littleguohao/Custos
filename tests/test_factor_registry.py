@@ -759,7 +759,7 @@ class TestCharacterizationSnapshot:
         "sector_mainstream": "2f6b4e2841cc",
         "sector_phase": "3fb204571d9e",
         "volume_detectors": "33ec8965a8ee",  # v0.223…B4 更新（detect 打包门面接管）
-        "wave_type": "fe7d6273bde1",  # v0.591 上涨段统一到 MACD 平台 N 结构（owner 2026-11-25）
+        "wave_type": "c700313d395f",  # v0.597 二次启动窗口边界修复（owner review 2026-11-25）
         "weekly_j": "4e64459f31a6",
     }
 

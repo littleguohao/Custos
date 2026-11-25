@@ -105,6 +105,30 @@ def test_field_value_and_hit_rules():
     assert cp.is_hit("sprint") and cp.is_hit(2) and cp.is_hit(True)
 
 
+def test_trend_shape_wave_type_forwards_code(monkeypatch):
+    """v0.597：校准图集的涨停口径也按股票代码前缀，不能默认全按主板 10%。"""
+    from custos.core.factors import b1_structure as bsm
+    from custos.core.factors import distribution as dm
+    from custos.core.factors import wave_type as wt
+    from custos.pipeline.market_timing import technical_monitor as tm
+    from custos.research import swing_state as sws
+
+    seen = {}
+    monkeypatch.setattr(bsm, "check_one_wave_v3", lambda df: {})
+    monkeypatch.setattr(bsm, "check_one_wave_v4", lambda df: {})
+    monkeypatch.setattr(tm, "analyze", lambda df, code: {})
+    monkeypatch.setattr(dm, "detect_distribution", lambda df, code: {})
+    monkeypatch.setattr(sws, "swing_state", lambda df: {"state": None})
+
+    def fake_wave(df, code=""):
+        seen["code"] = code
+        return {"wave_type": "unknown"}
+
+    monkeypatch.setattr(wt, "detect_wave_type", fake_wave)
+    cp.trend_shape_readings((pd.DataFrame(), pd.DataFrame(), None, "300750"))
+    assert seen["code"] == "300750"
+
+
 def test_bar_pool_respects_spans_and_history():
     bars = {"000001|2014": _df()}
     spans = [("2015-01-01", "2015-12-31")]

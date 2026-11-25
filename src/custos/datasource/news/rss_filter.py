@@ -20,6 +20,10 @@ from custos.core.code_utils import bare_code as bare  # noqa: E402
 from custos.core.runtime_guards import previous_confirmed_trading_day  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 from custos.core import positions_history  # noqa: E402
+from custos.datasource.news.cls_priority import (  # noqa: E402
+    exclude_presented_cls,
+    presented_cls_priority,
+)
 
 LOG = LOGS / "rss"
 CFG = RSS_FILTER_CONFIG_FILE
@@ -442,7 +446,21 @@ def main():
     cutoff = asof - timedelta(hours=hours)
     previous_close_date = None
     if a.session_type == "premarket":
+        # v0.598：盘前材料无论盘后何时重建都截至 09:00，避免混入当日午后文章。
+        premarket_end = (
+            datetime.fromisoformat(a.date + "T09:00:00")
+            .replace(tzinfo=SH)
+            .astimezone(timezone.utc)
+        )
+        asof = min(asof, premarket_end)
         cutoff, previous_close_date = premarket_window(a.date, asof, hours)
+    elif a.session_type == "postclose":
+        # v0.598：盘后报告只看当日 15:00 后的新增材料，不再滚动回看 18 小时。
+        cutoff = (
+            datetime.fromisoformat(a.date + "T15:00:00")
+            .replace(tzinfo=SH)
+            .astimezone(timezone.utc)
+        )
     limit = cfg["limits"][a.session_type]
     per_source_limit = cfg.get("per_source_limits", {}).get(a.session_type, limit)
     names, codes, positions_source = entities(a.date)
@@ -460,6 +478,21 @@ def main():
     ]
     scored.sort(key=_rank_key, reverse=True)
     unique = dedupe(scored)
+    previous_postclose_excluded = 0
+    if a.session_type == "premarket" and previous_close_date:
+        previous_digest = load(
+            DATA
+            / "news"
+            / "postclose"
+            / f"{previous_close_date}_postclose_news_digest.json",
+            {},
+        )
+        # 在候选截断与 LLM 材料组装之前去重，普通消息区也不会重复收录前日 1700 文章。
+        before = len(unique)
+        unique = exclude_presented_cls(unique, presented_cls_priority(previous_digest))
+        previous_postclose_excluded = before - len(unique)
+        if previous_postclose_excluded:
+            excluded["previous_postclose_presented"] = previous_postclose_excluded
     selected = _select(unique, limit, per_source_limit)
     require("rss_candidates", selected)
     out = (
@@ -472,6 +505,9 @@ def main():
     dump(out, selected)
     # 主题×来源聚类 + 窗口内全量清单（v0.256）：0850 LLM 研判层的确定性输入
     clusters_doc = _build_topic_clusters(a.date, a.session_type, asof, cutoff, unique)
+    clusters_doc["cls_priority_previous_postclose_excluded"] = (
+        previous_postclose_excluded
+    )
     require("rss_topic_clusters", clusters_doc)
     cluster_path = (
         DATA

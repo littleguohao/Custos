@@ -30,6 +30,24 @@ def make_df(closes, vols=None, highs=None, lows=None):
 # ---------- wave_type（B1 §四.0 拉升波三分类） ----------
 
 
+@pytest.mark.parametrize("segment_start,want", [(10, 40), (70, 70)])
+def test_wave_segment_start_never_expands_lookback(monkeypatch, segment_start, want):
+    """v0.597：二次启动窗口取段左界与近 60 根起点的较晚者，不向历史扩张。"""
+    from custos.core.factors import wave_type as wt
+
+    monkeypatch.setattr(
+        wt._bs,
+        "rally_segment",
+        lambda df: {
+            "start": segment_start,
+            "i_low": 75,
+            "i_high": 85,
+            "n": 100,
+        },
+    )
+    assert wt._find_rally_segment(make_df([10.0] * 100))[0] == want
+
+
 def test_wave_buildup(fixed_rally):
     # 50 平盘 + 启动放量长阳(+6%, 量2x) + 10日温和上行至13（段涨幅约31%）
     closes = [10.0] * 50 + [10.6] + [10.6 + i * 0.27 for i in range(1, 10)]
