@@ -26,118 +26,95 @@ def frame(lows, highs, closes):
     )
 
 
+def _seg(kind, price, idx, ongoing=False):
+    return {
+        "kind": kind,
+        "price": price,
+        "idx": idx,
+        "date": None,
+        "start": None,
+        "end": None,
+        "ongoing": ongoing,
+    }
+
+
+def _flat(n=60, last=10.0):
+    closes = [10.0] * (n - 1) + [last]
+    return frame([c * 0.99 for c in closes], [c * 1.01 for c in closes], closes)
+
+
 class NStructureTests(unittest.TestCase):
+    """v0.589：上升 / 下降 N 由 MACD 平台点推出（已完成段；owner 2026-11-25 走势唯一底座）。"""
+
+    def setUp(self):
+        from custos.core.factors import b1_structure as bs
+
+        self.bs = bs
+        self._orig = bs.macd_platform_segments
+
+    def tearDown(self):
+        self.bs.macd_platform_segments = self._orig
+
+    def _n(self, segs, df):
+        self.bs.macd_platform_segments = lambda d: segs
+        return n_structure_state(df), self.bs.check_descending_n_structure(df)
+
     def test_completed_rising_n_returns_second_low(self):
-        lows = [11, 10, 9, 8, 7, 8, 9, 10, 11, 10, 9, 8, 9, 10, 11, 12, 13, 14]
-        highs = [12, 11, 10, 9, 8, 9, 10, 11, 13, 12, 11, 10, 11, 12, 14, 15, 16, 17]
-        closes = [
-            11.5,
-            10.5,
-            9.5,
-            8.5,
-            7.5,
-            8.5,
-            9.5,
-            10.5,
-            12.5,
-            11.5,
-            10.5,
-            8.8,
-            10,
-            11,
-            13.5,
-            14.5,
-            15.5,
-            16.5,
+        segs = [
+            _seg("L", 9.0, 30),
+            _seg("H", 11.0, 38),
+            _seg("L", 9.5, 45),
+            _seg("H", 10.5, 59, ongoing=True),
         ]
-        result = n_structure_state(frame(lows, highs, closes), left=2, right=2)
-        self.assertTrue(result["available"])
-        self.assertEqual(result["prior_low"], 7.5)
-        self.assertEqual(result["pullback_low"], 8.8)
-        self.assertEqual(result["breakout_level"], 12.5)
-        self.assertEqual(result["confirmed_date"], "2026-01-15")
+        r, _ = self._n(segs, _flat(last=10.0))
+        self.assertTrue(r["available"])
+        self.assertEqual(
+            (r["prior_low"], r["pullback_low"], r["breakout_level"]), (9.0, 9.5, 11.0)
+        )
+        self.assertEqual(r["status"], "candidate")
 
     def test_lower_second_low_is_not_rising_n(self):
-        lows = [11, 10, 9, 8, 7, 8, 9, 10, 11, 10, 9, 6, 9, 10, 11, 12, 13, 14]
-        highs = [12, 11, 10, 9, 8, 9, 10, 11, 13, 12, 11, 10, 11, 12, 14, 15, 16, 17]
-        closes = [
-            11.5,
-            10.5,
-            9.5,
-            8.5,
-            7.5,
-            8.5,
-            9.5,
-            10.5,
-            12.5,
-            11.5,
-            10.5,
-            7,
-            10,
-            11,
-            13.5,
-            14.5,
-            15.5,
-            16.5,
+        segs = [_seg("L", 9.0, 30), _seg("H", 11.0, 38), _seg("L", 8.5, 45)]
+        r, d = self._n(segs, _flat())
+        self.assertFalse(r["available"])
+
+    def test_ongoing_segment_not_used_as_structure(self):
+        """进行中末段的平台值随价格移动，不当作结构位（避免破位被改写成新低点）。"""
+        segs = [
+            _seg("L", 9.0, 30),
+            _seg("H", 11.0, 38),
+            _seg("L", 9.5, 59, ongoing=True),
         ]
-        self.assertFalse(
-            n_structure_state(frame(lows, highs, closes), left=2, right=2)["available"]
-        )
+        r, _ = self._n(segs, _flat())
+        self.assertFalse(r["available"])
 
     def test_stale_breach_is_marked_stale(self):
-        # 上升N(L1=7.5) 突破后长期跌破 L1 → 破位过久，应标记 stale（不再当作新鲜P0）
-        base = [
-            11.5,
-            10.5,
-            9.5,
-            8.5,
-            7.5,
-            8.5,
-            9.5,
-            10.5,
-            12.5,
-            11.5,
-            10.5,
-            8.8,
-            10,
-            11,
-            13.5,
-        ]
-        closes = base + [7.0] * 16
-        highs = [c + 0.5 for c in closes]
-        lows = [c - 0.5 for c in closes]
-        r = n_structure_state(frame(lows, highs, closes), left=2, right=2)
-        self.assertTrue(r["available"])
-        self.assertAlmostEqual(r["prior_low"], 7.5)
+        closes = [10.0] * 46 + [8.0] * 14  # L2 之后 14 根前跌破 L1=9
+        df = frame([c * 0.99 for c in closes], [c * 1.01 for c in closes], closes)
+        r, _ = self._n(
+            [_seg("L", 9.0, 30), _seg("H", 11.0, 38), _seg("L", 9.5, 45)], df
+        )
         self.assertTrue(r["breached_on_close"])
         self.assertTrue(r["stale"])
         self.assertFalse(r["fresh_breach"])
 
     def test_recent_breach_is_fresh_not_stale(self):
-        base = [
-            11.5,
-            10.5,
-            9.5,
-            8.5,
-            7.5,
-            8.5,
-            9.5,
-            10.5,
-            12.5,
-            11.5,
-            10.5,
-            8.8,
-            10,
-            11,
-            13.5,
-        ]
-        closes = base + [12, 11, 10, 9, 8.5, 8, 7.0, 7.0]  # 最近1-2根才跌破 L1
-        highs = [c + 0.5 for c in closes]
-        lows = [c - 0.5 for c in closes]
-        r = n_structure_state(frame(lows, highs, closes), left=2, right=2)
-        self.assertTrue(r["available"] and r["breached_on_close"])
+        closes = [10.0] * 57 + [8.0] * 3
+        df = frame([c * 0.99 for c in closes], [c * 1.01 for c in closes], closes)
+        r, _ = self._n(
+            [_seg("L", 9.0, 30), _seg("H", 11.0, 38), _seg("L", 9.5, 45)], df
+        )
         self.assertFalse(r["stale"])
         self.assertTrue(r["fresh_breach"])
+
+    def test_descending_n_confirmed_below_structural_low(self):
+        segs = [_seg("H", 12.0, 30), _seg("L", 10.0, 38), _seg("H", 11.0, 45)]
+        _, d = self._n(segs, _flat(last=9.5))
+        self.assertTrue(d["available"])
+        self.assertEqual(
+            (d["prior_high"], d["structural_low"], d["lower_high"]), (12.0, 10.0, 11.0)
+        )
+        self.assertEqual(d["status"], "confirmed")
 
 
 class PriceVolumeTests(unittest.TestCase):
@@ -160,14 +137,6 @@ class PriceVolumeTests(unittest.TestCase):
         result = price_volume_state(df)
         self.assertTrue(result["shrink_small_bear"])
         self.assertFalse(result["heavy_large_bear"])
-
-    def test_unconfirmed_recent_low_is_ignored(self):
-        lows = [11, 10, 9, 8, 7, 8, 9, 10, 11, 10, 9, 8]
-        highs = [12, 11, 10, 9, 8, 9, 10, 11, 13, 12, 11, 10]
-        closes = [11.5, 10.5, 9.5, 8.5, 7.5, 8.5, 9.5, 10.5, 12.5, 11.5, 10.5, 8.8]
-        self.assertFalse(
-            n_structure_state(frame(lows, highs, closes), left=2, right=2)["available"]
-        )
 
 
 if __name__ == "__main__":

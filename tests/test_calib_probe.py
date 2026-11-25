@@ -266,11 +266,14 @@ def test_holding_modules_patch_live_function_defaults():
 
     df = _df(5, n=500)
     with cp.patched(
-        "custos.pipeline.market_timing.technical_monitor",
-        {"N_LOOKBACK": 30, "BOX_SHORT": 10},
+        "custos.core.factors.b1_structure", {"N_LOOKBACK": 30}
+    ):  # v0.589：N 结构唯一实现在因子层
+        an = tm.analyze(df, "600000")
+        assert an["n_structure"].get("lookback", 30) == 30
+    with cp.patched(
+        "custos.pipeline.market_timing.technical_monitor", {"BOX_SHORT": 10}
     ):
         an = tm.analyze(df, "600000")
-        assert (an["n_structure"].get("pivot_window") or {}).get("lookback", 30) == 30
         assert an["box_20d"]["period"] == 10
     assert tm.analyze(df, "600000")["box_20d"]["period"] == 20
 

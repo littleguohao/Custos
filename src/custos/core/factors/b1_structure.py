@@ -37,7 +37,7 @@ from custos.core.factors.wave_type import (
     WAVE_MIN_BARS,
     _find_rally_segment,  # noqa: E402
 )
-from custos.core.indicators import kdj, pct_change  # noqa: E402
+from custos.core.indicators import kdj, macd_series, pct_change  # noqa: E402
 
 FACTOR: dict[str, Any] = {
     "id": "b1_structure",
@@ -511,17 +511,16 @@ OW3_FAST_BARS = 20  # 「20 根左右」
 OW3_HEAVY_PULLBACK = (
     0.9  # 一波流的「A 下」：回调不缩量 = 回调段均量 ≥ 上涨段 0.9 倍（owner 2026-11-17）
 )
-OW3_PIVOT = 3  # N 型结构回踩低点：收盘分型左右各 3 根确认（同 technical_monitor.N_PIVOT_LEFT/RIGHT 口径）
 
 
-def _ow3_n_floor(close, i_low: int, i_high: int) -> tuple[float, int]:
-    """上涨段内最后一个已确认的回踩低点（收盘分型，左右各 OW3_PIVOT 根）；没有则取启动低点收盘。
-    健康拉升要求高点之后收盘不跌破它（上升 N 型结构不破；因子层不得 import technical_monitor，故本地同口径实现）。"""
+def _ow3_n_floor(close, i_low: int, i_high: int, df=None) -> tuple[float, int]:
+    """上涨段内最后一个已完成的 MACD 平台底（v0.589 起同 check_n_structure 的平台点，唯一实现）；没有则取启动低点收盘。
+    健康拉升要求高点之后收盘不跌破它（上升 N 型结构不破）。"""
     floor_i = i_low
-    for t in range(i_low + OW3_PIVOT, i_high - OW3_PIVOT + 1):
-        w = close[t - OW3_PIVOT : t + OW3_PIVOT + 1]
-        if close[t] <= w.min():
-            floor_i = t
+    if df is not None:
+        for sg in macd_platform_segments(df):
+            if sg["kind"] == "L" and not sg["ongoing"] and i_low < sg["idx"] < i_high:
+                floor_i = sg["idx"]
     return float(close[floor_i]), int(floor_i)
 
 
@@ -586,7 +585,7 @@ def check_one_wave_v3(df) -> dict[str, Any]:
     brk = any(
         close[t] < close[i_low] and _v2_vol_up(vol, t) for t in range(i_high + 1, n)
     )
-    n_floor, n_floor_i = _ow3_n_floor(close, i_low, i_high)
+    n_floor, n_floor_i = _ow3_n_floor(close, i_low, i_high, df.reset_index(drop=True))
     n_intact = (
         bool(float(close[i_high + 1 :].min()) >= n_floor) if i_high + 1 < n else True
     )
@@ -694,67 +693,334 @@ def check_one_wave_v4(df) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# 走势三态 v4 候选（owner 2026-11-20：用于选股侧提示；未进 detect / live）
+# MACD 平台 N 结构（owner 2026-11-10 通达信公式转译，v0.507 / v0.512；2026-11-25 定为**全项目走势判断的唯一底座**）
+#   红柱段内阴线最高开盘 = 平台顶 H，绿柱段内阴线最低收盘 = 平台底 L；N 结构抬高 = 上涨、横盘 = 横盘震荡、降低 = 下跌。
+#   走势三态（check_swing_state）、持仓上升 N（check_n_structure）、下降 N（check_descending_n_structure）、
+#   technical_monitor.trend_state 全部由这里推出。🔄 v0.589 停用：走势三态 v4 两段直线拟合（SW4_*）、
+#   technical_monitor 的均线斜率 + 20 日高低点三态、收盘 3 根分型 N 结构（N_PIVOT_*）。
 # ---------------------------------------------------------------------------
-SW4_BARS = 120  # 只看图上显示的 120 根（owner：显示多少根就看多少根）
-SW4_THR = 0.15  # 段内直线涨跌 ≥15% 上涨 / ≤−15% 下跌，其余横盘
-SW4_MIN_HEAD = 20  # 转折点（最高 / 最低点）距图左端至少 20 根
-SW4_MIN_TAIL = 5  # 转折点距当根至少 5 根（B1 前短回落也算一段）
-SW4_SPLIT_RATIO = 0.9  # 两段拟合误差和须 ≤ 整段 0.9 倍才算有转折
-
-_SW4_FULL = {"上涨": "震荡上涨", "横盘": "横盘震荡", "下跌": "震荡下跌"}
+N_LOOKBACK = 90  # 持仓结构位（上升 / 下降 N）只在近 90 根的已完成平台点里找
+N_STALE_BREACH_BARS = 10  # 跌破关键位超过 10 根视为陈旧结构（不再触发新鲜 P0）
+_N_FULL = {"上升": "震荡上涨", "下降": "震荡下跌", "横盘震荡": "横盘震荡"}
+_N_SHORT = {"上升": "上涨", "下降": "下跌", "横盘震荡": "横盘"}
 
 
-def _sw4_line(y) -> tuple[float, float]:
-    import numpy as np  # noqa: PLC0415
-
-    x = np.arange(len(y), dtype=float)
-    slope, icpt = np.polyfit(x, y, 1)
-    return float(slope), float(((slope * x + icpt - y) ** 2).sum())
+def _n_date(x, i: Optional[int]) -> Optional[str]:
+    if i is None or "date" not in x.columns:
+        return None
+    return str(x["date"].iloc[int(i)])[:10]
 
 
-def _sw4_cls(slope: float, n: int) -> str:
-    import math  # noqa: PLC0415
+def macd_platform_segments(df) -> list[dict[str, Any]]:
+    """MACD 红 / 绿柱分段的平台点（**候选定义**，v0.507；owner 2026-11-10 通达信公式转译）。
 
-    ch = math.exp(slope * n) - 1
-    return "上涨" if ch >= SW4_THR else ("下跌" if ch <= -SW4_THR else "横盘")
+    - 分段：连续 ``MACD>0``（红柱）/ ``MACD<0``（绿柱）为一段（MACD = indicators.macd_series 的中式 ×2 柱）；
+      ``MACD==0`` 的根不属任何段。不设最短段长（owner：按公式）。
+    - 红柱段平台顶 = 段内**阴线**（收 < 开）开盘价的最高值；绿柱段平台底 = 段内阴线收盘价的最低值；
+      段内无阴线 ⇒ 该段跳过（owner：跳过）。
+    - as-of：只用截至末根的数据；末段（进行中）的平台值随新 K 线更新，标 ``ongoing``。
+    返回按时间顺序的 ``[{kind: "H"|"L", price, idx, date, start, end, ongoing}]``。"""
+    if df is None or len(df) < 2:
+        return []
+    x = df.reset_index(drop=True)
+    o = x["open"].astype(float).to_numpy()
+    c = x["close"].astype(float).to_numpy()
+    _dif, _dea, hist = macd_series(x["close"])
+    h = hist.to_numpy()
+    n = len(x)
+    out: list[dict[str, Any]] = []
+    i = 0
+    while i < n:
+        sgn = 1 if h[i] > 0 else (-1 if h[i] < 0 else 0)
+        j = i
+        while j + 1 < n and (1 if h[j + 1] > 0 else (-1 if h[j + 1] < 0 else 0)) == sgn:
+            j += 1
+        if sgn != 0:
+            bears = [k for k in range(i, j + 1) if c[k] < o[k]]
+            if bears:
+                if sgn > 0:
+                    k = max(bears, key=lambda t: (o[t], t))
+                    price = float(o[k])
+                else:
+                    k = min(bears, key=lambda t: (c[t], -t))
+                    price = float(c[k])
+                out.append(
+                    {
+                        "kind": "H" if sgn > 0 else "L",
+                        "price": round(price, 4),
+                        "idx": int(k),
+                        "date": _n_date(x, k),
+                        "start": _n_date(x, i),
+                        "end": _n_date(x, j),
+                        "ongoing": bool(j == n - 1),
+                    }
+                )
+        i = j + 1
+    return out
+
+
+def macd_platform_points(
+    segs: list[dict[str, Any]], groups: int = 3
+) -> list[dict[str, Any]]:
+    """往回交替匹配平台点（v0.512，owner 2026-11-11 定：从当根往回、B2、同类合并取极值）。
+
+    从最新的平台点（含进行中末段）往回交替收 L / H；连续同类（中间段无阴线被跳过）合并为一个——
+    L 取更低、H 取更高（并列取较新者）；凑满 ``groups`` 个 L 与 ``groups`` 个 H 即停。
+    返回按时间**从新到旧**的代表点列表（字段同 ``macd_platform_segments``）。"""
+    seq: list[dict[str, Any]] = []
+    for sg in reversed(segs):
+        if seq and seq[-1]["kind"] == sg["kind"]:
+            cur = seq[-1]
+            if (sg["kind"] == "L" and sg["price"] < cur["price"]) or (
+                sg["kind"] == "H" and sg["price"] > cur["price"]
+            ):
+                seq[-1] = sg
+            continue
+        n_l = sum(1 for x in seq if x["kind"] == "L")
+        n_h = len(seq) - n_l
+        if n_l >= groups and n_h >= groups:
+            break
+        seq.append(sg)
+    return seq
+
+
+def _platform_state(l_a: float, l_b: float, h_a: float, h_b: float) -> str:
+    if l_b > l_a and h_b > h_a:
+        return "上升"
+    if l_b < l_a and h_b < h_a:
+        return "下降"
+    return "横盘震荡"
+
+
+def macd_platform_structure(df) -> dict[str, Any]:
+    """MACD 平台结构：往回匹配三组平台点判结构（v0.589 起为全项目走势判断的唯一底座）。
+
+    v0.512（owner 2026-11-11 对图确认「可以对上」）：从当根往回交替匹配 L / H（``macd_platform_points``，
+    同类相邻合并取极值），凑满三组，标号 L1/H1 最早、L3/H3 最新。**最近两组定状态**：L3>L2 且 H3>H2 ⇒ 上升，
+    反之 ⇒ 下降，其余 ⇒ 横盘震荡；**第三组判延续 / 转折**：前一状态 = 同规则作用于 (L1→L2, H1→H2)，
+    ``transition`` = 「延续」或「由<前一状态>转」。（v0.507 原定义 = L、H 各自取最近两个，已被本版取代。）
+    上升结构里收盘 < L3 ⇒ ``breached``；下降结构里收盘 > H3 ⇒ ``reclaimed``；上升 N 的「确认」= L3 之后
+    收盘站上 L3 之前最近的平台顶。平台点含进行中的末段（as-of 当时值）。不足三组 ⇒ ``available=False``。"""
+    segs = macd_platform_segments(df)
+    pts = macd_platform_points(segs, 3)
+    lows = [x for x in pts if x["kind"] == "L"][:3][::-1]  # 旧 → 新
+    highs = [x for x in pts if x["kind"] == "H"][:3][::-1]
+    if len(lows) < 3 or len(highs) < 3:
+        return {
+            "available": False,
+            "reason": "MACD 平台底 / 顶不足三组",
+            "n_lows": len(lows),
+            "n_highs": len(highs),
+        }
+    l1, l2, l3 = lows
+    h1, h2, h3 = highs
+    state = _platform_state(l2["price"], l3["price"], h2["price"], h3["price"])
+    prior = _platform_state(l1["price"], l2["price"], h1["price"], h2["price"])
+    x = df.reset_index(drop=True)
+    close = x["close"].astype(float).to_numpy()
+    cur = float(close[-1])
+    prior_h = [sg for sg in segs if sg["kind"] == "H" and sg["idx"] < l3["idx"]]
+    confirmed = bool(
+        prior_h
+        and any(
+            close[k] > prior_h[-1]["price"] for k in range(l3["idx"] + 1, len(close))
+        )
+    )
+    return {
+        "available": True,
+        "state": state,
+        "prior_state": prior,
+        "transition": "延续" if state == prior else f"由{prior}转",
+        "L1": l1,
+        "L2": l2,
+        "L3": l3,
+        "H1": h1,
+        "H2": h2,
+        "H3": h3,
+        "current_close": round(cur, 4),
+        "confirmed": confirmed if state == "上升" else None,
+        "breached": bool(state == "上升" and cur < l3["price"]),
+        "reclaimed": bool(state == "下降" and cur > h3["price"]),
+        "definition": "macd_platform_v2（往回交替匹配三组，同类合并取极值；最近两组定状态，第三组判延续 / 转折）",
+    }
 
 
 def check_swing_state(df) -> dict[str, Any]:
-    """走势三态 v4（owner 2026-11-20「从整体到局部」）：只看末 ``SW4_BARS`` 根收盘（对数价）。
-
-    整体：转折点只取图上的最高点或最低点（距左端 ≥ ``SW4_MIN_HEAD``、距当根 ≥ ``SW4_MIN_TAIL``），
-    两段直线拟合误差和 ≤ 整段 × ``SW4_SPLIT_RATIO`` 才算转折，否则一段；局部：每段直线涨跌 ±``SW4_THR`` 分三态。
-    结论：一段 / 两段同态 ⇒ 震荡上涨 / 横盘震荡 / 震荡下跌；否则「X 转 Y」（上涨 / 横盘 / 下跌）。
-    参数来源：owner 两份 48 张交叉验证（整条 52/96、后段 72/96；owner 自洽 13/16、14/16）⇒ 候选，须新抽样复验。"""
-    import numpy as np  # noqa: PLC0415
-
-    if df is None or len(df) < SW4_MIN_HEAD + SW4_MIN_TAIL + 10:
-        return {"available": False, "state": None, "turn_bars_ago": None}
-    c = df["close"].astype(float).to_numpy()[-SW4_BARS:]
-    if not np.all(c > 0):
-        return {"available": False, "state": None, "turn_bars_ago": None}
-    y = np.log(c)
-    n = len(y)
-    s_all, e_all = _sw4_line(y)
-    best: Optional[tuple[float, int]] = None
-    for k in {int(np.argmax(c)), int(np.argmin(c))}:
-        if SW4_MIN_HEAD <= k <= n - 1 - SW4_MIN_TAIL:
-            e = _sw4_line(y[: k + 1])[1] + _sw4_line(y[k:])[1]
-            if best is None or e < best[0]:
-                best = (e, k)
-    if best is None or best[0] > SW4_SPLIT_RATIO * e_all:
+    """走势三态（v0.589 起由 MACD 平台 N 结构推出，owner 2026-11-25）：
+    最近两组平台点定当前态（上升 ⇒ 震荡上涨、下降 ⇒ 震荡下跌、其余 ⇒ 横盘震荡）；第三组定前一态，
+    前后不同 ⇒「X 转 Y」（上涨 / 横盘 / 下跌）。``now`` = 当前态全称；``turn_bars_ago`` = 转折（第二组平台点）距当根根数。
+    🔄 v4（v0.557~v0.585，末 120 根两段直线拟合，SW4_*）停用。"""
+    r = (
+        macd_platform_structure(df)
+        if df is not None and len(df) >= 2
+        else {"available": False}
+    )
+    if not r.get("available"):
+        return {
+            "available": False,
+            "state": None,
+            "now": None,
+            "turn_bars_ago": None,
+            "basis": "macd_platform",
+        }
+    st, pr = str(r["state"]), str(r["prior_state"])
+    l2: Any = r["L2"]
+    h2: Any = r["H2"]
+    n = len(df)
+    if st == pr:
         return {
             "available": True,
-            "state": _SW4_FULL[_sw4_cls(s_all, n)],
+            "state": _N_FULL[st],
+            "now": _N_FULL[st],
             "turn_bars_ago": None,
+            "basis": "macd_platform",
         }
-    k = best[1]
-    a = _sw4_cls(_sw4_line(y[: k + 1])[0], k + 1)
-    b = _sw4_cls(_sw4_line(y[k:])[0], n - k)
-    if a == b:
-        return {"available": True, "state": _SW4_FULL[a], "turn_bars_ago": None}
-    return {"available": True, "state": f"{a}转{b}", "turn_bars_ago": int(n - 1 - k)}
+    k = min(int(l2["idx"]), int(h2["idx"]))
+    return {
+        "available": True,
+        "state": f"{_N_SHORT[pr]}转{_N_SHORT[st]}",
+        "now": _N_FULL[st],
+        "turn_bars_ago": int(n - 1 - k),
+        "basis": "macd_platform",
+    }
+
+
+def _n_completed_seq(df) -> list[dict[str, Any]]:
+    """近 N_LOOKBACK 根内**已完成**平台点（进行中末段不算：其平台值随价格移动，会把破位改写成新低点），
+    同类相邻合并取极值（同 macd_platform_points），按时间旧 → 新。"""
+    n = len(df)
+    segs = [
+        s
+        for s in macd_platform_segments(df)
+        if not s["ongoing"] and s["idx"] >= n - N_LOOKBACK
+    ]
+    return macd_platform_points(segs, groups=10**9)[::-1]
+
+
+def _n_breach(
+    close, anchor: int, level: float
+) -> tuple[Optional[int], Optional[int], bool, bool]:
+    """anchor 之后首次收盘跌破 level 的新鲜度 → (first_breach, breach_bars_ago, currently_breached, stale)。"""
+    n = len(close)
+    first = next((t for t in range(anchor + 1, n) if close[t] < level), None)
+    ago = (n - 1 - first) if first is not None else None
+    cur = bool(close[-1] < level)
+    return first, ago, cur, bool(cur and ago is not None and ago > N_STALE_BREACH_BARS)
+
+
+def check_n_structure(df) -> dict[str, Any]:
+    """上升 N（持仓结构位，v0.589 起由 MACD 平台点推出）：最近一组「平台底 L1 → 平台顶 H1 → 更高的平台底 L2」。
+    L1 = 主结构前低（跌破 ⇒ P0 清仓评估），L2 = 回踩低点（跌破 ⇒ P1）；L2 之后收盘站上 H1 ⇒ confirmed。
+    字段同 v0.585 前的收盘分型版（下游持仓状态机不改）。"""
+    if df is None or len(df) < 30:
+        return {"available": False, "reason": "K线数量不足以确认N型结构"}
+    x = df.reset_index(drop=True)
+    close = x["close"].astype(float).to_numpy()
+    low = x["low"].astype(float).to_numpy()
+    seq = _n_completed_seq(x)
+    hit = None
+    for j in range(len(seq) - 1, 1, -1):
+        if (
+            seq[j]["kind"] == "L"
+            and seq[j - 1]["kind"] == "H"
+            and seq[j - 2]["kind"] == "L"
+            and seq[j]["price"] > seq[j - 2]["price"]
+        ):
+            hit = (seq[j - 2], seq[j - 1], seq[j])
+            break
+    if hit is None:
+        return {
+            "available": False,
+            "reason": "未发现已完成的上升N型结构（MACD 平台点）",
+        }
+    p1, ph, p2 = hit
+    l1, h1, l2 = p1["idx"], ph["idx"], p2["idx"]
+    origin_low, swing_high, pullback_low = p1["price"], ph["price"], p2["price"]
+    breakout = next(
+        (t for t in range(l2 + 1, len(close)) if close[t] > swing_high), None
+    )
+    cur = float(close[-1])
+    first, ago, breached, stale = _n_breach(close, l2, origin_low)
+    return {
+        "available": True,
+        "pattern": "L1-H1-higher_L2"
+        + ("-breakout" if breakout is not None else "-candidate"),
+        "status": "confirmed" if breakout is not None else "candidate",
+        "prior_low": round(origin_low, 4),
+        "prior_low_date": _n_date(x, l1),
+        "origin_extreme_low": round(float(low[l1]), 4),
+        "breakout_level": round(swing_high, 4),
+        "breakout_level_date": _n_date(x, h1),
+        "pullback_low": round(pullback_low, 4),
+        "pullback_low_date": _n_date(x, l2),
+        "confirmed_date": _n_date(x, breakout),
+        "current_close": round(cur, 4),
+        "distance_pct": round((cur / origin_low - 1) * 100, 4) if origin_low else None,
+        "close_above": bool(cur >= origin_low),
+        "breached_on_close": breached,
+        "pullback_breached_on_close": bool(cur < pullback_low),
+        "breach_bars_ago": ago,
+        "first_breach_date": _n_date(x, first),
+        "stale": stale,
+        "fresh_breach": bool(breached and not stale),
+        "basis": "macd_platform",
+        "lookback": N_LOOKBACK,
+    }
+
+
+def check_descending_n_structure(df) -> dict[str, Any]:
+    """下降 N（v0.589 起由 MACD 平台点推出）：最近一组「平台顶 H1 → 平台底 L1 → 更低的平台顶 H2」；
+    收盘跌破 L1 ⇒ confirmed（P0）。字段同 v0.585 前的收盘分型版。"""
+    if df is None or len(df) < 30:
+        return {"available": False, "reason": "K线数量不足以确认下降N型结构"}
+    x = df.reset_index(drop=True)
+    close = x["close"].astype(float).to_numpy()
+    high = x["high"].astype(float).to_numpy()
+    seq = _n_completed_seq(x)
+    hit = None
+    for j in range(len(seq) - 1, 1, -1):
+        if (
+            seq[j]["kind"] == "H"
+            and seq[j - 1]["kind"] == "L"
+            and seq[j - 2]["kind"] == "H"
+            and seq[j]["price"] < seq[j - 2]["price"]
+        ):
+            hit = (seq[j - 2], seq[j - 1], seq[j])
+            break
+    if hit is None:
+        return {
+            "available": False,
+            "reason": "未发现已完成的下降N型结构（MACD 平台点）",
+        }
+    p1, pl, p2 = hit
+    h1, l1, h2 = p1["idx"], pl["idx"], p2["idx"]
+    cur = float(close[-1])
+    structural_low = pl["price"]
+    confirmed = bool(cur < structural_low)
+    first, ago, _b, stale = _n_breach(close, h2, structural_low)
+    return {
+        "available": True,
+        "pattern": "H1-L1-lower_H2" + ("-confirmed" if confirmed else "-candidate"),
+        "status": "confirmed" if confirmed else "candidate",
+        "prior_high": round(p1["price"], 4),
+        "prior_high_date": _n_date(x, h1),
+        "origin_extreme_high": round(float(high[h1]), 4),
+        "structural_low": round(structural_low, 4),
+        "structural_low_date": _n_date(x, l1),
+        "lower_high": round(p2["price"], 4),
+        "lower_high_date": _n_date(x, h2),
+        "current_close": round(cur, 4),
+        "distance_to_structural_low_pct": round((cur / structural_low - 1) * 100, 4)
+        if structural_low
+        else None,
+        "below_structural_low": confirmed,
+        "breach_bars_ago": ago,
+        "first_breach_date": _n_date(x, first),
+        "stale": stale,
+        "fresh_breach": bool(confirmed and not stale),
+        "basis": "macd_platform",
+        "lookback": N_LOOKBACK,
+    }
 
 
 def detect(df) -> dict[str, Any]:

@@ -483,8 +483,16 @@ class TestTopWindmill:
         )
         assert r["hit"] is False
 
-    def test_detect_distribution_includes_confirmed_windmill_v062(self):
+    def test_detect_distribution_includes_confirmed_windmill_v062(self, monkeypatch):
         """v0.62 接线：confirmed 大风车进出货信号（watch 级）。"""
+        from custos.core.factors import b1_structure as bs
+
+        # 夹具 MACD 平台点不足；固定顶部区间（走势三态末段上涨），本测只钉大风车接线与 ①v2 同根命中
+        monkeypatch.setattr(
+            bs,
+            "check_swing_state",
+            lambda df: {"available": True, "state": "震荡上涨", "now": "震荡上涨"},
+        )
         r = ec.detect_distribution(self._windmill_df(next_close=15.8), code="600000")
         assert r["signals"]["top_windmill"]["hit"] is True
         assert "top_windmill" in r["hits"]

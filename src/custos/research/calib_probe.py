@@ -37,7 +37,7 @@ from typing import Any, Callable, Iterator, Optional
 MODULES: dict[str, dict[str, Any]] = {
     # 持仓侧大形态（P0H，v0.485）：live 持仓链 technical_monitor.analyze，as-of 长历史帧（1200 根）
     "n_structure": {
-        "defmod": "custos.pipeline.market_timing.technical_monitor",
+        "defmod": "custos.core.factors.b1_structure",  # v0.589：N 结构唯一实现在因子层
         "eval": "technical_monitor",
         "fields": [
             "n_structure.status",
@@ -50,8 +50,6 @@ MODULES: dict[str, dict[str, Any]] = {
             "n_structure_macd.breached",
         ],
         "params": [
-            "N_PIVOT_LEFT",
-            "N_PIVOT_RIGHT",
             "N_LOOKBACK",
             "N_STALE_BREACH_BARS",
         ],
@@ -60,13 +58,9 @@ MODULES: dict[str, dict[str, Any]] = {
         "defmod": "custos.pipeline.market_timing.technical_monitor",
         "eval": "technical_monitor",
         # owner 2026-11-15：20/60 日箱体位置只是收盘与滚动高低分位的比较，退出校准。
+        # v0.589：trend.state 由 MACD 平台 N 结构推出（b1_structure.check_swing_state），均线参数只影响展示，不再扫描
         "fields": ["trend.state"],
-        "params": [
-            "TREND_MA_FAST",
-            "TREND_MA_SLOW",
-            "TREND_FAST_SLOPE_BARS",
-            "TREND_HL_WINDOW",
-        ],
+        "params": [],
     },
     "b1_thresholds": {
         "defmod": "custos.core.b1_thresholds",

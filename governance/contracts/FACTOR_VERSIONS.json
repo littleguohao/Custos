@@ -57,8 +57,8 @@
       ]
     },
     "b1_structure": {
-      "version": 3,
-      "source_digest": "adb88bde9c72930bf7fb",
+      "version": 4,
+      "source_digest": "3fe2bbbacd2b1d80dd86",
       "history": [
         {
           "version": 1,
@@ -109,6 +109,11 @@
           "version": 3,
           "date": "2026-11-23",
           "change": "一波流提醒改用 v4（连续 / ≤10 根 / ≥50%）；detect 加 swing_state，候选表证据列显示走势（owner 2026-11-23）"
+        },
+        {
+          "version": 4,
+          "date": "2026-11-25",
+          "change": "走势三态 / 上升 N / 下降 N 统一由 MACD 平台 N 结构推出（owner 2026-11-25 唯一底座）；停用 SW4 拟合、收盘分型 N、均线三态"
         }
       ]
     },
@@ -652,8 +657,8 @@
       ]
     },
     "technical_monitor": {
-      "version": 2,
-      "source_digest": "f14e0fcaa7dc4880bd24",
+      "version": 3,
+      "source_digest": "5df8130f807be195e162",
       "history": [
         {
           "version": 1,
@@ -679,6 +684,11 @@
           "version": 2,
           "date": "2026-11-11",
           "refactor": "v0.512 MACD 平台结构候选改往回匹配三组（不进 analyze，live 输出不变）"
+        },
+        {
+          "version": 3,
+          "date": "2026-11-25",
+          "change": "趋势三态与上升 / 下降 N 改由 b1_structure 的 MACD 平台 N 结构推出（owner 2026-11-25）"
         }
       ]
     }

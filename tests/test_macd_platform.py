@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""v0.507 MACD 平台结构（owner 2026-11-10 通达信公式转译，候选，不进 live analyze）。"""
+"""MACD 平台结构（owner 2026-11-10 通达信公式转译；v0.589 起实现在 b1_structure，全项目走势唯一底座）。"""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from custos.core.indicators import macd_series
+from custos.core.factors import b1_structure as bs
 from custos.pipeline.market_timing import technical_monitor as tm
 
 
@@ -87,9 +88,18 @@ def test_asof_prefix_consistent():
         assert done == [s for s in full if s["end"] <= done[-1]["end"]][: len(done)]
 
 
-def test_not_in_live_analyze():
-    an = tm.analyze(_wave(), "600000")
-    assert "n_structure_macd" not in an  # 候选不进 live 输出
+def test_live_trend_and_n_from_platform_v0589():
+    """owner 2026-11-25：持仓 analyze 的趋势、上升 N、下降 N 全部由 MACD 平台 N 结构推出（唯一实现）。"""
+    df = _wave()
+    an = tm.analyze(df, "600000")
+    sw = bs.check_swing_state(df)
+    assert (
+        an["trend"]["basis"] == "macd_platform"
+        and an["trend"]["swing_state"] == sw["state"]
+    )
+    assert an["n_structure"] == bs.check_n_structure(df)
+    assert an["descending_n_structure"] == bs.check_descending_n_structure(df)
+    assert tm.macd_platform_structure is bs.macd_platform_structure
 
 
 def _seg(kind, price, idx):
@@ -134,11 +144,11 @@ def test_state_and_transition_from_three_groups_v0512(monkeypatch):
         _seg("L", 9.5, 4),
         _seg("H", 11.5, 5),
     ]
-    monkeypatch.setattr(tm, "macd_platform_segments", lambda df: segs)
+    monkeypatch.setattr(bs, "macd_platform_segments", lambda df: segs)
     df = pd.DataFrame({"close": [10.0] * 8})
     st = tm.macd_platform_structure(df)
     assert st["state"] == "上升" and st["prior_state"] == "下降"
     assert st["transition"] == "由下降转"
     assert [st[k]["price"] for k in ("L1", "L2", "L3")] == [10.0, 9.0, 9.5]
-    monkeypatch.setattr(tm, "macd_platform_segments", lambda df: segs[2:])
+    monkeypatch.setattr(bs, "macd_platform_segments", lambda df: segs[2:])
     assert tm.macd_platform_structure(df)["available"] is False  # 只剩两组
