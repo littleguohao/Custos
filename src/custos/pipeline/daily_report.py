@@ -396,6 +396,17 @@ def _gather_inputs(day: str, cal_day: str) -> dict[str, Any]:
     window = intel.get("window") or {}
     window_start = window.get("start") or f"{prior_day} 15:00"
     window_end = window.get("end") or f"{cal_day} 09:00"
+    # v0.587：重点栏目直接进 0905 正式报告，不依赖 LLM 是否写入情报。
+    cls_priority_path = (
+        DATA
+        / "news"
+        / "rss"
+        / "filtered"
+        / f"{cal_day}_premarket_rss_topic_clusters.json"
+    )
+    cls_priority_articles = (
+        load(cls_priority_path, {}).get("cls_priority_articles") or []
+    )
     # 可审计块（原待办 #29，已实现）：本报告实际读过的输入；盘前情报缺失时也登记为缺失项
     audit_inputs = [
         DATA / "decisions" / f"{day}_chief_decision.json",
@@ -404,6 +415,7 @@ def _gather_inputs(day: str, cal_day: str) -> dict[str, Any]:
         DATA / "holdings" / f"{day}_holding_technical_summary.json",
         intel_path
         or (DATA / "news" / "premarket" / f"{cal_day}_premarket_intelligence.json"),
+        cls_priority_path,
     ]
     return {
         "chief": chief,
@@ -427,6 +439,8 @@ def _gather_inputs(day: str, cal_day: str) -> dict[str, Any]:
             if isinstance(intel.get("market_outlook"), dict)
             else None
         ),
+        "cls_priority_articles": cls_priority_articles,
+        "cls_priority_available": cls_priority_path.exists(),
         "audit_inputs": audit_inputs,
     }
 
@@ -467,11 +481,48 @@ def _section_market_outlook(outlook: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _section_cls_priority(articles: list[dict[str, Any]], available: bool) -> list[str]:
+    """§2.4 财联社重点栏目：0905 正式报告的确定性展示层。"""
+    lines = [
+        "",
+        "### 2.4 财联社重点栏目（原文摘要＋解读重点）",
+        "",
+        "> 五类栏目优先保留；原文摘要与固定分析口径仅作消息解读，不影响交易权限。",
+        "",
+    ]
+    if not available:
+        lines.append("- 重点栏目材料缺失：当日 `premarket_rss_topic_clusters` 未生成。")
+        return lines
+    if not articles:
+        lines.append("- 本窗口未检索到五类财联社重点栏目。")
+        return lines
+
+    def cell(value) -> str:
+        return clean(value).replace("|", "／").replace("\n", " ")
+
+    lines += [
+        "| 栏目 | 时间 | 文章与原文摘要 | 解读重点 |",
+        "|---|---|---|---|",
+    ]
+    for row in articles:
+        title = cell(row.get("title"))
+        if row.get("source_url"):
+            title = f"[{title}]({row['source_url']})"
+        summary = cell(row.get("summary"))[:500]
+        lines.append(
+            f"| {cell(row.get('cls_priority'))} | {cell(row.get('published_at'))} "
+            f"| {title}<br>{summary} | {cell(row.get('analysis_focus'))} |"
+        )
+    return lines
+
+
 def _section_overnight_news(
     market_events: list[dict[str, Any]],
     holding_events: list[dict[str, Any]],
     intel_check: dict[str, Any],
     market_outlook: dict[str, Any] | None = None,
+    cls_priority_articles: list[dict[str, Any]] | None = None,
+    cls_priority_available: bool = False,
 ) -> list[str]:
     """§2 隔夜重大消息与持仓公告。"""
     lines = [
@@ -513,6 +564,8 @@ def _section_overnight_news(
         )
     if market_outlook is not None:
         lines += _section_market_outlook(market_outlook)
+    if cls_priority_articles is not None:
+        lines += _section_cls_priority(cls_priority_articles, cls_priority_available)
     return lines
 
 
@@ -671,6 +724,8 @@ def main():
         inp["holding_events"],
         inp["intel_check"],
         inp["market_outlook"],
+        inp["cls_priority_articles"],
+        inp["cls_priority_available"],
     )
     lines += _section_overseas(inp["market"].get("overseas_market", {}))
     # v0.100（owner）：原 §5（主线题材观察节，口径 TODO #26 待重设计，一直挂着

@@ -377,7 +377,7 @@ market_timing、theme_tracker、portfolio_review、stock_pool、buy_strategy、r
 活动任务 `automation_ff0b95c4-7019-4af7-8892-e40d3499c831`，每日 08:50 以独立后台运行（无聊天窗口、无跨日对话历史），万得插件与模型研判仍按次消耗 credits：
 
 1. `scripts/automation/premarket_pipeline.py collect` 依次执行 `run_0850` 和 `wind_announcement_collector`；后者以固定 Wind 工具逐持仓查询公告，按 CSV 表头解析，任一失败即停且不紧密重试，其余持仓标 `skipped`，材料落 `artifacts/cache/premarket/`。完整公告由脚本把 `files[].content` 按原始 UTF-8 字节落 `artifacts/cache/kimiwork/`（v0.491），不得只信插件声称的附件路径；Windows 下不得二次转换 CRLF。
-2. 模型只读当日 RSS 候选、主题聚类与公告摘要；长公告仅重大风险需要时读完整缓存。财联社按上一交易日 15:00 起分页采集（v0.586，最多 20 页，超出显式失败），防止重点栏目被高频电报挤出最新 100 条。主题聚类产物中的 `cls_priority_articles` 单列五类重点栏目的正文、重要级别、关联股票和固定解读口径，须逐篇提炼核心逻辑、持仓/候选影响及后续验证点。写出情报后必须以 `premarket_pipeline.py validate` 验收，未通过不得报成功；研判不进入交易权限。
+2. 模型只读当日 RSS 候选、主题聚类与公告摘要；长公告仅重大风险需要时读完整缓存。财联社按上一交易日 15:00 起分页采集（v0.586，最多 20 页，超出显式失败），防止重点栏目被高频电报挤出最新 100 条。主题聚类产物中的 `cls_priority_articles` 单列五类重点栏目的正文、重要级别、关联股票和固定解读口径，须逐篇提炼核心逻辑、持仓/候选影响及后续验证点。0905 §2.4 直接渲染这些文章（v0.587），不依赖模型是否写入情报；写出情报后必须以 `premarket_pipeline.py validate` 验收，未通过不得报成功；研判不进入交易权限。
 3. 当日有效情报已存在时返回 `already_completed`，不重复采集、不调用插件、不覆盖文件；人工确需重做才用 `collect --force`。原 08:50 `local_conversation(reuse)` 任务已停用保留，禁止与新任务同时启用。
 
 ### 周度无聊天独立研判（v0.510）

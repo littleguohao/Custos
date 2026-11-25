@@ -193,6 +193,35 @@ class TestHoldingsPlanSection:
         assert "stock_pool_section" not in src, "公式选股备选池随 §5 一并下线"
 
 
+class TestClsPrioritySection:
+    def test_priority_articles_render_in_0905_formal_section(self):
+        lines = dr._section_overnight_news(
+            [],
+            [],
+            {"valid": True, "errors": [], "warnings": []},
+            cls_priority_articles=[
+                {
+                    "published_at": "2026-11-25T08:48:35+08:00",
+                    "title": "11月25日股市避雷针",
+                    "summary": "减持、解禁与 ST 风险原文",
+                    "cls_priority": "盘前避雷针",
+                    "analysis_focus": "逐项映射持仓和候选风险",
+                    "source_url": "https://www.cls.cn/detail/2543561",
+                }
+            ],
+            cls_priority_available=True,
+        )
+        text = "\n".join(lines)
+        assert "### 2.4 财联社重点栏目（原文摘要＋解读重点）" in text
+        assert "11月25日股市避雷针" in text
+        assert "减持、解禁与 ST 风险原文" in text
+        assert "逐项映射持仓和候选风险" in text
+
+    def test_missing_priority_material_is_explicit(self):
+        lines = dr._section_cls_priority([], available=False)
+        assert any("重点栏目材料缺失" in line for line in lines)
+
+
 class TestNonTradingDayReport:
     """--non-trading-day（休市版日报，v0.255 owner）：数据口径回退最近已确认
     交易日、§4 持仓与预案确认整节省略；隔夜情报/海外行情仍按**日历日**取——
