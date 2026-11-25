@@ -38,7 +38,6 @@ def test_simple_numeric_fields_and_their_sensitivity_params_removed():
         ],
         "volume_detectors": [
             "volume_sustain.status",
-            "three_lows.hit",
             "bottom_volume.hit",
         ],
         "macd_technics": [

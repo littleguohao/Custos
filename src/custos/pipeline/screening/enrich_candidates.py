@@ -273,7 +273,10 @@ __all__ = [
 # VOLUME_SUSTAIN_*/LEADER_VOL_*/BOTTOM_*/CZ_MIN_BARS/THREE_LOWS_DRAWDOWN_PCT 随量能族
 # 迁入 factors/volume_detectors.py（常量跟因子走）。
 
-THREE_LOWS_VOL_RATIO = 0.3  # 待回测参数：三低之低量（<250日均量×30%）
+THREE_LOWS_VOL_RATIO = 0.4  # 三低之低量：近 THREE_LOWS_VOL_BARS 根均量 < 250 日均量 × 0.4（owner 2026-11-25，原当根 < 0.3）
+THREE_LOWS_VOL_BARS = (
+    5  # 原文「地量持续萎缩」⇒ 看近 5 根均量而非当根（owner 2026-11-25）
+)
 
 # --- 知行量价（good_b1 图集）与出货五方式 待回测参数 ---
 # v0.86（因子化批 C）：ZX_CROSS_RECENT/IGNITION_*/PULLBACK_* 随点火族迁入
@@ -402,7 +405,8 @@ def _close_ret_pct(df, n: int) -> Optional[float]:
 
 
 def check_three_lows(df) -> dict[str, Any]:
-    """三低（CZ §九/§18.6）：低价格（回撤>=40%）+ 低量（<250日均量×30%）。
+    """三低（CZ §九/§18.6）：低价格（回撤>=40%）+ 持续地量（近 5 根均量 < 250 日均量×0.4，v0.583 owner）。
+    纯数值判定，不做人工校准；第三条「好公司」由候选表与基本面「优」合取，显示「优·三低」，只提醒。
 
     第三维"低关注度"非量价可计算，不输出；财务排雷因数据源未接入暂缓。
     """
@@ -412,7 +416,8 @@ def check_three_lows(df) -> dict[str, Any]:
         return {"hit": False, "available": False}
     vol_ma250 = float(vol[-CZ_MIN_BARS:].mean())
     low_price = dd >= THREE_LOWS_DRAWDOWN_PCT
-    low_vol = bool(vol_ma250 and vol[-1] < vol_ma250 * THREE_LOWS_VOL_RATIO)
+    vol_recent = float(vol[-THREE_LOWS_VOL_BARS:].mean())
+    low_vol = bool(vol_ma250 and vol_recent < vol_ma250 * THREE_LOWS_VOL_RATIO)
     return {
         "hit": bool(low_price and low_vol),
         "available": True,
@@ -425,7 +430,8 @@ def check_three_lows(df) -> dict[str, Any]:
                 "hit": low_vol,
                 "vol_today": float(vol[-1]),
                 "vol_ma250": round(vol_ma250, 2),
-                "vol_ratio_vs_ma250": round(float(vol[-1] / vol_ma250), 3)
+                "vol_recent_mean": round(vol_recent, 2),
+                "vol_ratio_vs_ma250": round(float(vol_recent / vol_ma250), 3)
                 if vol_ma250
                 else None,
             },

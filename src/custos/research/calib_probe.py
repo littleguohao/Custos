@@ -161,10 +161,9 @@ MODULES: dict[str, dict[str, Any]] = {
     },
     "volume_detectors": {
         "defmod": "custos.core.factors.volume_detectors",
-        # 龙头量能只是连续 3 根与滚动最低量比较，退出；其余保留时间序列 / 多条件形态。
+        # 龙头量能只是连续 3 根与滚动最低量比较，退出；三低（v0.583）纯数值退出；其余保留时间序列 / 多条件形态。
         "fields": [
             "volume_sustain.status",
-            "three_lows.hit",
             "bottom_volume.hit",
         ],
         "params": [
@@ -172,7 +171,6 @@ MODULES: dict[str, dict[str, Any]] = {
             "VOLUME_SUSTAIN_MIN_POST_DAYS",
             "VOLUME_SUSTAIN_RATIO",
             "VOLUME_SUSTAIN_RETREAT_DAYS",
-            "THREE_LOWS_DRAWDOWN_PCT",
             "BOTTOM_VOL_RATIO",
             "BOTTOM_NO_NEW_LOW_DAYS",
             "CZ_MIN_BARS",

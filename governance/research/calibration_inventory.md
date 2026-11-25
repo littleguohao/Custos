@@ -270,6 +270,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 - **顶部放量阴线复验二（`top_bear_volume__mining_v2` labels16.csv 24 张，owner 2026-11-24）**：对 19 / 错 5。owner：多根命中「找最近的就行」（#7 改判对）；#11 600505 06-07 owner 看量大于前面阳线（比紧挨的阳线大、比 4 根前的小）。
   v0.577：DIST2_PREV_YANG 5 → 3、DIST2_POS 0.7 → 0.65（#18 次高点 0.69）、只报最近一根。三份共 58 张一致 49 → 51（88%）；剩 #1 000568（owner：后面涨上去的新平台低点，不是次高点；加「之后创新高即失效」会让 #24 变错，未采用）、#11 / #19（量 < 20 日均量 1.5 倍；降到 1.3~1.4 净值变差）等。
 - **顶部放量阴线上 live（v0.578，owner 2026-11-24）**：替换旧 ①②。J<13 样本点（挖掘 B 6,618 个）命中 47.7%（旧 ①② 0.1%）⇒ owner 定只提醒不受限、技术分 −15；风险等级只看 ③~⑥。distribution v2（bump）。
+- **三低（owner 2026-11-25）**：出处 cz/03_entry_methods.md §三「三低买入法」（低价格 / 低量 / 低关注度 + 基本面排雷）。v0.583：低量改为近 5 根均量 < 250 日均量 0.4（原当根 < 0.3；原文「地量持续萎缩」）；与基本面「优」（非三无）合取，候选表基本面列显示「优·三低」，只提醒不计分；低关注度不可量价计算、不做。纯数值，退出人工校准，`volume_detectors__mining_v1` 全部隐藏。J<13 样本点量价两条命中约 4.4%。
 - **纯数值判定退出人工校准（v0.563，owner 2026-11-23）**：MACD 区间（DIF / DEA 是否在 0 轴上 + 柱体放长 / 缩短 / 转绿）只是数值比较，看图只能核实现，改由钉测管四态；`macd_technics__mining_v1` 的 24 张区间图隐藏，MODULES 去掉该字段。
 - **owner 定（2026-11-23）**：一波流 = ①连续 ②快速（几个交易日内）③大幅（≥50%），之后 A 杀或震荡下跌 / 横盘都算，尽力识别；走势只识别买点前最近 1~2 段，尽力识别。
   落地（v0.561）：`b1_structure.check_one_wave_v4`（120 根内 ≤10 根、途中收盘回撤 <10%、最高价较起点最低价 ≥50%），live 提醒改用 v4（风险列「一波流（提醒）」，不否决不计分）；
@@ -423,7 +424,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `volume_detectors` | `VOLUME_SUSTAIN_RETREAT_DAYS` | 3 | 连续N日<峰值55%判撤退（CZ §14.6） | candidate | 未校准 |
 | `volume_detectors` | `LEADER_VOL_BASE_DAYS` | 20 | 龙头量能：连续 3 根与滚动最低量比较 | candidate | 无需 A 类（owner 2026-11-15） |
 | `volume_detectors` | `LEADER_VOL_RATIO` | 1.7 | 龙头量能倍数；纯数值比较 | candidate | 无需 A 类（owner 2026-11-15） |
-| `volume_detectors` | `THREE_LOWS_DRAWDOWN_PCT` | 40.0 | 待回测参数：三低之低价格（自250日高点回撤%） | candidate | 未校准 |
+| `volume_detectors` | `THREE_LOWS_DRAWDOWN_PCT` | 40.0 | 三低之低价格（自250日高点回撤%）；纯数值，钉测管（v0.583） | candidate | 退出人工校准（owner 2026-11-25） |
 | `volume_detectors` | `BOTTOM_VOL_RATIO` | 2.0 | 待回测参数：底部巨量（≥250日均量×2，CZ §14.6） | candidate | 未校准 |
 | `volume_detectors` | `BOTTOM_NO_NEW_LOW_DAYS` | 20 | 待回测参数：不再创新低观察窗口 | candidate | 未校准 |
 | `volume_detectors` | `CZ_MIN_BARS` | 250 | CZ 三低/底部巨量最少K线数（不足→available=false） | candidate | 未校准 |

@@ -515,3 +515,48 @@ def test_unified_table_sorted_by_status_then_score():
         if ln.startswith("| ") and ln.split("|")[1].strip().isdigit()
     ]
     assert order[:6] == ["5", "3", "4", "6", "2", "1"]
+
+
+def test_fundamental_cell_you_three_lows_v0583():
+    """owner 2026-11-25：基本面「优」∧ 三低（回撤 ≥40% + 近 5 根地量）⇒ 基本面列「优·三低」，只提醒。"""
+    from custos.pipeline.screening import candidate_table as ct
+
+    fq = {"tier": "优", "sanwu": False}
+    assert (
+        ct._fq_disp({"fundamental_quality": fq, "three_lows": {"hit": True}})
+        == "优·三低"
+    )
+    assert (
+        ct._fq_disp({"fundamental_quality": fq, "three_lows": {"hit": False}}) == "优"
+    )
+    assert (
+        ct._fq_disp(
+            {"fundamental_quality": {"tier": "中"}, "three_lows": {"hit": True}}
+        )
+        == "中"
+    )
+
+
+def test_three_lows_uses_recent5_mean_v0583():
+    import numpy as np
+    import pandas as pd
+
+    from custos.pipeline.screening import enrich_candidates as ec
+
+    n = 300
+    close = np.r_[np.linspace(20, 20, 50), np.linspace(20, 10, n - 50)]
+    vol = np.full(n, 1000.0)
+    vol[-5:] = 300.0  # 近 5 根均量 0.3 倍 < 0.4
+    df = pd.DataFrame(
+        {
+            "open": close,
+            "high": close * 1.01,
+            "low": close * 0.99,
+            "close": close,
+            "volume": vol,
+        }
+    )
+    assert ec.check_three_lows(df)["hit"] is True
+    vol[-1] = 3000.0  # 当根放量把近 5 根均量拉到 0.84 倍
+    df["volume"] = vol
+    assert ec.check_three_lows(df)["hit"] is False

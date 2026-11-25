@@ -249,7 +249,11 @@ def _mark(value):
 
 def _fq_disp(c):
     fq = c.get("fundamental_quality") or {}
-    return (fq.get("tier", "-") or "-") + ("⚠三无" if fq.get("sanwu") else "")
+    tier = fq.get("tier", "-") or "-"
+    # v0.583（owner 2026-11-25）：好公司（优、非三无）∧ 三低量价（回撤 ≥40% + 近 5 根地量）⇒「优·三低」，只提醒
+    if tier == "优" and not fq.get("sanwu") and (c.get("three_lows") or {}).get("hit"):
+        return "优·三低"
+    return tier + ("⚠三无" if fq.get("sanwu") else "")
 
 
 def _r4_disp(c):

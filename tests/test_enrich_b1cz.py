@@ -207,11 +207,12 @@ def _cz250_df(today_vol, close_now=11.0):
     return make_df(closes, vols=vols)
 
 
-def test_three_lows_hit():
+def test_three_lows_single_low_day_not_enough():
+    """v0.583（owner 2026-11-25）：低量看近 5 根均量；只有当根一天地量不算（持续地量见 test_candidate_table）。"""
     r = ec.check_three_lows(_cz250_df(200.0))
-    assert r["available"] and r["hit"] is True
+    assert r["available"] and r["hit"] is False
     assert r["conditions"]["low_price"]["hit"] is True
-    assert r["conditions"]["low_volume"]["hit"] is True
+    assert r["conditions"]["low_volume"]["hit"] is False
 
 
 def test_three_lows_miss_when_drawdown_shallow():
