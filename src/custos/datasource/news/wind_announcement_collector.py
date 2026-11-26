@@ -28,8 +28,10 @@ def announcement_window(day: str) -> tuple[datetime, datetime]:
         raise RuntimeError(f"无法确定 {day} 的上一交易日")
     start_day = date_from_iso(previous)
     end_day = date_from_iso(day)
+    # v0.602（owner 2026-11-26「补上」）：持仓公告只在 0905 采，1700 不采，所以窗口要首尾相接——
+    # 上一交易日 08:50 → 当日 08:50，盘中与 15:00~17:00 的公告都不漏、也不重复。🔄 v0.599 的「前日 17:00 起」停用。
     return (
-        datetime(start_day.year, start_day.month, start_day.day, 17, 0, tzinfo=CST),
+        datetime(start_day.year, start_day.month, start_day.day, 8, 50, tzinfo=CST),
         datetime(end_day.year, end_day.month, end_day.day, 8, 50, tzinfo=CST),
     )
 

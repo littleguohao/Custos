@@ -755,8 +755,8 @@
       ]
     },
     "wave_type": {
-      "version": 4,
-      "source_digest": "fea66378e073a6487007",
+      "version": 5,
+      "source_digest": "ee65791836f8977edd2c",
       "history": [
         {
           "version": 1,
@@ -782,6 +782,11 @@
           "version": 4,
           "date": "2026-11-25",
           "change": "修复二次启动窗口起点取反：取段左界与近60根起点的较晚者，防止窗口向历史扩张（owner review 2026-11-25）"
+        },
+        {
+          "version": 5,
+          "date": "2026-11-26",
+          "change": "二次启动窗口回到近 60 根（owner 2026-11-26），不随平台点段左界伸缩"
         }
       ]
     },

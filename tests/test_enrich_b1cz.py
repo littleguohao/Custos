@@ -30,9 +30,9 @@ def make_df(closes, vols=None, highs=None, lows=None):
 # ---------- wave_type（B1 §四.0 拉升波三分类） ----------
 
 
-@pytest.mark.parametrize("segment_start,want", [(10, 40), (70, 70)])
+@pytest.mark.parametrize("segment_start,want", [(10, 40), (70, 40)])
 def test_wave_segment_start_never_expands_lookback(monkeypatch, segment_start, want):
-    """v0.597：二次启动窗口取段左界与近 60 根起点的较晚者，不向历史扩张。"""
+    """v0.602（owner 2026-11-26）：二次启动窗口固定为近 60 根，不随平台点段左界向历史扩张、也不收缩。"""
     from custos.core.factors import wave_type as wt
 
     monkeypatch.setattr(

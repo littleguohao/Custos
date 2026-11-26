@@ -456,9 +456,10 @@ def main():
         asof = min(asof, premarket_end)
         cutoff, previous_close_date = premarket_window(a.date, asof, hours)
     elif a.session_type == "postclose":
-        # v0.599：1700 固定为当日 09:30 → 17:00，覆盖盘中新增，晚间重建不扩张。
+        # v0.602（owner 2026-11-26「补上」）：1700 固定为当日 08:50 → 17:00，接住 0905 的结束端，
+        # 08:50~09:30 集合竞价前后不再两边都不收；晚间重建不扩张。🔄 v0.599 的 09:30 起点停用。
         cutoff = (
-            datetime.fromisoformat(a.date + "T09:30:00")
+            datetime.fromisoformat(a.date + "T08:50:00")
             .replace(tzinfo=SH)
             .astimezone(timezone.utc)
         )

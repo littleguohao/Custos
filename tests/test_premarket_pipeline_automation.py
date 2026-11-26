@@ -109,12 +109,12 @@ def test_empty_first_file_shell_falls_through_to_content_file(tmp_path: Path):
 
 
 def test_announcement_window_matches_0905(monkeypatch):
-    """v0.599：持仓公告与 0905 同为前日 17:00 → 当日 08:50。"""
+    """v0.602：持仓公告只在 0905 采，窗口首尾相接：上一交易日 08:50 → 当日 08:50。"""
     monkeypatch.setattr(
         collector, "previous_confirmed_trading_day", lambda day: "2026-11-03"
     )
     start, end = collector.announcement_window("2026-11-04")
-    assert start == collector.datetime(2026, 11, 3, 17, tzinfo=collector.CST)
+    assert start == collector.datetime(2026, 11, 3, 8, 50, tzinfo=collector.CST)
     assert end == collector.datetime(2026, 11, 4, 8, 50, tzinfo=collector.CST)
 
 

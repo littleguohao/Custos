@@ -673,8 +673,8 @@ class TestTopicClusters:
         assert [x["title"] for x in doc["cls_priority_articles"]] == ["当日股市避雷针"]
         assert doc["cls_priority_previous_postclose_excluded"] == 1
 
-    def test_postclose_window_is_0930_to_1700(self, env, monkeypatch):
-        """v0.599：1700 覆盖盘中新增，但排除 09:30 前与 17:00 容差之后的文章。"""
+    def test_postclose_window_is_0850_to_1700(self, env, monkeypatch):
+        """v0.602：1700 从 08:50 接住 0905 的结束端（集合竞价前后不漏），排除 08:50 前与 17:00 容差之后的文章。"""
         _positions(env, [])
         _items(
             env,
@@ -687,8 +687,8 @@ class TestTopicClusters:
                 for i, (title, published) in enumerate(
                     [
                         ("0905已收录", "2026-08-07T08:30:00+08:00"),
-                        ("窗口起点前", "2026-08-07T09:29:00+08:00"),
-                        ("窗口起点", "2026-08-07T09:30:00+08:00"),
+                        ("窗口起点", "2026-08-07T08:50:00+08:00"),
+                        ("集合竞价期间", "2026-08-07T09:15:00+08:00"),
                         ("午盘文章", "2026-08-07T14:59:00+08:00"),
                         ("超过容差", "2026-08-07T17:11:00+08:00"),
                     ]
@@ -701,8 +701,8 @@ class TestTopicClusters:
             session="postclose",
             as_of="2026-08-07T18:00:00+08:00",
         )
-        assert {x["title"] for x in sel} == {"窗口起点", "午盘文章"}
-        assert rep["window_start"] == "2026-08-07T01:30:00+00:00"
+        assert {x["title"] for x in sel} == {"窗口起点", "集合竞价期间", "午盘文章"}
+        assert rep["window_start"] == "2026-08-07T00:50:00+00:00"
         assert rep["as_of"] == "2026-08-07T09:00:00+00:00"
 
     def test_cls_article_cell_is_link_only(self):
