@@ -787,3 +787,12 @@ def test_trend_shape_chart_only_kline_and_volume(tmp_path):
 def test_macd_gallery_hides_j_pane():
     """owner 2026-11-23：MACD 图集只画 K 线 / 量 / MACD。"""
     assert cp.MODULES["macd_technics"]["chart_panes"] == ["vol", "macd"]
+
+
+def test_stairstep_module_and_zx_overlay_v0601():
+    """owner 2026-11-26：阶梯放量 ③ 校准图集；主图叠加 QSX / DKS（chart_panes 含 zx 才画）。"""
+    assert cp.MODULES["stairstep"]["fields"] == ["stairstep.hit"]
+    assert "zx" in cp.MODULES["stairstep"]["chart_panes"]
+    pay = cp.chart_payload(_df(1), "t")
+    assert len(pay["qsx"]) == len(pay["close"]) == len(pay["dks"])
+    assert "PN.includes('zx')" in cp._KC_RENDER

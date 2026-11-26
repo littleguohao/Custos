@@ -181,6 +181,13 @@ MODULES: dict[str, dict[str, Any]] = {
             "DIST2_POS",
         ],
     },
+    "stairstep": {  # 出货 ③ 阶梯放量跌破趋势线（owner 2026-11-26 要校准；live 单项 = 出货观察 −10）
+        "defmod": "custos.core.factors.distribution",
+        "eval": "stairstep",
+        "chart_panes": ["vol", "zx"],  # 主图叠加 QSX（蓝）/ DKS（橙），跌破看得见
+        "fields": ["stairstep.hit"],
+        "params": ["DIST_RECENT", "DIST_STAIR_MIN_BARS", "DIST_STAIR_BREAK_VR"],
+    },
     "pullback_v2": {  # 回调缩量企稳 v2 候选（owner 2026-11-25）
         "defmod": "custos.core.factors.ignition",
         "eval": "pullback_v2",
@@ -469,6 +476,16 @@ def evaluate(
             an = {
                 "top_bear_volume": dsm.check_top_bear_volume(df.reset_index(drop=True))
             }
+        return {f: field_value(an, f) for f in fields}
+    if spec is not None and spec["eval"] == "stairstep":
+        from custos.core.factors import distribution as dsm  # noqa: PLC0415
+
+        with patched(defmod, overrides):
+            r = dsm.detect_distribution(df.reset_index(drop=True), code)
+        an = {
+            "stairstep": (r.get("signals") or {}).get("stairstep_vol_decline")
+            or {"hit": None}
+        }
         return {f: field_value(an, f) for f in fields}
     if spec is not None and spec["eval"] == "pullback_v2":
         from custos.core.factors import ignition as igm  # noqa: PLC0415
@@ -1321,6 +1338,7 @@ def _csv_rows(rep: dict[str, Any], frames: dict) -> list[list[Any]]:
 FIELD_DEF: dict[str, str] = {
     "top_bear_volume.hit": "顶部 / 次高点放量阴线（出货 ①② v2）：近 60 根内，顶部或次高点（最高价分型、≥ 近 60 根最高 7 成）前后 2 根内出现阴线，量大于前 5 根里最大的阳线量、≥ 20 日均量 1.5 倍、≥ 前 60 根最大量 0.6 倍。假阴真阳（收低于开、高于前收）只在顶部区间算阴量。图上标高点与阴线",
     "base_volume.l1": "底部放量 ⭐（单根放量阳线）：近 20 根内，从阶段低点（前 20 根最低收盘）起 5 根内出现一根放量上涨 K（量 ≥ 前 5 日均量 1.5 倍、涨 ≥3%，阳线或假阴真阳），且没有更强的放量。评价的是量能状态，当根形态不管。图上标阶段低点与放量 K",
+    "stairstep.hit": "出货 ③ 阶梯放量跌破趋势线：最近 5 根里有一根收盘跌破 QSX（蓝线）且量 ≥ 前 5 日均量 1.2 倍，或收盘跌破 DKS（橙线，平量也算），并且这一根往前连着 ≥3 根阴线（含这根）。图上紫线标连阴段与跌破的那根",
     "pullback_v2.hit": "回调缩量企稳 v2：近 30 根高点之后回调 ≥3%，回调段的量一路缩（后 1/3 均量 ≤ 前 1/3 的 0.75），当根不放量（阴线 < 前 5 日均量 0.9、阳线 < 1.5），当根实体 < 4%。只判回调的量和当根 K 线；「收盘守住 DKS 或前一回踩低点」是数值判断，由钉测管，不用看。图上标高点与前一低点",
     "base_volume.l2": "底部放量 ⭐⭐（连续放量）：近 20 根内、下跌之后的阶段底部（放量前走势三态有下跌段、最后一段不是上涨），连续 3 根量都 ≥ 之前 20 根最低日量 1.7 倍，且没有巨量。当根形态不管。图上标底部低点与放量 K",
     "base_volume.l3": "底部放量 ⭐⭐⭐（巨量）：近 20 根内、下跌之后的阶段底部（同上），出现一根量 ≥ 近 250 根均量 2 倍的巨量。当根形态不管。图上标底部低点与放量 K",
@@ -2019,7 +2037,7 @@ def _rsi14(df: Any) -> Any:
 
 def chart_payload(df: Any, title: str) -> dict[str, Any]:
     """终端标注用的紧凑图数据（v0.503）：末 TERM_BARS 根 OHLCV + J + MACD，只到 as-of 当根。"""
-    from custos.core.indicators import j_series, macd_series  # noqa: PLC0415
+    from custos.core.indicators import dks_series, j_series, macd_series, qsx_series  # noqa: PLC0415
 
     t = df.tail(
         CHART_BARS
@@ -2037,6 +2055,15 @@ def chart_payload(df: Any, title: str) -> dict[str, Any]:
         "dif": r(dif),
         "dea": r(dea),
         "hist": r(hist),
+        # v0.601：知行趋势线（主图叠加，chart_panes 含 "zx" 才画）
+        "qsx": [
+            None if x != x else round(float(x), 4)
+            for x in qsx_series(df["close"]).tail(CHART_BARS)
+        ],
+        "dks": [
+            None if x != x else round(float(x), 4)
+            for x in dks_series(df["close"]).tail(CHART_BARS)
+        ],
         # v0.531：RSI14（indicators.rsi 单源）——RD 校准图集画 RSI 窗格
         "rsi": [
             None if x != x else round(float(x), 4) for x in _rsi14(df).tail(CHART_BARS)
@@ -2258,6 +2285,12 @@ klinecharts.registerIndicator({
   calc: l => l.map(d => ({ r: nz(d.rsi), l25: 25 }))
 });
 klinecharts.registerIndicator({
+  name: 'CZX', shortName: '知行', precision: 2,
+  figures: [{ key: 'q', title: 'QSX(白线): ', type: 'line', styles: () => ({ color: '#1E63D6', size: 2 }) },
+            { key: 'k', title: 'DKS(黄线): ', type: 'line', styles: () => ({ color: '#F08C00', size: 2 }) }],
+  calc: l => l.map(d => ({ q: nz(d.qsx), k: nz(d.dks) }))
+});
+klinecharts.registerIndicator({
   name: 'CMACD', shortName: 'MACD', precision: 3,
   figures: [
     { key: 'dif', title: 'DIF: ', type: 'line' }, { key: 'dea', title: 'DEA: ', type: 'line' },
@@ -2268,7 +2301,7 @@ klinecharts.registerIndicator({
 function kcBars(p) {
   return p.dates.map((d, i) => ({ timestamp: Date.parse(d + 'T15:00:00+08:00'), open: p.open[i], high: p.high[i],
     low: p.low[i], close: p.close[i], volume: p.volume[i], j: p.j[i], dif: p.dif[i], dea: p.dea[i], hist: p.hist[i],
-    rsi: p.rsi ? p.rsi[i] : null }));
+    rsi: p.rsi ? p.rsi[i] : null, qsx: p.qsx ? p.qsx[i] : null, dks: p.dks ? p.dks[i] : null }));
 }
 function kcReveal(id) {
   const el = document.querySelector("div.s[data-id='" + id + "']"), p = KC[id];
@@ -2306,6 +2339,7 @@ function kcDraw(el) {
   if (PN && PN.includes('j')) ch.createIndicator({ name: 'CJ', paneId: 'p_j' });  // v0.582（owner 2026-11-25）：图集默认不画 J，模块显式要才画
   if (want('macd')) ch.createIndicator({ name: 'CMACD', paneId: 'p_macd' });
   if (p.rsi && want('rsi')) ch.createIndicator({ name: 'CRSI', paneId: 'p_rsi' });  // v0.531：RD 校准用
+  if (PN && PN.includes('zx') && p.qsx) ch.createIndicator({ name: 'CZX', paneId: 'candle_pane' }, true);  // v0.601：主图叠加 QSX / DKS
   const ts = d => Date.parse(d + 'T15:00:00+08:00');
   const first = bars[0].timestamp;
   (p.marks || []).forEach(m => {
@@ -2432,6 +2466,38 @@ def top_bear_marks(df: Any) -> list[dict[str, Any]]:
         }
         for b in (r.get("bars") or [])
         if b["i"] >= first_i
+    ]
+
+
+def stairstep_marks(df: Any) -> list[dict[str, Any]]:
+    """阶梯放量：连阴段起点 → 跌破那根，价位 = 跌破那根的趋势线（QSX 或 DKS）。"""
+    from custos.core.factors import distribution as dsm  # noqa: PLC0415
+    from custos.core.indicators import dks_series, qsx_series  # noqa: PLC0415
+
+    d0 = df.reset_index(drop=True)
+    det = (
+        (dsm.detect_distribution(d0).get("signals") or {}).get("stairstep_vol_decline")
+        or {}
+    ).get("detail")
+    if not det:
+        return []
+    ds = [str(x)[:10] for x in df["date"]]
+    t = len(d0) - 1 - int(det["bars_ago"])
+    a = t - int(det["consecutive_bears"]) + 1
+    line = (qsx_series if det["below"] == "qsx" else dks_series)(d0["close"]).to_numpy()
+    nm = "QSX" if det["below"] == "qsx" else "DKS"
+    vr = det.get("vol_ratio5")
+    return [
+        {
+            "kind": "M",
+            "price": round(float(line[t]), 2),
+            "date": ds[t],
+            "start": ds[max(a, 0)],
+            "end": ds[t],
+            "label": f"连阴{det['consecutive_bears']}根·跌破{nm}"
+            + (f"（量比{vr}）" if vr else ""),
+            "ongoing": False,
+        }
     ]
 
 
@@ -2613,7 +2679,11 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
                                         else (
                                             pullback_v2_marks(fr[1])
                                             if rep["module"] == "pullback_v2"
-                                            else []
+                                            else (
+                                                stairstep_marks(fr[1])
+                                                if rep["module"] == "stairstep"
+                                                else []
+                                            )
                                         )
                                     )
                                 )
