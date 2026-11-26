@@ -39,15 +39,16 @@ MODULES: dict[str, dict[str, Any]] = {
     "n_structure": {
         "defmod": "custos.core.factors.b1_structure",  # v0.589：N 结构唯一实现在因子层
         "eval": "technical_monitor",
+        "chart_panes": [
+            "vol",
+            "macd",
+        ],  # v0.603：平台点来自 MACD 红 / 绿柱段，图上看得见
+        # v0.603：N 结构已由 MACD 平台点推出；问「有没有上升 N」与两个 P0 触发（新鲜跌破 L1 / 下降 N 确认）。
+        # n_structure_macd.* 并排对照已无意义（与走势三态同一实现），去掉。
         "fields": [
-            "n_structure.status",
+            "n_structure.available",
             "n_structure.fresh_breach",
-            "descending_n_structure.status",
             "descending_n_structure.fresh_breach",
-            # v0.507 候选：MACD 平台结构（owner 通达信公式转译；只在探针里并排，不进 live analyze）
-            "n_structure_macd.state",
-            "n_structure_macd.transition",
-            "n_structure_macd.breached",
         ],
         "params": [
             "N_LOOKBACK",
@@ -179,6 +180,36 @@ MODULES: dict[str, dict[str, Any]] = {
             "DIST2_MAX60",
             "DIST2_SEG_TAIL",
             "DIST2_POS",
+        ],
+    },
+    "wave_sprint": {  # v0.603 冲刺波（live 否决：冲刺波后首个 B1 封顶 B）
+        "defmod": "custos.core.factors.wave_type",
+        "eval": "wave_sprint",
+        "chart_panes": ["vol"],
+        "fields": ["wave_sprint.hit"],
+        "params": [
+            "WAVE_SPRINT_WINDOW",
+            "WAVE_SPRINT_MIN_LIMIT_UPS",
+            "WAVE_ACCEL_10D_GAIN",
+            "WAVE_TOP_VOL_RATIO",
+        ],
+    },
+    "dist_more": {  # v0.603 出货 ④ 双头 / ⑤ 顶部绿肥红瘦 / ⑥ 顶部大风车（与 ③ 合计 ≥2 项 = 出货高，否决）
+        "defmod": "custos.core.factors.distribution",
+        "eval": "dist_more",
+        "chart_panes": ["vol"],
+        "fields": [
+            "dist_more.double_top",
+            "dist_more.green_heavy",
+            "dist_more.windmill",
+        ],
+        "params": [
+            "DIST_DOUBLE_TOP_WIN",
+            "DIST_DOUBLE_TOP_TOL",
+            "DIST_TOP_WINDOW",
+            "DIST_WINDMILL_SHADOW_BODY",
+            "DIST_WINDMILL_RANGE_PCT",
+            "DIST_WINDMILL_VOL_RATIO",
         ],
     },
     "stairstep": {  # 出货 ③ 阶梯放量跌破趋势线（owner 2026-11-26 要校准；live 单项 = 出货观察 −10）
@@ -442,8 +473,6 @@ def evaluate(
         with patched(defmod, overrides):
             dfl = df_long.reset_index(drop=True)
             an = tm.analyze(dfl, code)
-            if any(f.startswith("n_structure_macd.") for f in fields):
-                an["n_structure_macd"] = tm.macd_platform_structure(dfl)
             return {f: field_value(an, f) for f in fields}
     if spec is not None and spec["eval"] == "signal":
         from custos.pipeline.screening import signal_labels as sl  # noqa: PLC0415
@@ -477,6 +506,32 @@ def evaluate(
                 "top_bear_volume": dsm.check_top_bear_volume(df.reset_index(drop=True))
             }
         return {f: field_value(an, f) for f in fields}
+    if spec is not None and spec["eval"] == "wave_sprint":
+        from custos.core.factors import wave_type as wtm  # noqa: PLC0415
+
+        with patched(defmod, overrides):
+            w = wtm.detect_wave_type(df.reset_index(drop=True), code)
+        hit = None if not w.get("available") else w.get("wave_type") == "sprint"
+        return {f: hit for f in fields}
+    if spec is not None and spec["eval"] == "dist_more":
+        from custos.core.factors import distribution as dsm  # noqa: PLC0415
+
+        with patched(defmod, overrides):
+            r = dsm.detect_distribution(df.reset_index(drop=True), code)
+        sg = r.get("signals") or {}
+        key = {
+            "double_top": "double_top_vol_bear",
+            "green_heavy": "top_green_heavy_red_light",
+            "windmill": "top_windmill",
+        }
+        return {
+            f: (
+                None
+                if not r.get("available")
+                else bool((sg.get(key[f.split(".")[1]]) or {}).get("hit"))
+            )
+            for f in fields
+        }
     if spec is not None and spec["eval"] == "stairstep":
         from custos.core.factors import distribution as dsm  # noqa: PLC0415
 
@@ -1338,6 +1393,13 @@ def _csv_rows(rep: dict[str, Any], frames: dict) -> list[list[Any]]:
 FIELD_DEF: dict[str, str] = {
     "top_bear_volume.hit": "顶部 / 次高点放量阴线（出货 ①② v2）：近 60 根内，顶部或次高点（最高价分型、≥ 近 60 根最高 7 成）前后 2 根内出现阴线，量大于前 5 根里最大的阳线量、≥ 20 日均量 1.5 倍、≥ 前 60 根最大量 0.6 倍。假阴真阳（收低于开、高于前收）只在顶部区间算阴量。图上标高点与阴线",
     "base_volume.l1": "底部放量 ⭐（单根放量阳线）：近 20 根内，从阶段低点（前 20 根最低收盘）起 5 根内出现一根放量上涨 K（量 ≥ 前 5 日均量 1.5 倍、涨 ≥3%，阳线或假阴真阳），且没有更强的放量。评价的是量能状态，当根形态不管。图上标阶段低点与放量 K",
+    "n_structure.available": "持仓上升 N 结构（v0.589 起由 MACD 平台点推出）：近 90 根里有一组「平台底 L1 → 平台顶 H1 → 更高的平台底 L2」。图上标 L1 / H1 / L2；L1 是 P0 清仓位、L2 是 P1 位。请判：这里有没有一个上升 N？L1 / L2 标得对不对",
+    "n_structure.fresh_breach": "上升 N 新鲜跌破 L1（持仓 P0 清仓评估）：收盘跌破 L1，且首次跌破在 10 根以内。图上标 L1 / H1 / L2。请判：这是不是该清仓评估的结构破位",
+    "descending_n_structure.fresh_breach": "下降 N 确认（持仓 P0 清仓评估）：近 90 根里有「平台顶 H1 → 平台底 L1 → 更低的平台顶 H2」，收盘跌破 L1 且在 10 根以内。图上标 H1 / L1 / H2。请判：是不是下降 N 确认",
+    "wave_sprint.hit": "冲刺波（live 否决：冲刺波之后的第一个 B1 封顶 B）：上涨段（MACD 平台 N 结构定位）里，近 20 根 ≥2 个涨停（按代码前缀限幅）、段内最大 10 日涨幅 ≥25%、高点那天量 ≥ 前 5 日均量 1.5 倍。图上标上涨段与读数。请判：前面这段是不是冲刺波",
+    "dist_more.double_top": "出货 ④ 双头双巨阴：近 60 根里最近的平台顶与它之前最高的平台顶相差 ≤3%，两个顶所在红柱段到其后 2 根内都出现放量阴（量 ≥ 前 5 日均量 1.5 倍）。图上标两个顶",
+    "dist_more.green_heavy": "出货 ⑤ 顶部绿肥红瘦：最近 10 根在近 60 根高点 98% 以内（顶部），且阴线实体均值 > 阳线实体均值、阴线均量 > 阳线均量。图上标顶部 10 根与读数",
+    "dist_more.windmill": "出货 ⑥ 顶部大风车：高位（≥ 近 60 根最高 93%）出现长上影（上影 ≥ 实体）或宽幅震荡（振幅 ≥7%）的天量 K（量 ≥ 前 20 日中位数 1.5 倍），次日没有反包（收盘没收复实体上沿）。图上标那根 K",
     "stairstep.hit": "出货 ③ 阶梯放量跌破趋势线：最近 5 根里有一根收盘跌破 QSX（蓝线）且量 ≥ 前 5 日均量 1.2 倍，或收盘跌破 DKS（橙线，平量也算），并且这一根往前连着 ≥3 根阴线（含这根）。图上紫线标连阴段与跌破的那根",
     "pullback_v2.hit": "回调缩量企稳 v2：近 30 根高点之后回调 ≥3%，回调段的量一路缩（后 1/3 均量 ≤ 前 1/3 的 0.75），当根不放量（阴线 < 前 5 日均量 0.9、阳线 < 1.5），当根实体 < 4%。只判回调的量和当根 K 线；「收盘守住 DKS 或前一回踩低点」是数值判断，由钉测管，不用看。图上标高点与前一低点",
     "base_volume.l2": "底部放量 ⭐⭐（连续放量）：近 20 根内、下跌之后的阶段底部（放量前走势三态有下跌段、最后一段不是上涨），连续 3 根量都 ≥ 之前 20 根最低日量 1.7 倍，且没有巨量。当根形态不管。图上标底部低点与放量 K",
@@ -2370,7 +2432,20 @@ document.querySelectorAll('div.s').forEach(el => kcObs.observe(el));
 
 
 #: 图集上画 MACD 平台线（L1 / L2 / H1 / H2）的模块（v0.507）
-_MARK_MODULES = frozenset({"n_structure", "trend_box"})
+_MARK_MODULES = frozenset(
+    {"trend_box"}
+)  # v0.603：n_structure 改标 L1 / H1 / L2（见 _EXTRA_MARKS）
+_EXTRA_MARKS = frozenset({"n_structure", "wave_sprint", "dist_more"})
+
+
+def _extra_marks(
+    module: str, df: Any, field: str, code: str = ""
+) -> list[dict[str, Any]]:
+    if module == "n_structure":
+        return n_structure_marks(df, field)
+    if module == "wave_sprint":
+        return wave_sprint_marks(df, code)
+    return dist_more_marks(df, field, code)
 
 
 def platform_marks(df: Any) -> list[dict[str, Any]]:
@@ -2467,6 +2542,99 @@ def top_bear_marks(df: Any) -> list[dict[str, Any]]:
         for b in (r.get("bars") or [])
         if b["i"] >= first_i
     ]
+
+
+def _mk(ds, price, a, b, label) -> dict[str, Any]:
+    return {
+        "kind": "M",
+        "price": round(float(price), 2),
+        "date": ds[b],
+        "start": ds[max(a, 0)],
+        "end": ds[b],
+        "label": label,
+        "ongoing": False,
+    }
+
+
+def n_structure_marks(df: Any, field: str) -> list[dict[str, Any]]:
+    """持仓 N 结构：上升 N 标 L1 / H1 / L2，下降 N 标 H1 / L1 / H2（价位 = 平台点价）。"""
+    from custos.core.factors import b1_structure as bsm  # noqa: PLC0415
+
+    d0 = df.reset_index(drop=True)
+    ds = [str(x)[:10] for x in df["date"]]
+    n = len(d0)
+    idx = {x: i for i, x in enumerate(ds)}
+    if field.startswith("descending"):
+        r = bsm.check_descending_n_structure(d0)
+        trio = [
+            ("prior_high", "prior_high_date", "H1"),
+            ("structural_low", "structural_low_date", "L1（P0）"),
+            ("lower_high", "lower_high_date", "H2"),
+        ]
+    else:
+        r = bsm.check_n_structure(d0)
+        trio = [
+            ("prior_low", "prior_low_date", "L1（P0）"),
+            ("breakout_level", "breakout_level_date", "H1"),
+            ("pullback_low", "pullback_low_date", "L2（P1）"),
+        ]
+    if not r.get("available"):
+        return []
+    return [
+        _mk(ds, r[k], idx.get(r[dk], n - 1), n - 1, nm)
+        for k, dk, nm in trio
+        if r.get(dk) in idx
+    ]
+
+
+def wave_sprint_marks(df: Any, code: str = "") -> list[dict[str, Any]]:
+    """冲刺波：上涨段起点 → 高点，价位 = 高点最高价，标涨停次数 / 最大 10 日涨幅 / 高点量比。"""
+    from custos.core.factors import wave_type as wtm  # noqa: PLC0415
+
+    d0 = df.reset_index(drop=True)
+    seg = wtm._find_rally_segment(d0)
+    if seg is None:
+        return []
+    _st, lo, hi, _n = seg
+    det = (wtm.detect_wave_type(d0, code) or {}).get("detail") or {}
+    ds = [str(x)[:10] for x in df["date"]]
+    h = d0["high"].astype(float).to_numpy()
+    lab = f"上涨段+{det.get('seg_gain_pct')}%·涨停{det.get('limit_up_count_20d')}·10日最大{det.get('accel_10d_gain_pct')}%·高点量比{det.get('top_vol_ratio')}"
+    return [_mk(ds, h[hi], lo, hi, lab)]
+
+
+def dist_more_marks(df: Any, field: str, code: str = "") -> list[dict[str, Any]]:
+    """出货 ④⑤⑥ 标记。"""
+    from custos.core.factors import distribution as dsm  # noqa: PLC0415
+
+    d0 = df.reset_index(drop=True)
+    ds = [str(x)[:10] for x in df["date"]]
+    n = len(d0)
+    h = d0["high"].astype(float).to_numpy()
+    sg = dsm.detect_distribution(d0, code).get("signals") or {}
+    if field.endswith("double_top"):
+        det = (sg.get("double_top_vol_bear") or {}).get("detail")
+        if not det:
+            return []
+        p1, p2 = n - 1 - int(det["peak1_bars_ago"]), n - 1 - int(det["peak2_bars_ago"])
+        return [
+            _mk(ds, h[p1], p1, p1, "顶1"),
+            _mk(ds, h[p2], p2, p2, f"顶2（差{det['tops_gap_pct']}%）"),
+        ]
+    if field.endswith("green_heavy"):
+        det = (sg.get("top_green_heavy_red_light") or {}).get("detail")
+        a = n - dsm.DIST_TOP_WINDOW
+        lab = "顶部10根" + (
+            f"·阴实体{det['bear_body_mean_pct']}%/阳实体{det['bull_body_mean_pct']}%"
+            if det
+            else "（不在顶部）"
+        )
+        return [_mk(ds, h[a:].max(), a, n - 1, lab)]
+    det = dsm.detect_top_windmill(d0, code).get("detail")
+    if not det:
+        return []
+    t = n - 1 - int(det["bars_ago"])
+    return [_mk(ds, h[t], t, t, f"大风车（{det.get('status')}）")]
 
 
 def stairstep_marks(df: Any) -> list[dict[str, Any]]:
@@ -2662,7 +2830,9 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
                             if MODULES.get(rep["module"], {}).get("chart_panes")
                             else {}
                         ),
-                        "marks": platform_marks(fr[1])
+                        "marks": _extra_marks(rep["module"], fr[1], f, str(row[2]))
+                        if rep["module"] in _EXTRA_MARKS
+                        else platform_marks(fr[1])
                         if rep["module"] in _MARK_MODULES
                         else (
                             hourglass_marks(fr[1])

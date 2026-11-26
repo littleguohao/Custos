@@ -796,3 +796,21 @@ def test_stairstep_module_and_zx_overlay_v0601():
     pay = cp.chart_payload(_df(1), "t")
     assert len(pay["qsx"]) == len(pay["close"]) == len(pay["dks"])
     assert "PN.includes('zx')" in cp._KC_RENDER
+
+
+def test_priority_calibration_modules_v0603():
+    """owner 2026-11-26「按优先级校准」：持仓 N 结构（平台点版）、冲刺波、出货 ④⑤⑥ 三个模块。"""
+    assert cp.MODULES["n_structure"]["fields"] == [
+        "n_structure.available",
+        "n_structure.fresh_breach",
+        "descending_n_structure.fresh_breach",
+    ]
+    assert cp.MODULES["wave_sprint"]["fields"] == ["wave_sprint.hit"]
+    assert cp.MODULES["dist_more"]["fields"] == [
+        "dist_more.double_top",
+        "dist_more.green_heavy",
+        "dist_more.windmill",
+    ]
+    for m in ("n_structure", "wave_sprint", "dist_more"):
+        for f in cp.MODULES[m]["fields"]:
+            assert f in cp.FIELD_DEF, f
