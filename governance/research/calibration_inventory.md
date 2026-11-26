@@ -8,9 +8,9 @@
 
 ## 现状
 
-- **P0H 持仓大形态 13 个**（12 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 249 个模块级数值参数：**P0 88 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
+- **P0H 持仓大形态 13 个**（12 个判定参数 + `QFQ_LOAD_BARS` 加载深度，见下节）；另 250 个模块级数值参数：**P0 89 个**（live 判定模块优先，含 4 个只在 calib_probe 对照的 v2 候选，9 个模块）、
   **P1 live 展示 97 个**（1800 证据标注，不进判定）、P2 研究 64 个。
-- **定义校准：0 / 249**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
+- **定义校准：0 / 250**。现有研究（R2/R6/R19/R31/R42 等）测的都是**效果**，没有一个检测器做过「是否测对了形态」的核对。
 - **清单未覆盖**（需在逐因子校准时一并核）：①函数体内联常量（KDJ 9/3/3、BBI 周期、20 日相对强度窗口等）；
   ②打分权重与分档（`DEFAULT_TECH_WEIGHTS`、`tech_strong/mid` 60/30、资金意图 `ci_*` 与 `CAP_STRONG/MID`——属打分，R35 终局 A 已收口，
   不在 A 类范围，只在因子定义改动时同步核对）；③出场规则（`EXIT_RULES.json`，R10/R44/R47 测过效果）与 0AMV 状态机（R4），另议。
@@ -281,6 +281,8 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 - **阴阳线统一（v0.593，owner 2026-11-25）**：阴阳唯一判定 `indicators.candle_side`（假阴真阳：底部区间算阳、顶部区间算阴；一字板按前收，一字涨停算阳），区间唯一判定 `b1_structure.price_zone`（走势三态最后一段上涨 = 顶部；有下跌段 = 底部）。接入：阴阳量（live +7 / −5）、红肥绿瘦 W 底 / v2（底部）、出货 ③④⑤（顶部，结果不变）、顶部放量阴线、底部放量阶段底部。J<13 样本阴阳量「阳 > 阴」21.9% → 24.6%（翻转 4.9%）。实体统计排除一字板（实体 0）。K 线形态类（阳包阴、线上阴线、平台公式 C<O）仍按实体，不分区间。假阳真阴（收 > 开、收 < 前收）owner 未定，暂按阳。
 - **价格高低点改平台点 / 背离统一（v0.594，owner 2026-11-25）**：价格高低点统一取 MACD 平台点（`b1_structure.macd_platform_segments`）——顶部放量阴线的高点（阴线在平台顶所在红柱段内或段后 ≤2 根，owner 58 张一致数不变 49）、双头 ④、W 底双底、回调缩量 v2 前一低点；MACD 背离统一走 `macd_technics.macd_divergence_v2_arrays`——板块相位、QN ADX、W 底背离腿。删：MACD 背离 v1（*_v1 字段）、出货旧 ①②（legacy_v1）、6 套分型摆点。J<13 样本：④ 0.3% → 3.0%、出货 high（否决）4.8% → 6.4%、顶部放量阴 47.4% → 47.1%。
 - **出货 ③ 阶梯放量（v0.601，owner 2026-11-26 要校准）**：J<13 样本出货「观察」约 57%，几乎都来自 ③（2026-08 讲义转译，从未校准）。新图集 `stairstep__mining_v1`（36 张：判成立 / 不成立 / 边界各 12），主图叠加 QSX（蓝）/ DKS（橙），紫线标连阴段与跌破的那根。旧 `distribution__mining_v1`（问整体风险等级，旧 ①② 口径）归档不再标。
+- **走势 / 持仓 N 结构改口径（v0.604，owner 2026-11-26「120 根的所有 H L 都识别出来看走势」）**：平台点逐根核对与 owner 通达信公式一致（30 只 × 600 根：压力价 17,766 / 17,766、支撑价 17,876 / 17,876）。走势改为近 120 根全部平台点、在最高 H / 最低 L 切两段（每段 ≥4 点），owner 标的 133 张后段一致 76 → 89、整条 39 → 45；未参与调参的 37 张后段 25 → 31、整条 13 → 11。转折判不准（有无转折判反 60/133），待 `trend_shape__mining_v4`（36 张，九种走势各 4 张，图上逐点标 H / L 与切点）。
+  持仓 N 结构改取最近两组已完成平台点（底、顶都抬高 = 上升 N；当前绿柱段平台底跌破 L1 = P0），🔄 v0.589「近 90 根往回找任一组 L1 → H1 → 更高 L2」停用；`n_structure__mining_v1` 作废，改标 `n_structure__mining_v2`（72 张）。
 - **按优先级补校准（v0.603，owner 2026-11-26）**：① 持仓 N 结构（v0.589 起由 MACD 平台点推出，P0 12% → 4%）：`n_structure__mining_v1`（72 张，三项：有无上升 N / 新鲜跌破 L1 / 下降 N 确认，图标 L1 / H1 / L2 或 H1 / L1 / H2，pool=all）；生产机旧收盘分型口径的 `n_structure__holdings_v3cand` 作废。
   ② 冲刺波（live 否决）：`wave_sprint__mining_v1`（36 张，图标上涨段与涨停数 / 最大 10 日涨幅 / 高点量比）；旧 `wave_type__mining_v1`（问四分类，涨停 / 上涨段改口径前生成）归档。③ 出货 ④⑤⑥：`dist_more__mining_v1`（72 张）。③ 阶梯放量见 `stairstep__mining_v1`。
 - **纯数值判定退出人工校准（v0.563，owner 2026-11-23）**：MACD 区间（DIF / DEA 是否在 0 轴上 + 柱体放长 / 缩短 / 转绿）只是数值比较，看图只能核实现，改由钉测管四态；`macd_technics__mining_v1` 的 24 张区间图隐藏，MODULES 去掉该字段。
@@ -346,7 +348,7 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `technical_monitor` | `TREND_MIN_BARS` | 60 | 趋势判定最少 K 线数 | - | 未校准 |
 | `technical_monitor` | `QFQ_LOAD_BARS` | 100000 | - | - | 未校准 |
 
-### P0（88 个参数）
+### P0（89 个参数）
 
 | 因子 | 参数 | 当前值 | 代码注释 | 因子状态 / 效果证据 | 定义校准 |
 |---|---|---|---|---|---|
@@ -376,7 +378,8 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `b1_structure` | `OW4_FAST_BARS` | 10 | 快速：≤10 根（「几个交易日内」） | candidate | 已标 · live 提示（v0.561） |
 | `b1_structure` | `OW4_RISE_PCT` | 50.0 | 大幅：最高价相对起点最低价涨 ≥50% | candidate | 已标 · live 提示（v0.561） |
 | `b1_structure` | `OW4_MAX_PULLBACK` | 0.1 | 连续：拉升途中收盘较途中最高收盘回撤 <10%，否则视为断开 | candidate | 已标 · live 提示（v0.561） |
-| `b1_structure` | `N_LOOKBACK` | 90 | 持仓结构位（上升 / 下降 N）只在近 90 根的已完成平台点里找 | candidate | 退出人工校准（钉测管，v0.589） |
+| `b1_structure` | `PLATFORM_BARS` | 120 | 走势三态与持仓 N 结构共用：近 120 根（图上显示的范围）内的全部 MACD 平台点（v0.604 取代 N_LOOKBACK=90） | candidate | 候选（owner 2026-11-26，图集 `trend_shape__mining_v4` / `n_structure__mining_v2`） |
+| `b1_structure` | `SW_MIN_PART_POINTS` | 4 | 走势按最高 H / 最低 L 切两段时每段至少 4 个平台点（两组 H / L） | candidate | 候选（owner 2026-11-26，图集 `trend_shape__mining_v4`） |
 | `b1_structure` | `N_STALE_BREACH_BARS` | 10 | 跌破关键位超过 10 根视为陈旧结构（不再触发新鲜 P0） | candidate | 退出人工校准（钉测管，v0.589） |
 | `capital_intent` | `CAP_STRONG` | 5 | - | candidate | 未校准 |
 | `capital_intent` | `CAP_MID` | 2 | - | candidate | 未校准 |

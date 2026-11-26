@@ -57,8 +57,8 @@
       ]
     },
     "b1_structure": {
-      "version": 7,
-      "source_digest": "0d1574ae0576d9e32762",
+      "version": 8,
+      "source_digest": "cbba03e4a031f85e3f50",
       "history": [
         {
           "version": 1,
@@ -134,6 +134,11 @@
           "version": 7,
           "date": "2026-11-25",
           "refactor": "量比分母改调 indicators.vol_ma_prev / vol_ratio 唯一实现（输出逐位不变，快照钉测通过）"
+        },
+        {
+          "version": 8,
+          "date": "2026-11-26",
+          "change": "走势改用近 120 根全部 MACD 平台点、最高 H / 最低 L 切两段；持仓上升 / 下降 N 改取最近两组已完成平台点，当前绿柱段平台底破位；删三组版 macd_platform_structure（owner 2026-11-26）"
         }
       ]
     },
@@ -802,8 +807,8 @@
       ]
     },
     "technical_monitor": {
-      "version": 4,
-      "source_digest": "5df8130f807be195e162",
+      "version": 5,
+      "source_digest": "6fb73c65139eb15c3d2f",
       "history": [
         {
           "version": 1,
@@ -839,6 +844,11 @@
           "version": 4,
           "date": "2026-11-25",
           "change": "依赖的涨跌停幅度改为按代码前缀（owner 2026-11-25），输出随之变化"
+        },
+        {
+          "version": 5,
+          "date": "2026-11-26",
+          "change": "趋势三态与 N 结构随 b1_structure v0.604 口径（owner 2026-11-26）"
         }
       ]
     }

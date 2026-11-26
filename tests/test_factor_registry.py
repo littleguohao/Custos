@@ -721,7 +721,7 @@ class TestCharacterizationSnapshot:
         "alpha_pvcorr": "effcb178ff26",
         "b1_dual_factor": "2be88ca4242c",  # v0.226 更新（score 规范槽上移接管）
         "b1_pullback_fit": "c73516b95663",  # v0.226 更新（score 规范槽上移接管）
-        "b1_structure": "a000d4ec2023",  # v0.592 顶部放量阴线统一判定（owner 2026-11-25）
+        "b1_structure": "e4dea182bae6",  # v0.604 走势 120 根全部平台点切两段、N 取最近两组（owner 2026-11-26）
         "b2_surge_factor": "9f3b7bcdc8e1",
         "baseline": "2bd7dd114d5c",
         "bottom_patterns": "df803a82fd38",  # v0.594 价格高低点改平台点、背离统一 v2（owner 2026-11-25）

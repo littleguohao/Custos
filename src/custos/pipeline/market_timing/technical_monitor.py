@@ -53,7 +53,7 @@ from custos.core.factors.b1_structure import (  # noqa: E402  v0.589：走势 / 
     check_swing_state,
     macd_platform_points,  # noqa: F401  包 API re-export（研究 / 测试用）
     macd_platform_segments,
-    macd_platform_structure,
+    platform_window,  # noqa: F401  包 API re-export（研究 / 测试用）
 )
 
 _TREND_SHORT = {"震荡上涨": "上涨", "震荡下跌": "下跌", "横盘震荡": "横盘震荡"}
@@ -71,7 +71,7 @@ from custos.core.b1_thresholds import (
 OUT_DIR = MARKET_DIR
 
 # --- 大形态检测参数（v0.485 提为模块常量，行为逐位不变；TODO #121 定义校准 P0H 档：驱动 live 持仓 P0/P1） ---
-# v0.589：N 结构参数随唯一实现移到 core/factors/b1_structure.py（N_LOOKBACK / N_STALE_BREACH_BARS）；N_PIVOT_* 收盘分型口径停用
+# v0.589：N 结构参数随唯一实现移到 core/factors/b1_structure.py（v0.604 起 PLATFORM_BARS / N_STALE_BREACH_BARS）；N_PIVOT_* 收盘分型口径停用
 BOX_UPPER_Q = 0.85  # 箱体上沿 = 窗口最高价分位
 BOX_LOWER_Q = 0.15  # 箱体下沿 = 窗口最低价分位
 BOX_SHORT = 20  # 短箱体窗口（持仓「跌破 20 日箱体」）
@@ -439,7 +439,7 @@ def _trend_metrics(df: pd.DataFrame) -> dict[str, Any]:
 
 
 def trend_state(df: pd.DataFrame) -> dict[str, Any]:
-    """趋势三态（v0.589 起由 MACD 平台 N 结构推出，唯一实现 = b1_structure.check_swing_state，owner 2026-11-25）：
+    """趋势三态（v0.589 起由 MACD 平台 N 结构推出；v0.604 起取近 120 根全部平台点、按最高顶 / 最低底切两段，唯一实现 = b1_structure.check_swing_state，owner 2026-11-25）：
     state ∈ 上涨 / 下跌 / 横盘震荡（当前态）/ 数据不足；swing_state = 含「X 转 Y」的全称。均线值只作展示。
     🔄 v0.585 前的「均线斜率 + 20 日高低点」三态判定停用。"""
     sw = check_swing_state(df)
@@ -448,7 +448,7 @@ def trend_state(df: pd.DataFrame) -> dict[str, Any]:
             "state": "数据不足",
             "reason": f"少于{TREND_MIN_BARS}根K线"
             if len(df) < TREND_MIN_BARS
-            else "MACD 平台底 / 顶不足三组",
+            else "近 120 根 MACD 平台点不足 4 个",
             "swing_state": None,
         }
     m = _trend_metrics(df)

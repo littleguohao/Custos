@@ -51,7 +51,7 @@ MODULES: dict[str, dict[str, Any]] = {
             "descending_n_structure.fresh_breach",
         ],
         "params": [
-            "N_LOOKBACK",
+            "PLATFORM_BARS",
             "N_STALE_BREACH_BARS",
         ],
     },
@@ -129,7 +129,16 @@ MODULES: dict[str, dict[str, Any]] = {
         "fields": ["trend_shape.combo"],
         "params": [],
         "label_mode": "shape",
-        "chart_panes": ["vol"],  # owner 2026-11-23：只看 K 线和量
+        "chart_panes": [
+            "vol"
+        ],  # owner 2026-11-23：只看 K 线和量（v0.604 起 H / L 直接标在主图上）
+        # v0.604：只抽有走势判定的 bar（九种走势各一档）；平台点不足 4 个的不出图
+        "sample_classes": ["hit"],
+        # v0.604：只问走势（附加题「顶部放量出货」「一波流」不再显示，CSV 列保留为空）
+        "shape_ask": [],
+        "shape_question": "按近 120 根的全部 H / L 看，这里是什么走势？从下方菜单选一个。图上逐个标出 MACD 平台点 H / L，"
+        "粉色竖线是检测器的切点（最高 H 或最低 L，切点两侧各 ≥4 个点），每段看首尾的 H、L：都抬高 = 上涨，都降低 = 下跌，其余 = 横盘。"
+        "切点或某段判得不对，备注写在哪",
     },
     "b1_structure_v3": {  # 一波流 v3 候选（owner 2026-11-17）
         "defmod": "custos.core.factors.b1_structure",
@@ -646,8 +655,12 @@ def trend_shape_readings(frames: tuple) -> dict[str, Any]:
 
 def _shape_combo(r: dict[str, Any]) -> str:
     rd = r.get("_readings") or {}
-    # v0.553：复验一波流（owner 2026-11-19「再验证一次」）⇒ 只按一波流 v3 四态分层，三态自然分布
-    return str(rd.get("one_wave_v3"))
+    # v0.604：走势改为 120 根全部平台点 + 最高顶 / 最低底切两段（owner 2026-11-26）⇒ 按走势判定分层
+    # 🔄 v0.553~v0.603 按一波流 v3 四态分层（复验一波流用）
+    st = rd.get("swing_state")
+    return (
+        f"走势：{st}" if st else "none"
+    )  # 横盘震荡也进命中类（is_hit 把裸「横盘震荡」当未命中），九种走势各抽一档
 
 
 def _eval_bar(job: tuple) -> tuple:
@@ -1154,7 +1167,10 @@ def _samples(pool, base, hits, flips, fields, args, rng) -> dict[str, list[dict]
         rows = []
         one_per_code = MODULES.get(args.module, {}).get("label_mode") == "shape"
         seen_codes: set[str] = set()
+        only = MODULES.get(args.module, {}).get("sample_classes")
         for c, keys in cls.items():
+            if only and c not in only:
+                continue
             if one_per_code:  # v0.548：同票相邻日几乎同图 ⇒ 每票随机留一根
                 by: dict[str, list] = {}
                 for k in keys:
@@ -1258,6 +1274,7 @@ def label_ui(
     hint: Optional[str] = None,
     prefill: Optional[dict[str, str]] = None,
     hidden: Optional[list[str]] = None,
+    ask: Optional[list[str]] = None,
 ) -> str:
     """网页内标注（v0.502，owner 2026-11-09）：每图下「判定按钮 + 形态理由」，浏览器本地存档
     （localStorage，可分多次标），一键导出与 labels.csv 同列的 CSV；可导入已有 labels.csv 续标。
@@ -1272,6 +1289,8 @@ def label_ui(
             "prefill": prefill or {},
             "hidden": [str(x) for x in (hidden or [])],
             "extras": list(SHAPE_EXTRAS) if mode == "shape" else [],
+            # v0.604：页面上实际要问的附加题（缺省 = 全部 extras；导出列仍按 extras，没问的留空）
+            "ask": list(ask) if ask is not None else None,
         },
         ensure_ascii=False,
     )
@@ -1306,7 +1325,7 @@ const HID = new Set(M.hidden || []);
 function refresh(){
   let n = 0;
   document.querySelectorAll('div.s').forEach(d => {
-    const v = get(d.dataset.id), xs = v.xs || {}, done = !!v.c && M.extras.every(e => !!xs[e]);
+    const v = get(d.dataset.id), xs = v.xs || {}, done = !!v.c && (M.ask || M.extras).every(e => !!xs[e]);
     n += (done && !HID.has(d.dataset.id)) ? 1 : 0;
     d.classList.toggle('done', done);
     d.style.display = (HID.has(d.dataset.id) || (document.getElementById('onlyTodo').checked && done)) ? 'none' : '';
@@ -1324,7 +1343,7 @@ document.querySelectorAll('div.s').forEach(d => {
     b.onclick = () => { const v = get(id); v.c = (v.c === c ? '' : c); put(id, v); refresh(); };
     box.appendChild(b);
   });
-  M.extras.forEach(e => {  // v0.551 独立一行「有 / 无」；v0.553 多项
+  (M.ask || M.extras).forEach(e => {  // v0.551 独立一行「有 / 无」；v0.553 多项；v0.604 按模块只问 M.ask
     const row = document.createElement('div'); row.style.margin = '6px 0';
     const t = document.createElement('b'); t.textContent = e + '：'; row.appendChild(t);
     [['有', 'Y'], ['无', 'N']].forEach(([lab, x]) => {
@@ -1393,9 +1412,9 @@ def _csv_rows(rep: dict[str, Any], frames: dict) -> list[list[Any]]:
 FIELD_DEF: dict[str, str] = {
     "top_bear_volume.hit": "顶部 / 次高点放量阴线（出货 ①② v2）：近 60 根内，顶部或次高点（最高价分型、≥ 近 60 根最高 7 成）前后 2 根内出现阴线，量大于前 5 根里最大的阳线量、≥ 20 日均量 1.5 倍、≥ 前 60 根最大量 0.6 倍。假阴真阳（收低于开、高于前收）只在顶部区间算阴量。图上标高点与阴线",
     "base_volume.l1": "底部放量 ⭐（单根放量阳线）：近 20 根内，从阶段低点（前 20 根最低收盘）起 5 根内出现一根放量上涨 K（量 ≥ 前 5 日均量 1.5 倍、涨 ≥3%，阳线或假阴真阳），且没有更强的放量。评价的是量能状态，当根形态不管。图上标阶段低点与放量 K",
-    "n_structure.available": "持仓上升 N 结构（v0.589 起由 MACD 平台点推出）：近 90 根里有一组「平台底 L1 → 平台顶 H1 → 更高的平台底 L2」。图上标 L1 / H1 / L2；L1 是 P0 清仓位、L2 是 P1 位。请判：这里有没有一个上升 N？L1 / L2 标得对不对",
-    "n_structure.fresh_breach": "上升 N 新鲜跌破 L1（持仓 P0 清仓评估）：收盘跌破 L1，且首次跌破在 10 根以内。图上标 L1 / H1 / L2。请判：这是不是该清仓评估的结构破位",
-    "descending_n_structure.fresh_breach": "下降 N 确认（持仓 P0 清仓评估）：近 90 根里有「平台顶 H1 → 平台底 L1 → 更低的平台顶 H2」，收盘跌破 L1 且在 10 根以内。图上标 H1 / L1 / H2。请判：是不是下降 N 确认",
+    "n_structure.available": "持仓上升 N 结构（v0.604）：近 120 根已走完的最近两组 MACD 平台点，平台底 L1 → L2、平台顶 H1 → H2 都抬高。图上标 L1（P0）/ L2（P1）/ H1 / H2，当前绿柱段的平台底标「当前段 L」。请判：这里是不是上升 N？L1 / L2 标得对不对",
+    "n_structure.fresh_breach": "上升 N 破位（持仓 P0 清仓评估，v0.604）：当前绿柱段的平台底（段内阴线最低收盘）跌破 L1，且首次跌破在 10 根以内。图上标 L1 / L2 / H1 / H2 与当前段 L。请判：这是不是该清仓评估的结构破位",
+    "descending_n_structure.fresh_breach": "下降 N 确认（持仓 P0 清仓评估，v0.604）：近 120 根已走完的最近两组平台点，平台顶 H1 → H2、平台底 L1 → L2 都降低；当前绿柱段的平台底再跌破 L2，且首次跌破在 10 根以内。图上标 H1 / H2 / L1 / L2（P0）与当前段 L。请判：是不是下降 N 确认",
     "wave_sprint.hit": "冲刺波（live 否决：冲刺波之后的第一个 B1 封顶 B）：上涨段（MACD 平台 N 结构定位）里，近 20 根 ≥2 个涨停（按代码前缀限幅）、段内最大 10 日涨幅 ≥25%、高点那天量 ≥ 前 5 日均量 1.5 倍。图上标上涨段与读数。请判：前面这段是不是冲刺波",
     "dist_more.double_top": "出货 ④ 双头双巨阴：近 60 根里最近的平台顶与它之前最高的平台顶相差 ≤3%，两个顶所在红柱段到其后 2 根内都出现放量阴（量 ≥ 前 5 日均量 1.5 倍）。图上标两个顶",
     "dist_more.green_heavy": "出货 ⑤ 顶部绿肥红瘦：最近 10 根在近 60 根高点 98% 以内（顶部），且阴线实体均值 > 阳线实体均值、阴线均量 > 阳线均量。图上标顶部 10 根与读数",
@@ -1407,7 +1426,7 @@ FIELD_DEF: dict[str, str] = {
     "macd_v2.bottom_divergence.hit": "MACD 底背离 v2（绿柱和绿柱比）：当根在绿柱组，本组股价创新低（低于上一组绿柱时的最低收盘），本波最长绿柱比上一波短（同一组绿柱里有多个柱长波峰时按波比）。图上紫线标两波的最低价",
     "macd_v2.top_divergence.hit": "MACD 顶背离 v2（红柱和红柱比）：最近两组红柱，后一波股价创新高，最长红柱比前一波短（同组多波峰按波比）。图上紫线标两波的最高价",
     "macd_v2.three_peaks.hit": "三打白骨精 v2：最近三波红柱，股价高点逐波抬高，最长红柱逐波缩短。图上紫线标三波的最高价",
-    "trend_shape.combo": "前置走势形态（合并校准）：B1 点之前的走势属于哪种形态；抽样按一波流 v3 结论分层（v0.553）",
+    "trend_shape.combo": "走势三态（v0.604）：近 120 根的全部 MACD 平台点 H / L 都标在图上，在最高 H 或最低 L 处切两段（粉色竖线），每段看首尾的 H、L：都抬高 = 上涨，都降低 = 下跌，其余 = 横盘。请选你看到的走势；转折点或某一段判得不对，备注写在哪",
     "n_structure.status": "上升 N 型结构（分型版）：前低 → 前高 → 回踩不破前低形成更高的低点；状态为成立 / 确认 / 破位等",
     "n_structure.fresh_breach": "上升 N 型结构是否刚刚被跌破（收盘跌破结构前低）",
     "descending_n_structure.status": "下降 N 型结构（分型版）：高点、低点依次下移",
@@ -1536,7 +1555,9 @@ def ask_html(field: str, cls: str, value: Any, boundary: str = "") -> str:
     )
 
 
-def shape_ask_html(readings: dict[str, Any], blind: bool = False) -> str:
+def shape_ask_html(
+    readings: dict[str, Any], blind: bool = False, question: Optional[str] = None
+) -> str:
     """合并图集图块顶部：问题 + 各检测器读数（只作参考）；``blind`` = 复验盲标，不显示读数（防锚定，v0.553）。"""
     cells = "　".join(
         f"{html.escape(nm)}：<b>{html.escape(value_zh(readings.get(k), k))}</b>"
@@ -1544,8 +1565,11 @@ def shape_ask_html(readings: dict[str, Any], blind: bool = False) -> str:
     )
     return (
         "<div class='q' style='font:14px sans-serif;background:#f4f7fb;border-left:4px solid #3b6fb6;"
-        "padding:6px 10px;margin:6px 0'><b>请判断：</b>这个 B1 点（最后一根）之前是什么走势？从下方菜单选一个；"
-        "再选「顶部放量出货」「一波流」各 有 / 无。"
+        "padding:6px 10px;margin:6px 0'><b>请判断：</b>"
+        + html.escape(
+            question
+            or "这个 B1 点（最后一根）之前是什么走势？从下方菜单选一个；再选「顶部放量出货」「一波流」各 有 / 无。"
+        )
         + (
             "<br><span style='color:#666'>复验盲标：不显示检测器读数</span>"
             if blind
@@ -2404,12 +2428,22 @@ function kcDraw(el) {
   if (PN && PN.includes('zx') && p.qsx) ch.createIndicator({ name: 'CZX', paneId: 'candle_pane' }, true);  // v0.601：主图叠加 QSX / DKS
   const ts = d => Date.parse(d + 'T15:00:00+08:00');
   const first = bars[0].timestamp;
+  const pLo = Math.min(...p.low), pHi = Math.max(...p.high);
   (p.marks || []).forEach(m => {
+    if (m.kind === 'V') {  // v0.604：走势切点竖线
+      ch.createOverlay({ name: 'segment', lock: true, points: [{ timestamp: ts(m.date), value: pLo }, { timestamp: ts(m.date), value: pHi }],
+        styles: { line: { color: '#D81B60', size: 1.5, style: 'dashed' } } });
+      ch.createOverlay({ name: 'simpleAnnotation', lock: true, points: [{ timestamp: ts(m.date), value: pLo + (pHi - pLo) * 0.12 }], extendData: m.label,
+        styles: { line: { color: '#D81B60' }, text: { backgroundColor: '#D81B60', borderColor: '#D81B60' } } });
+      return;
+    }
     const col = m.kind === 'H' ? '#E5A50A' : '#7E57C2';
     const s = Math.max(ts(m.start), first);
     ch.createOverlay({ name: 'segment', lock: true, points: [{ timestamp: s, value: m.price }, { timestamp: ts(m.end), value: m.price }],
       styles: { line: { color: col, size: m.label ? 2 : 1, style: m.ongoing ? 'dashed' : 'solid' } } });
-    if (m.label) ch.createOverlay({ name: 'simpleTag', lock: true, points: [{ timestamp: ts(m.date), value: m.price }], extendData: m.label + ' ' + m.price,
+    if (m.label && m.point) ch.createOverlay({ name: 'simpleAnnotation', lock: true, points: [{ timestamp: ts(m.date), value: m.price }], extendData: m.label,
+      styles: { line: { color: col }, text: { backgroundColor: col, borderColor: col } } });  // v0.604：逐点标注（走势全部 H / L）
+    else if (m.label) ch.createOverlay({ name: 'simpleTag', lock: true, points: [{ timestamp: ts(m.date), value: m.price }], extendData: m.label + ' ' + m.price,
       styles: { line: { color: col }, text: { backgroundColor: col, borderColor: col } } });
   });
   const asOf = bars[p.dates.length - 1];
@@ -2435,7 +2469,7 @@ document.querySelectorAll('div.s').forEach(el => kcObs.observe(el));
 _MARK_MODULES = frozenset(
     {"trend_box"}
 )  # v0.603：n_structure 改标 L1 / H1 / L2（见 _EXTRA_MARKS）
-_EXTRA_MARKS = frozenset({"n_structure", "wave_sprint", "dist_more"})
+_EXTRA_MARKS = frozenset({"n_structure", "wave_sprint", "dist_more", "trend_shape"})
 
 
 def _extra_marks(
@@ -2443,6 +2477,8 @@ def _extra_marks(
 ) -> list[dict[str, Any]]:
     if module == "n_structure":
         return n_structure_marks(df, field)
+    if module == "trend_shape":
+        return swing_marks(df)
     if module == "wave_sprint":
         return wave_sprint_marks(df, code)
     return dist_more_marks(df, field, code)
@@ -2556,8 +2592,44 @@ def _mk(ds, price, a, b, label) -> dict[str, Any]:
     }
 
 
+def swing_marks(df: Any) -> list[dict[str, Any]]:
+    """走势三态（v0.604）：近 120 根全部平台点逐个标「H / L 价位」（线段 = 所在红 / 绿柱段，进行中虚线），切点画粉色竖线并写两段判定。"""
+    from custos.core.factors import b1_structure as bsm  # noqa: PLC0415
+
+    d0 = df.reset_index(drop=True)
+    pts = bsm.platform_window(d0)[0]
+    out: list[dict[str, Any]] = [
+        {
+            "kind": x["kind"],
+            "price": x["price"],
+            "date": x["date"],
+            "start": x["start"],
+            "end": x["end"],
+            "label": f"{x['kind']} {x['price']:.2f}" + ("…" if x["ongoing"] else ""),
+            "point": True,
+            "ongoing": x["ongoing"],
+        }
+        for x in pts
+    ]
+    sw = bsm.check_swing_state(d0)
+    if sw.get("split_date"):
+        a, b = str(sw["state"]).split("转", 1)
+        out.append(
+            {
+                "kind": "V",
+                "price": 0.0,
+                "date": sw["split_date"],
+                "start": sw["split_date"],
+                "end": sw["split_date"],
+                "label": f"切点：前段{a}｜后段{b}",
+                "ongoing": False,
+            }
+        )
+    return out
+
+
 def n_structure_marks(df: Any, field: str) -> list[dict[str, Any]]:
-    """持仓 N 结构：上升 N 标 L1 / H1 / L2，下降 N 标 H1 / L1 / H2（价位 = 平台点价）。"""
+    """持仓 N 结构（v0.604）：标最近两组已完成平台点（L1 / L2 / H1 / H2，P0 / P1 位注在名字上）+ 当前绿柱段的平台底。"""
     from custos.core.factors import b1_structure as bsm  # noqa: PLC0415
 
     d0 = df.reset_index(drop=True)
@@ -2566,25 +2638,36 @@ def n_structure_marks(df: Any, field: str) -> list[dict[str, Any]]:
     idx = {x: i for i, x in enumerate(ds)}
     if field.startswith("descending"):
         r = bsm.check_descending_n_structure(d0)
-        trio = [
+        four = [
             ("prior_high", "prior_high_date", "H1"),
-            ("structural_low", "structural_low_date", "L1（P0）"),
             ("lower_high", "lower_high_date", "H2"),
+            ("prior_low", "prior_low_date", "L1"),
+            ("structural_low", "structural_low_date", "L2（P0）"),
         ]
     else:
         r = bsm.check_n_structure(d0)
-        trio = [
+        four = [
             ("prior_low", "prior_low_date", "L1（P0）"),
-            ("breakout_level", "breakout_level_date", "H1"),
             ("pullback_low", "pullback_low_date", "L2（P1）"),
+            ("prior_high", "prior_high_date", "H1"),
+            ("latest_high", "latest_high_date", "H2"),
         ]
     if not r.get("available"):
         return []
-    return [
+    out = [
         _mk(ds, r[k], idx.get(r[dk], n - 1), n - 1, nm)
-        for k, dk, nm in trio
+        for k, dk, nm in four
         if r.get(dk) in idx
     ]
+    og = bsm.platform_window(d0)[2]
+    if og is not None and og["kind"] == "L":
+        out.append(
+            {
+                **_mk(ds, og["price"], int(og["start_i"]), n - 1, "当前段 L"),
+                "ongoing": True,
+            }
+        )
+    return out
 
 
 def wave_sprint_marks(df: Any, code: str = "") -> list[dict[str, Any]]:
@@ -2809,7 +2892,11 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
                         f"<div class='s' data-id='{row[0]}'>"
                         + (
                             shape_ask_html(
-                                r.get("readings") or {}, blind=bool(rep.get("blind"))
+                                r.get("readings") or {},
+                                blind=bool(rep.get("blind")),
+                                question=MODULES.get(rep["module"], {}).get(
+                                    "shape_question"
+                                ),
                             )
                             if lmode == "shape"
                             else ask_html(f, r["class"], r["value"], row[6])
@@ -2870,7 +2957,16 @@ def write_outputs(rep: dict[str, Any], out_dir: Path) -> Path:
                 csv_rows,
                 lmode,
                 f"calib:{d.name}",
-                hint=SHAPE_HINT if lmode == "shape" else None,
+                hint=(
+                    (
+                        "每张图从菜单选一个走势即算标完；备注写切点或哪一段不对。按你看到的走势选，备注写形态，不写后来涨跌"
+                        if MODULES.get(rep["module"], {}).get("shape_ask") == []
+                        else SHAPE_HINT
+                    )
+                    if lmode == "shape"
+                    else None
+                ),
+                ask=MODULES.get(rep["module"], {}).get("shape_ask"),
             )
         )
         parts.append("</body></html>")

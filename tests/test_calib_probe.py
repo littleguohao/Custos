@@ -290,7 +290,7 @@ def test_holding_modules_patch_live_function_defaults():
 
     df = _df(5, n=500)
     with cp.patched(
-        "custos.core.factors.b1_structure", {"N_LOOKBACK": 30}
+        "custos.core.factors.b1_structure", {"PLATFORM_BARS": 30}
     ):  # v0.589：N 结构唯一实现在因子层
         an = tm.analyze(df, "600000")
         assert an["n_structure"].get("lookback", 30) == 30
@@ -438,7 +438,7 @@ class TestLabelUiAndIngestV0502:
                 "2026-10-06",
                 "near_miss",
                 "False",
-                "N_LOOKBACK×1.2",
+                "PLATFORM_BARS×1.2",
             ],
         ]
         d = self._mk(tmp_path, mode="review", rows=rows)
@@ -814,3 +814,51 @@ def test_priority_calibration_modules_v0603():
     for m in ("n_structure", "wave_sprint", "dist_more"):
         for f in cp.MODULES[m]["fields"]:
             assert f in cp.FIELD_DEF, f
+
+
+def test_trend_gallery_marks_all_platform_points_and_split_v0604():
+    """owner 2026-11-26「120 根的所有 H L 都识别出来」：走势图集逐点标 H / L、切点竖线、只问走势、九种走势分层。"""
+    import numpy as np
+    import pandas as pd
+
+    from custos.core.factors import b1_structure as bs
+
+    spec = cp.MODULES["trend_shape"]
+    assert spec["shape_ask"] == [] and spec["sample_classes"] == ["hit"]
+    assert spec["chart_panes"] == ["vol"] and "trend_shape" in cp._EXTRA_MARKS
+    assert (
+        cp._shape_combo({"_readings": {"swing_state": "横盘震荡"}}) == "走势：横盘震荡"
+    )
+    assert cp.is_hit("走势：横盘震荡") and not cp.is_hit(
+        cp._shape_combo({"_readings": {}})
+    )
+    rng = np.random.default_rng(3)
+    t = np.arange(300)
+    c = 10 * np.exp(0.08 * np.sin(t / 9.0) + np.cumsum(rng.normal(0, 0.004, 300)))
+    o = c * (1 + rng.normal(0, 0.01, 300))
+    df = pd.DataFrame(
+        {
+            "date": pd.date_range("2023-01-02", periods=300, freq="B"),
+            "open": o,
+            "high": np.maximum(o, c) * 1.01,
+            "low": np.minimum(o, c) * 0.99,
+            "close": c,
+            "volume": np.full(300, 1e6),
+        }
+    )
+    marks = cp.swing_marks(df)
+    pts = bs.platform_window(df)[0]
+    assert [m["price"] for m in marks if m["kind"] in ("H", "L")] == [
+        p["price"] for p in pts
+    ]
+    sw = bs.check_swing_state(df)
+    v = [m for m in marks if m["kind"] == "V"]
+    assert (
+        (len(v) == 1 and v[0]["date"] == sw["split_date"])
+        if sw["split_date"]
+        else not v
+    )
+    html = cp.label_ui(
+        [[1, "f", "600000", "2024-01-02", "hit", "x", ""]], "shape", "k", ask=[]
+    )
+    assert '"ask": []' in html and "(M.ask || M.extras)" in html

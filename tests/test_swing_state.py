@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""走势三态（v0.589 起由 MACD 平台 N 结构推出，owner 2026-11-25）+ 一波流 v4。"""
+"""走势三态（v0.604：近 120 根全部 MACD 平台点、最高顶 / 最低底切两段，owner 2026-11-26）+ 一波流 v4。"""
 
 from __future__ import annotations
 
@@ -70,6 +70,26 @@ def test_flat_n_is_sideways(monkeypatch):
 
 
 def test_down_then_up_turn(monkeypatch):
+    """v0.604：120 根全部平台点在最低平台底处切两段：前段顶底都降 = 下跌，后段顶底都抬 = 上涨。"""
+    segs = [
+        _seg("L", 10, 1),
+        _seg("H", 12, 5),
+        _seg("L", 9, 10),
+        _seg("H", 11, 15),
+        _seg("L", 8, 20),
+        _seg("H", 10, 25),
+        _seg("L", 9, 30),
+        _seg("H", 11, 35),
+        _seg("L", 10, 40),
+        _seg("H", 12.5, 45),
+    ]
+    r = _with(monkeypatch, segs)
+    assert r["state"] == "下跌转上涨" and r["now"] == "震荡上涨"
+    assert r["turn_bars_ago"] == 59 - 20 and r["n_points"] == 10
+
+
+def test_part_needs_four_points_else_whole(monkeypatch):
+    """切点两侧任一段不足 4 个平台点 ⇒ 不切，整段一个态（首尾底、首尾顶）。"""
     segs = [
         _seg("L", 10, 1),
         _seg("H", 12, 5),
@@ -79,12 +99,30 @@ def test_down_then_up_turn(monkeypatch):
         _seg("H", 11.5, 25),
     ]
     r = _with(monkeypatch, segs)
-    assert r["state"] == "下跌转上涨" and r["now"] == "震荡上涨"
-    assert r["turn_bars_ago"] == 59 - 10
+    assert r["state"] == "震荡下跌" and r["turn_bars_ago"] is None
 
 
-def test_unavailable_when_less_than_three_groups(monkeypatch):
-    r = _with(monkeypatch, [_seg("L", 9, 1), _seg("H", 10, 5)])
+def test_only_points_within_120_bars(monkeypatch):
+    """只取近 120 根内的平台点；更早的点不参与。"""
+    monkeypatch.setattr(
+        bs,
+        "macd_platform_segments",
+        lambda df: (
+            [_seg("L", 5, 10), _seg("H", 20, 50)]
+            + [
+                _seg(k, v, 200 + 10 * i)
+                for i, (k, v) in enumerate(
+                    [("L", 9), ("H", 11), ("L", 9.2), ("H", 10.8)]
+                )
+            ]
+        ),
+    )
+    r = bs.check_swing_state(_df(300))
+    assert r["n_points"] == 4 and r["state"] == "横盘震荡"
+
+
+def test_unavailable_when_less_than_four_points(monkeypatch):
+    r = _with(monkeypatch, [_seg("L", 9, 1), _seg("H", 10, 5), _seg("L", 9.5, 9)])
     assert r["available"] is False and r["state"] is None
 
 

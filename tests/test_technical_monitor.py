@@ -43,8 +43,24 @@ def _flat(n=60, last=10.0):
     return frame([c * 0.99 for c in closes], [c * 1.01 for c in closes], closes)
 
 
+def _seg_og(kind, price, idx, start_i):
+    return {**_seg(kind, price, idx, ongoing=True), "start_i": start_i}
+
+
+def _bear_tail(n, start, close_tail):
+    """前 start 根收 10、开 = 收；之后收 close_tail 的阴线（开 = 收 × 1.01）。"""
+    closes = [10.0] * start + [close_tail] * (n - start)
+    opens = closes[:start] + [c * 1.01 for c in closes[start:]]
+    df = frame([c * 0.99 for c in closes], [c * 1.02 for c in closes], closes)
+    df["open"] = opens
+    return df
+
+
+_UP = [_seg("H", 10.0, 20), _seg("L", 9.0, 30), _seg("H", 11.0, 38), _seg("L", 9.5, 45)]
+
+
 class NStructureTests(unittest.TestCase):
-    """v0.589：上升 / 下降 N 由 MACD 平台点推出（已完成段；owner 2026-11-25 走势唯一底座）。"""
+    """v0.604（owner 2026-11-26）：最近两组已完成平台点，底、顶都抬高 ⇒ 上升 N；当前绿柱段的平台底跌破 L1 ⇒ P0。"""
 
     def setUp(self):
         from custos.core.factors import b1_structure as bs
@@ -59,60 +75,92 @@ class NStructureTests(unittest.TestCase):
         self.bs.macd_platform_segments = lambda d: segs
         return n_structure_state(df), self.bs.check_descending_n_structure(df)
 
-    def test_completed_rising_n_returns_second_low(self):
-        segs = [
-            _seg("L", 9.0, 30),
-            _seg("H", 11.0, 38),
-            _seg("L", 9.5, 45),
-            _seg("H", 10.5, 59, ongoing=True),
-        ]
-        r, _ = self._n(segs, _flat(last=10.0))
+    def test_latest_two_groups_rising_is_up_n(self):
+        r, _ = self._n(_UP + [_seg_og("H", 10.5, 59, 50)], _flat(last=10.0))
         self.assertTrue(r["available"])
         self.assertEqual(
             (r["prior_low"], r["pullback_low"], r["breakout_level"]), (9.0, 9.5, 11.0)
         )
+        self.assertEqual((r["prior_high"], r["latest_high"]), (10.0, 11.0))
         self.assertEqual(r["status"], "candidate")
+        self.assertFalse(r["platform_breach"])
 
     def test_lower_second_low_is_not_rising_n(self):
-        segs = [_seg("L", 9.0, 30), _seg("H", 11.0, 38), _seg("L", 8.5, 45)]
-        r, d = self._n(segs, _flat())
-        self.assertFalse(r["available"])
-
-    def test_ongoing_segment_not_used_as_structure(self):
-        """进行中末段的平台值随价格移动，不当作结构位（避免破位被改写成新低点）。"""
         segs = [
+            _seg("H", 10.0, 20),
             _seg("L", 9.0, 30),
             _seg("H", 11.0, 38),
-            _seg("L", 9.5, 59, ongoing=True),
+            _seg("L", 8.5, 45),
         ]
         r, _ = self._n(segs, _flat())
         self.assertFalse(r["available"])
 
-    def test_stale_breach_is_marked_stale(self):
-        closes = [10.0] * 46 + [8.0] * 14  # L2 之后 14 根前跌破 L1=9
-        df = frame([c * 0.99 for c in closes], [c * 1.01 for c in closes], closes)
-        r, _ = self._n(
-            [_seg("L", 9.0, 30), _seg("H", 11.0, 38), _seg("L", 9.5, 45)], df
+    def test_low_rising_but_high_falling_is_not_rising_n(self):
+        """v0.604 起顶也要抬高（🔄 v0.589「只看底抬高」停用）。"""
+        segs = [
+            _seg("H", 12.0, 20),
+            _seg("L", 9.0, 30),
+            _seg("H", 11.0, 38),
+            _seg("L", 9.5, 45),
+        ]
+        r, d = self._n(segs, _flat())
+        self.assertFalse(r["available"])
+        self.assertFalse(d["available"])
+
+    def test_no_older_n_when_latest_groups_not_rising(self):
+        """🔄 v0.589「往回翻旧的 N」停用：只看最近两组。"""
+        segs = (
+            [_seg("L", 8.0, 5), _seg("H", 10.0, 12)]
+            + _UP[1:]
+            + [_seg("H", 10.6, 50), _seg("L", 9.2, 55)]
         )
-        self.assertTrue(r["breached_on_close"])
-        self.assertTrue(r["stale"])
+        r, _ = self._n(segs, _flat())
+        self.assertFalse(r["available"])
+
+    def test_ongoing_segment_not_used_as_structure(self):
+        """进行中末段的平台值随价格移动，不当作结构位。"""
+        segs = [
+            _seg("H", 10.0, 20),
+            _seg("L", 9.0, 30),
+            _seg("H", 11.0, 38),
+            _seg_og("L", 9.5, 59, 50),
+        ]
+        r, _ = self._n(segs, _flat())
+        self.assertFalse(r["available"])
+
+    def test_current_green_segment_breaks_l1_is_fresh_p0(self):
+        df = _bear_tail(60, 56, 8.8)
+        r, _ = self._n(_UP + [_seg("H", 10.6, 50), _seg_og("L", 8.8, 59, 54)], df)
+        # 最近两组已完成：L 9 → 9.5、H 11 → 10.6 不抬高 ⇒ 换成顶也抬高的序列
+        self.assertFalse(r["available"])
+        r, _ = self._n(_UP + [_seg("H", 11.5, 50), _seg_og("L", 8.8, 59, 54)], df)
+        self.assertTrue(r["available"] and r["platform_breach"] and r["fresh_breach"])
+        self.assertEqual((r["breach_bars_ago"], r["current_platform_low"]), (3, 8.8))
+        self.assertFalse(r["stale"])
+
+    def test_platform_breach_long_ago_is_stale(self):
+        df = _bear_tail(60, 47, 8.8)
+        r, _ = self._n(_UP + [_seg("H", 11.5, 46), _seg_og("L", 8.8, 59, 47)], df)
+        self.assertTrue(r["platform_breach"] and r["stale"])
         self.assertFalse(r["fresh_breach"])
 
-    def test_recent_breach_is_fresh_not_stale(self):
-        closes = [10.0] * 57 + [8.0] * 3
-        df = frame([c * 0.99 for c in closes], [c * 1.01 for c in closes], closes)
-        r, _ = self._n(
-            [_seg("L", 9.0, 30), _seg("H", 11.0, 38), _seg("L", 9.5, 45)], df
-        )
-        self.assertFalse(r["stale"])
-        self.assertTrue(r["fresh_breach"])
+    def test_current_low_between_l1_and_l2_is_only_p1(self):
+        df = _bear_tail(60, 56, 9.2)
+        r, _ = self._n(_UP + [_seg("H", 11.5, 50), _seg_og("L", 9.2, 59, 54)], df)
+        self.assertTrue(r["available"] and r["pullback_breached_on_close"])
+        self.assertFalse(r["platform_breach"] or r["breached_on_close"])
 
-    def test_descending_n_confirmed_below_structural_low(self):
-        segs = [_seg("H", 12.0, 30), _seg("L", 10.0, 38), _seg("H", 11.0, 45)]
-        _, d = self._n(segs, _flat(last=9.5))
+    def test_descending_n_latest_two_groups_falling(self):
+        segs = [
+            _seg("H", 12.0, 20),
+            _seg("L", 10.0, 30),
+            _seg("H", 11.0, 38),
+            _seg("L", 9.5, 45),
+        ]
+        _, d = self._n(segs, _flat(last=9.0))
         self.assertTrue(d["available"])
         self.assertEqual(
-            (d["prior_high"], d["structural_low"], d["lower_high"]), (12.0, 10.0, 11.0)
+            (d["prior_high"], d["structural_low"], d["lower_high"]), (12.0, 9.5, 11.0)
         )
         self.assertEqual(d["status"], "confirmed")
 

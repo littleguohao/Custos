@@ -59,23 +59,14 @@ def test_segment_without_bearish_candle_skipped():
     df = _wave()
     df["open"] = df["close"] * 0.99  # 全阳线 ⇒ 每段都无阴线 ⇒ 全部跳过
     assert tm.macd_platform_segments(df) == []
-    assert tm.macd_platform_structure(df)["available"] is False
+    assert bs.check_swing_state(df)["available"] is False
 
 
-def test_states_up_down_and_breach():
-    up = tm.macd_platform_structure(_wave(seed=1, drift=0.004))
-    down = tm.macd_platform_structure(_wave(seed=1, drift=-0.004))
-    assert up["available"] and up["state"] == "上升"
-    assert down["available"] and down["state"] == "下降"
-    assert (
-        up["L3"]["price"] > up["L2"]["price"] and up["H3"]["price"] > up["H2"]["price"]
-    )
-    assert up["transition"] in ("延续", f"由{up['prior_state']}转")
-    df = _wave(seed=1, drift=0.004)
-    st = tm.macd_platform_structure(df)
-    df.loc[len(df) - 1, "close"] = st["L3"]["price"] * 0.9  # 末根收盘砸穿最新平台底 L3
-    after = tm.macd_platform_structure(df)
-    assert after["state"] != "上升" or after["breached"]
+def test_states_up_and_down_on_drift():
+    up = bs.check_swing_state(_wave(seed=1, drift=0.004))
+    down = bs.check_swing_state(_wave(seed=1, drift=-0.004))
+    assert up["available"] and up["now"] == "震荡上涨"
+    assert down["available"] and down["now"] == "震荡下跌"
 
 
 def test_asof_prefix_consistent():
@@ -99,7 +90,10 @@ def test_live_trend_and_n_from_platform_v0589():
     )
     assert an["n_structure"] == bs.check_n_structure(df)
     assert an["descending_n_structure"] == bs.check_descending_n_structure(df)
-    assert tm.macd_platform_structure is bs.macd_platform_structure
+    assert tm.platform_window is bs.platform_window
+    assert not hasattr(
+        bs, "macd_platform_structure"
+    )  # v0.604：三组判走势停用，只留一份走势实现
 
 
 def _seg(kind, price, idx):
@@ -130,28 +124,6 @@ def test_backward_points_merge_same_kind_v0512():
     # 并列取较新者（往回先见到的较新点保留）
     tie = tm.macd_platform_points([_seg("L", 9.0, 0), _seg("L", 9.0, 1)], 3)
     assert tie == [_seg("L", 9.0, 1)]
-
-
-def test_state_and_transition_from_three_groups_v0512(monkeypatch):
-    """最近两组定状态，第三组判延续 / 转折。"""
-    import pandas as pd
-
-    segs = [
-        _seg("L", 10.0, 0),
-        _seg("H", 12.0, 1),
-        _seg("L", 9.0, 2),
-        _seg("H", 11.0, 3),
-        _seg("L", 9.5, 4),
-        _seg("H", 11.5, 5),
-    ]
-    monkeypatch.setattr(bs, "macd_platform_segments", lambda df: segs)
-    df = pd.DataFrame({"close": [10.0] * 8})
-    st = tm.macd_platform_structure(df)
-    assert st["state"] == "上升" and st["prior_state"] == "下降"
-    assert st["transition"] == "由下降转"
-    assert [st[k]["price"] for k in ("L1", "L2", "L3")] == [10.0, 9.0, 9.5]
-    monkeypatch.setattr(bs, "macd_platform_segments", lambda df: segs[2:])
-    assert tm.macd_platform_structure(df)["available"] is False  # 只剩两组
 
 
 def test_rally_segment_from_platform_points_v0591(monkeypatch):

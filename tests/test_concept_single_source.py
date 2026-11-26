@@ -25,6 +25,10 @@ REGISTRY = {
         "core/factors/b1_structure.py",
         "macd_platform_segments",
     ),
+    "走势 / N 结构共用的平台点窗口（近 120 根）": (
+        "core/factors/b1_structure.py",
+        "platform_window",
+    ),
     "上升 N 结构位": ("core/factors/b1_structure.py", "check_n_structure"),
     "下降 N 结构位": ("core/factors/b1_structure.py", "check_descending_n_structure"),
     "上涨段 / 回调段": ("core/factors/b1_structure.py", "rally_segment"),
