@@ -484,12 +484,12 @@ def _section_market_outlook(outlook: dict[str, Any]) -> list[str]:
 
 
 def _section_cls_priority(articles: list[dict[str, Any]], available: bool) -> list[str]:
-    """§2.4 财联社重点栏目：只展示盘前新增文章的内容总结与规则解读。"""
+    """§2.4 财联社重点栏目：只展示盘前新增文章的标题链接。"""
     lines = [
         "",
-        "### 2.4 财联社重点栏目（内容总结＋解读）",
+        "### 2.4 财联社重点栏目（文章链接）",
         "",
-        "> 窗口为前一交易日 17:00～当日 08:50，并排除前次 1700 已收录文章；总结与规则解读不影响交易权限。",
+        "> 窗口为前一交易日 17:00～当日 08:50，并排除前次 1700 已收录文章；点击标题查看原文，不影响交易权限。",
         "",
     ]
     if not available:
@@ -505,7 +505,7 @@ def _section_cls_priority(articles: list[dict[str, Any]], available: bool) -> li
         return clean(value).replace("|", "／").replace("\n", " ")
 
     lines += [
-        "| 栏目 | 时间 | 文章、内容总结与解读 |",
+        "| 栏目 | 时间 | 文章链接 |",
         "|---|---|---|",
     ]
     for row in articles:

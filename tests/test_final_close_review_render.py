@@ -123,12 +123,11 @@ class TestRenderNews:
             evidence=[],
         )
         text = "\n".join(lines)
-        assert "财联社重点栏目（内容总结＋解读）" in text
-        assert "| 栏目 | 时间 | 文章、内容总结与解读 |" in text
+        assert "财联社重点栏目（文章链接）" in text
+        assert "| 栏目 | 时间 | 文章链接 |" in text
         assert "[11月25日涨停分析](https://www.cls.cn/detail/1)" in text
-        assert "**内容总结**：涨停与连板结构原文" in text
-        assert "**解读**：" in text and "舆情热度不等于持续性" in text
-        assert "文章与原文摘要" not in text and "| 解读重点 |" not in text
+        assert "涨停与连板结构原文" not in text
+        assert "内容总结" not in text and "**解读**" not in text
 
     def test_empty_section_says_unavailable_not_blank(self):
         """⚠️ 空节写 `unavailable` 并说明原因（没过时效/来源质量门），

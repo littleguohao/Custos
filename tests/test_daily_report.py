@@ -212,12 +212,11 @@ class TestClsPrioritySection:
             cls_priority_available=True,
         )
         text = "\n".join(lines)
-        assert "### 2.4 财联社重点栏目（内容总结＋解读）" in text
-        assert "| 栏目 | 时间 | 文章、内容总结与解读 |" in text
+        assert "### 2.4 财联社重点栏目（文章链接）" in text
+        assert "| 栏目 | 时间 | 文章链接 |" in text
         assert "[11月25日股市避雷针](https://www.cls.cn/detail/2543561)" in text
-        assert "**内容总结**：减持、解禁与 ST 风险原文" in text
-        assert "**解读**：" in text and "风险线索只用于核查和收紧" in text
-        assert "文章与原文摘要" not in text and "| 解读重点 |" not in text
+        assert "减持、解禁与 ST 风险原文" not in text
+        assert "内容总结" not in text and "**解读**" not in text
 
     def test_missing_priority_material_is_explicit(self):
         lines = dr._section_cls_priority([], available=False)

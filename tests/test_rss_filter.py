@@ -705,20 +705,20 @@ class TestTopicClusters:
         assert rep["window_start"] == "2026-08-07T01:30:00+00:00"
         assert rep["as_of"] == "2026-08-07T09:00:00+00:00"
 
-    def test_cls_article_cell_contains_summary_and_rule_interpretation(self):
+    def test_cls_article_cell_is_link_only(self):
+        """v0.600：报告只放标题链接，正文留在数据文件中，不再放总结与解读。"""
         from custos.datasource.news.cls_priority import render_cls_article
 
         cell = render_cls_article(
             {
                 "title": "11月25日涨停分析",
-                "summary": "财联社11月25日电，今日全市场共51股涨停。封板率为63%，30股封板未遂。",
+                "summary": "今日全市场共51股涨停，封板率为63%。",
                 "cls_priority": "涨停与舆情分析",
                 "source_url": "https://www.cls.cn/detail/2544033",
             }
         )
-        assert "**内容总结**：" in cell and "**解读**：" in cell
-        assert "封板率 63%，仍有分歧" in cell
-        assert "舆情热度不等于持续性" in cell
+        assert cell == "[11月25日涨停分析](https://www.cls.cn/detail/2544033)"
+        assert "内容总结" not in cell and "解读" not in cell
 
     def test_no_theme_match_gives_empty_clusters(self, env, monkeypatch):
         _positions(env, [])
