@@ -288,11 +288,10 @@ class TestCodeMatching:
 
 class TestWindowing:
     def test_premarket_window_starts_at_previous_close(self, env, monkeypatch):
-        """盘前窗口从**上一交易日 15:00** 开始，而不是简单往前推 N 小时 ——
-        否则周末/长假后会漏掉休市期间的全部消息。"""
+        """v0.599：盘前窗口从上一交易日 17:00 开始，覆盖周末与长假休市期。"""
         _positions(env, [])
         _items(
-            env, _item(title="芯片需求回暖", published_at="2026-08-06T16:00:00+08:00")
+            env, _item(title="芯片需求回暖", published_at="2026-08-06T17:00:00+08:00")
         )
         sel, rep = _run(env, monkeypatch)
         assert rep["previous_close_date"] == "2026-08-06"
@@ -616,12 +615,13 @@ class TestTopicClusters:
         assert article["stocks"] == ["600000.SH"]
         assert "逐篇提炼核心逻辑" in doc["cls_priority_rule"]
 
-    def test_premarket_rebuild_is_capped_at_0900(self, env, monkeypatch):
-        """v0.598：盘后重建 0905 材料也不得混入当天收盘后的文章。"""
+    def test_premarket_rebuild_is_capped_at_0850(self, env, monkeypatch):
+        """v0.599：0905 晚点重建仍截至 08:50（保留既有 10 分钟源站时钟容差）。"""
         _positions(env, [])
         _items(
             env,
             _item(title="盘前避雷针", published_at="2026-08-07T08:30:00+08:00"),
+            _item(title="窗口外文章", published_at="2026-08-07T09:01:00+08:00"),
             _item(title="午后收评", published_at="2026-08-07T15:20:00+08:00"),
         )
         _run(
@@ -633,7 +633,7 @@ class TestTopicClusters:
         doc = self._clusters(env)
         titles = {x["title"] for x in doc["in_window_brief"]}
         assert titles == {"盘前避雷针"}
-        assert doc["as_of"] == "2026-08-07T01:00:00+00:00"
+        assert doc["as_of"] == "2026-08-07T00:50:00+00:00"
 
     def test_premarket_excludes_previous_1700_presented_article(self, env, monkeypatch):
         """同一详情页 ID 即使域名不同也排除；只排除前次实际展示的栏目文章。"""
@@ -657,7 +657,7 @@ class TestTopicClusters:
             env,
             _item(
                 title="前日连板股分析",
-                published_at="2026-08-06T16:00:00+08:00",
+                published_at="2026-08-06T17:00:00+08:00",
                 cls_priority="连板股分析",
                 source_url="https://m.cls.cn/detail/100",
             ),
@@ -673,22 +673,37 @@ class TestTopicClusters:
         assert [x["title"] for x in doc["cls_priority_articles"]] == ["当日股市避雷针"]
         assert doc["cls_priority_previous_postclose_excluded"] == 1
 
-    def test_postclose_window_starts_at_same_day_1500(self, env, monkeypatch):
+    def test_postclose_window_is_0930_to_1700(self, env, monkeypatch):
+        """v0.599：1700 覆盖盘中新增，但排除 09:30 前与 17:00 容差之后的文章。"""
         _positions(env, [])
         _items(
             env,
-            _item(title="上午已收录", published_at="2026-08-07T08:30:00+08:00"),
-            _item(title="收盘前文章", published_at="2026-08-07T14:59:00+08:00"),
-            _item(title="收盘后文章", published_at="2026-08-07T15:20:00+08:00"),
+            *[
+                _item(
+                    title=title,
+                    published_at=published,
+                    source_url=f"https://x.com/postclose-{i}",
+                )
+                for i, (title, published) in enumerate(
+                    [
+                        ("0905已收录", "2026-08-07T08:30:00+08:00"),
+                        ("窗口起点前", "2026-08-07T09:29:00+08:00"),
+                        ("窗口起点", "2026-08-07T09:30:00+08:00"),
+                        ("午盘文章", "2026-08-07T14:59:00+08:00"),
+                        ("超过容差", "2026-08-07T17:11:00+08:00"),
+                    ]
+                )
+            ],
         )
         sel, rep = _run(
             env,
             monkeypatch,
             session="postclose",
-            as_of="2026-08-07T17:00:00+08:00",
+            as_of="2026-08-07T18:00:00+08:00",
         )
-        assert [x["title"] for x in sel] == ["收盘后文章"]
-        assert rep["window_start"] == "2026-08-07T07:00:00+00:00"
+        assert {x["title"] for x in sel} == {"窗口起点", "午盘文章"}
+        assert rep["window_start"] == "2026-08-07T01:30:00+00:00"
+        assert rep["as_of"] == "2026-08-07T09:00:00+00:00"
 
     def test_cls_article_cell_contains_summary_and_rule_interpretation(self):
         from custos.datasource.news.cls_priority import render_cls_article

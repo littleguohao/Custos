@@ -394,9 +394,10 @@ def _gather_inputs(day: str, cal_day: str) -> dict[str, Any]:
     market_events = intel.get("market_events") or fallback_rss_events(cal_day)
     holding_events = intel.get("holding_events") or []
     holding_event_map = {code(x.get("code")): x for x in holding_events}
-    window = intel.get("window") or {}
-    window_start = window.get("start") or f"{prior_day} 15:00"
-    window_end = window.get("end") or f"{cal_day} 09:00"
+    # v0.599：报告头部与 RSS 实际过滤一致；上一交易日不能由“最近复盘日”代替。
+    news_previous_day = previous_confirmed_trading_day(cal_day) or prior_day
+    window_start = f"{news_previous_day}T17:00:00+08:00"
+    window_end = f"{cal_day}T08:50:00+08:00"
     # v0.587：重点栏目直接进 0905 正式报告，不依赖 LLM 是否写入情报。
     cls_priority_path = (
         DATA
@@ -488,7 +489,7 @@ def _section_cls_priority(articles: list[dict[str, Any]], available: bool) -> li
         "",
         "### 2.4 财联社重点栏目（内容总结＋解读）",
         "",
-        "> 仅展示盘前窗口内、上一交易日 1700 未收录的文章；总结与规则解读不影响交易权限。",
+        "> 窗口为前一交易日 17:00～当日 08:50，并排除前次 1700 已收录文章；总结与规则解读不影响交易权限。",
         "",
     ]
     if not available:

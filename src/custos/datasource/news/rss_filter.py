@@ -69,11 +69,12 @@ def parse_dt(s):
 
 
 def premarket_window(day, asof, fallback_hours):
+    """0905 固定窗口：上一交易日 17:00 → 当日 08:50（结束端在 main 固定）。"""
     previous = previous_confirmed_trading_day(day)
     if not previous:
         return asof - timedelta(hours=fallback_hours), None
     start = (
-        datetime.fromisoformat(previous + "T15:00:00")
+        datetime.fromisoformat(previous + "T17:00:00")
         .replace(tzinfo=SH)
         .astimezone(timezone.utc)
     )
@@ -446,21 +447,27 @@ def main():
     cutoff = asof - timedelta(hours=hours)
     previous_close_date = None
     if a.session_type == "premarket":
-        # v0.598：盘前材料无论盘后何时重建都截至 09:00，避免混入当日午后文章。
+        # v0.599：0905 固定为前日 17:00 → 当日 08:50，晚点重建也不扩张窗口。
         premarket_end = (
-            datetime.fromisoformat(a.date + "T09:00:00")
+            datetime.fromisoformat(a.date + "T08:50:00")
             .replace(tzinfo=SH)
             .astimezone(timezone.utc)
         )
         asof = min(asof, premarket_end)
         cutoff, previous_close_date = premarket_window(a.date, asof, hours)
     elif a.session_type == "postclose":
-        # v0.598：盘后报告只看当日 15:00 后的新增材料，不再滚动回看 18 小时。
+        # v0.599：1700 固定为当日 09:30 → 17:00，覆盖盘中新增，晚间重建不扩张。
         cutoff = (
-            datetime.fromisoformat(a.date + "T15:00:00")
+            datetime.fromisoformat(a.date + "T09:30:00")
             .replace(tzinfo=SH)
             .astimezone(timezone.utc)
         )
+        postclose_end = (
+            datetime.fromisoformat(a.date + "T17:00:00")
+            .replace(tzinfo=SH)
+            .astimezone(timezone.utc)
+        )
+        asof = min(asof, postclose_end)
     limit = cfg["limits"][a.session_type]
     per_source_limit = cfg.get("per_source_limits", {}).get(a.session_type, limit)
     names, codes, positions_source = entities(a.date)

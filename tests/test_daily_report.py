@@ -287,6 +287,7 @@ class TestNonTradingDayReport:
         assert "2026-09-18" in text, "§1 休市行必须标明数据口径日"
         assert "防守" in text, "§1 结论应来自最近交易日 0918 的 ChiefDecision"
         assert "偏多" in text, "§3 海外行情必须按日历日 0919 取"
+        assert "2026-09-18T17:00:00+08:00 至 2026-09-19T08:50:00+08:00" in text
         assert "## 5. 数据时效与声明" in text
 
     def test_trading_day_keeps_section4(self, tmp_path, monkeypatch):

@@ -29,8 +29,8 @@ def announcement_window(day: str) -> tuple[datetime, datetime]:
     start_day = date_from_iso(previous)
     end_day = date_from_iso(day)
     return (
-        datetime(start_day.year, start_day.month, start_day.day, 15, 0, tzinfo=CST),
-        datetime(end_day.year, end_day.month, end_day.day, 9, 0, tzinfo=CST),
+        datetime(start_day.year, start_day.month, start_day.day, 17, 0, tzinfo=CST),
+        datetime(end_day.year, end_day.month, end_day.day, 8, 50, tzinfo=CST),
     )
 
 
