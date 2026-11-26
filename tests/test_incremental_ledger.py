@@ -83,6 +83,58 @@ class TestFingerprint:
         )
 
 
+class TestIncrementalOrdering:
+    def test_blank_time_roundtrip_preserves_import_order(self, tmp_path, monkeypatch):
+        """无成交时间的同日回转不得被指纹字典序改成先卖后买（2026-11-26 实测）。"""
+        import pathlib as _pl
+
+        for attr in dir(il):
+            value = getattr(il, attr, None)
+            if attr.isupper() and isinstance(value, _pl.Path):
+                monkeypatch.setattr(
+                    il, attr, tmp_path if value.suffix == "" else tmp_path / value.name
+                )
+        monkeypatch.setattr(positions_history, "HISTORY_DIR", tmp_path / "hist")
+        monkeypatch.setattr(il, "_sync_plans_best_effort", lambda *args: None)
+
+        rows = [
+            {
+                "成交日期": "2026-11-26",
+                "成交时间": "",
+                "代码": "513010",
+                "名称": "港股科技",
+                "交易类别": "买入",
+                "成交数量": 439300.0,
+                "成交价格": 0.451,
+                "成交金额": 198124.3,
+                "发生金额": -198124.3,
+                "费用": 19.81,
+                "备注": "投资账本MCP（接口无成交时间字段）",
+            },
+            {
+                "成交日期": "2026-11-26",
+                "成交时间": "",
+                "代码": "513010",
+                "名称": "港股科技",
+                "交易类别": "卖出",
+                "成交数量": 439300.0,
+                "成交价格": 0.442,
+                "成交金额": 194170.6,
+                "发生金额": 194170.6,
+                "费用": 19.42,
+                "备注": "投资账本MCP（接口无成交时间字段）",
+            },
+        ]
+        source = tmp_path / "ordered.csv"
+        pd.DataFrame(rows).to_csv(source, index=False, encoding="utf-8-sig")
+        audit = il.main(["--input", str(source), "--date", "2026-11-26"])
+
+        # 真实指纹卖单 < 买单；旧的第三排序键会把卖单提到买单前，确保用例能抓回归。
+        assert audit["transaction_ids"][1] < audit["transaction_ids"][0]
+        saved = pd.read_csv(tmp_path / "master_trade_ledger.csv", dtype={"代码": str})
+        assert saved["交易类别"].tolist() == ["买入", "卖出"]
+
+
 class TestApplyPositions:
     @pytest.fixture(autouse=True)
     def _tmp_pos(self, tmp_path, monkeypatch):

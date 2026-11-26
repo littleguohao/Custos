@@ -366,7 +366,9 @@ def main(argv=None) -> dict:
         before = _read_positions()
         positions = compute_positions(new, before)
         merged = pd.concat([existing, new], ignore_index=True)
-        merged = merged.sort_values(["成交日期", "成交时间", "transaction_id"])
+        # 与对账回放同一口径：同一时间保持导入顺序。投资账本没有成交时间，
+        # 不能再按成交指纹排序，否则同日先买后卖可能被字典序改写成先卖后买。
+        merged = merged.sort_values(["成交日期", "成交时间"], kind="stable")
         stock = merged[merged["交易类别"].isin(TRADE_CATEGORIES)].copy()
 
         staged = [

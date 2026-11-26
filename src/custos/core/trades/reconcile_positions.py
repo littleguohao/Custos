@@ -116,7 +116,8 @@ def replay_ledger(
             "trade_rows": 0,
         }
     trades = norm(trades)
-    # 回放必须按成交顺序：先卖后买的顺序会把合法卖出误判成超卖
+    # 回放必须按成交顺序：先卖后买的顺序会把合法卖出误判成超卖。
+    # 与 incremental_ledger 落盘排序保持一致：同一时间稳定保留台账物理顺序。
     trades = trades.sort_values(["成交日期", "成交时间"], kind="stable")
     try:
         pos = compute_positions(trades, list(baseline or []))
