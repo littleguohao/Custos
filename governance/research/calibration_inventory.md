@@ -282,6 +282,9 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 - **价格高低点改平台点 / 背离统一（v0.594，owner 2026-11-25）**：价格高低点统一取 MACD 平台点（`b1_structure.macd_platform_segments`）——顶部放量阴线的高点（阴线在平台顶所在红柱段内或段后 ≤2 根，owner 58 张一致数不变 49）、双头 ④、W 底双底、回调缩量 v2 前一低点；MACD 背离统一走 `macd_technics.macd_divergence_v2_arrays`——板块相位、QN ADX、W 底背离腿。删：MACD 背离 v1（*_v1 字段）、出货旧 ①②（legacy_v1）、6 套分型摆点。J<13 样本：④ 0.3% → 3.0%、出货 high（否决）4.8% → 6.4%、顶部放量阴 47.4% → 47.1%。
 - **出货 ③ 阶梯放量（v0.601，owner 2026-11-26 要校准）**：J<13 样本出货「观察」约 57%，几乎都来自 ③（2026-08 讲义转译，从未校准）。新图集 `stairstep__mining_v1`（36 张：判成立 / 不成立 / 边界各 12），主图叠加 QSX（蓝）/ DKS（橙），紫线标连阴段与跌破的那根。旧 `distribution__mining_v1`（问整体风险等级，旧 ①② 口径）归档不再标。
 - **走势 / 持仓 N 结构改口径（v0.604，owner 2026-11-26「120 根的所有 H L 都识别出来看走势」）**：平台点逐根核对与 owner 通达信公式一致（30 只 × 600 根：压力价 17,766 / 17,766、支撑价 17,876 / 17,876）。走势改为近 120 根全部平台点、在最高 H / 最低 L 切两段（每段 ≥4 点），owner 标的 133 张后段一致 76 → 89、整条 39 → 45；未参与调参的 37 张后段 25 → 31、整条 13 → 11。转折判不准（有无转折判反 60/133），待 `trend_shape__mining_v4`（36 张，九种走势各 4 张，图上逐点标 H / L 与切点）。
+  - **读回 `trend_shape__mining_v4/labels18.csv`（owner 2026-11-27「基本上问题不大」）**：36 张，不确定 5（备注都是三段走势，如「上涨 下跌 上涨」，菜单只有两段）；其余 31 张整条一致 21（68%）、后段一致 23（74%）；有无转折判反 7/31（133 张旧样本是 60/133）。
+    不一致 8 张：最后一段只有 1~3 个平台点、切不出来 4 张（#1 #27 #32 #33：刚从最低 L 反弹，或最高 H 后一根急跌到新低）；首尾差很小 2 张（#20 H 3.44 → 3.45、#14 H 缓降 L 持平）；切点选错 2 张（#22 #36）。
+    试过「切点前后各并入 1 点」「变化 <1% 算持平」：新 31 张整条 21 → 18 / 20，旧 133 张后段 89 → 83 / 89，都没变好 ⇒ 现行不改。图集已归档。
   持仓 N 结构改取最近两组已完成平台点（底、顶都抬高 = 上升 N；当前绿柱段平台底跌破 L1 = P0），🔄 v0.589「近 90 根往回找任一组 L1 → H1 → 更高 L2」停用；`n_structure__mining_v1` 作废，改标 `n_structure__mining_v2`（72 张）。
 - **按优先级补校准（v0.603，owner 2026-11-26）**：① 持仓 N 结构（v0.589 起由 MACD 平台点推出，P0 12% → 4%）：`n_structure__mining_v1`（72 张，三项：有无上升 N / 新鲜跌破 L1 / 下降 N 确认，图标 L1 / H1 / L2 或 H1 / L1 / H2，pool=all）；生产机旧收盘分型口径的 `n_structure__holdings_v3cand` 作废。
   ② 冲刺波（live 否决）：`wave_sprint__mining_v1`（36 张，图标上涨段与涨停数 / 最大 10 日涨幅 / 高点量比）；旧 `wave_type__mining_v1`（问四分类，涨停 / 上涨段改口径前生成）归档。③ 出货 ④⑤⑥：`dist_more__mining_v1`（72 张）。③ 阶梯放量见 `stairstep__mining_v1`。
@@ -378,8 +381,8 @@ uv run python -m custos.research calib_probe --module <模块> --mode sensitivit
 | `b1_structure` | `OW4_FAST_BARS` | 10 | 快速：≤10 根（「几个交易日内」） | candidate | 已标 · live 提示（v0.561） |
 | `b1_structure` | `OW4_RISE_PCT` | 50.0 | 大幅：最高价相对起点最低价涨 ≥50% | candidate | 已标 · live 提示（v0.561） |
 | `b1_structure` | `OW4_MAX_PULLBACK` | 0.1 | 连续：拉升途中收盘较途中最高收盘回撤 <10%，否则视为断开 | candidate | 已标 · live 提示（v0.561） |
-| `b1_structure` | `PLATFORM_BARS` | 120 | 走势三态与持仓 N 结构共用：近 120 根（图上显示的范围）内的全部 MACD 平台点（v0.604 取代 N_LOOKBACK=90） | candidate | 候选（owner 2026-11-26，图集 `trend_shape__mining_v4` / `n_structure__mining_v2`） |
-| `b1_structure` | `SW_MIN_PART_POINTS` | 4 | 走势按最高 H / 最低 L 切两段时每段至少 4 个平台点（两组 H / L） | candidate | 候选（owner 2026-11-26，图集 `trend_shape__mining_v4`） |
+| `b1_structure` | `PLATFORM_BARS` | 120 | 走势三态与持仓 N 结构共用：近 120 根（图上显示的范围）内的全部 MACD 平台点（v0.604 取代 N_LOOKBACK=90） | candidate | 已标（走势 `trend_shape__mining_v4` owner 2026-11-27「问题不大」；持仓 N `n_structure__mining_v2` 待标） |
+| `b1_structure` | `SW_MIN_PART_POINTS` | 4 | 走势按最高 H / 最低 L 切两段时每段至少 4 个平台点（两组 H / L） | candidate | 已标（`trend_shape__mining_v4`，owner 2026-11-27「问题不大」） |
 | `b1_structure` | `N_STALE_BREACH_BARS` | 10 | 跌破关键位超过 10 根视为陈旧结构（不再触发新鲜 P0） | candidate | 退出人工校准（钉测管，v0.589） |
 | `capital_intent` | `CAP_STRONG` | 5 | - | candidate | 未校准 |
 | `capital_intent` | `CAP_MID` | 2 | - | candidate | 未校准 |
