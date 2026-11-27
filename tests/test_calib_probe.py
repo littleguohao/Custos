@@ -862,3 +862,28 @@ def test_trend_gallery_marks_all_platform_points_and_split_v0604():
         [[1, "f", "600000", "2024-01-02", "hit", "x", ""]], "shape", "k", ask=[]
     )
     assert '"ask": []' in html and "(M.ask || M.extras)" in html
+
+
+def test_n_structure_gallery_fewer_samples_v0605():
+    """owner 2026-11-27「72 太多了」：只有「有无上升 N」抽不成立类，破位两题只抽成立类，不抽参数边界类。"""
+    sc = cp.MODULES["n_structure"]["sample_classes"]
+    assert sc["n_structure.available"] == ["hit", "miss"]
+    assert (
+        sc["n_structure.fresh_breach"]
+        == sc["descending_n_structure.fresh_breach"]
+        == ["hit"]
+    )
+
+
+def test_field_def_has_no_duplicate_keys():
+    """字典字面量里重复的键会让后写的旧问句静默覆盖新问句（v0.605 前 N 结构两题就是这样）。"""
+    import ast
+    import collections
+    from pathlib import Path
+
+    tree = ast.parse(Path(cp.__file__).read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            ks = [k.value for k in node.keys if isinstance(k, ast.Constant)]
+            dup = [k for k, c in collections.Counter(ks).items() if c > 1]
+            assert not dup, f"line {node.lineno} 重复键：{dup}"

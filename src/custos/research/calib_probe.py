@@ -50,6 +50,12 @@ MODULES: dict[str, dict[str, Any]] = {
             "n_structure.fresh_breach",
             "descending_n_structure.fresh_breach",
         ],
+        # v0.605（owner 2026-11-27「72 太多」）：有无上升 N 抽成立 / 不成立，两个破位题只抽成立；不抽参数边界类
+        "sample_classes": {
+            "n_structure.available": ["hit", "miss"],
+            "n_structure.fresh_breach": ["hit"],
+            "descending_n_structure.fresh_breach": ["hit"],
+        },
         "params": [
             "PLATFORM_BARS",
             "N_STALE_BREACH_BARS",
@@ -1168,6 +1174,8 @@ def _samples(pool, base, hits, flips, fields, args, rng) -> dict[str, list[dict]
         one_per_code = MODULES.get(args.module, {}).get("label_mode") == "shape"
         seen_codes: set[str] = set()
         only = MODULES.get(args.module, {}).get("sample_classes")
+        if isinstance(only, dict):  # v0.605：按字段指定要抽的类
+            only = only.get(f)
         for c, keys in cls.items():
             if only and c not in only:
                 continue
@@ -1427,12 +1435,6 @@ FIELD_DEF: dict[str, str] = {
     "macd_v2.top_divergence.hit": "MACD 顶背离 v2（红柱和红柱比）：最近两组红柱，后一波股价创新高，最长红柱比前一波短（同组多波峰按波比）。图上紫线标两波的最高价",
     "macd_v2.three_peaks.hit": "三打白骨精 v2：最近三波红柱，股价高点逐波抬高，最长红柱逐波缩短。图上紫线标三波的最高价",
     "trend_shape.combo": "走势三态（v0.604）：近 120 根的全部 MACD 平台点 H / L 都标在图上，在最高 H 或最低 L 处切两段（粉色竖线），每段看首尾的 H、L：都抬高 = 上涨，都降低 = 下跌，其余 = 横盘。请选你看到的走势；转折点或某一段判得不对，备注写在哪",
-    "n_structure.status": "上升 N 型结构（分型版）：前低 → 前高 → 回踩不破前低形成更高的低点；状态为成立 / 确认 / 破位等",
-    "n_structure.fresh_breach": "上升 N 型结构是否刚刚被跌破（收盘跌破结构前低）",
-    "descending_n_structure.status": "下降 N 型结构（分型版）：高点、低点依次下移",
-    "descending_n_structure.fresh_breach": "下降 N 型结构是否刚刚被向上突破",
-    "n_structure_macd.state": "MACD 平台结构（往回匹配三组平台点）：最近两组平台底 / 顶都抬高 = 上升，都下移 = 下降，其余 = 横盘震荡",
-    "n_structure_macd.transition": "MACD 平台结构：当前状态是延续，还是刚由另一状态转来（第三组平台点判定）",
     "n_structure_macd.breached": "MACD 平台上升结构里，当根收盘是否跌破最新平台底 L3",
     "trend.state": "趋势三态：收盘与 MA25 / MA60 的排列、MA25 斜率、近 20 日高低点抬升或下移，判上涨 / 下跌 / 横盘震荡",
     "box_20d.position": "收盘在近 20 日高低点箱体里的位置（上沿 / 中部 / 下沿等）",
