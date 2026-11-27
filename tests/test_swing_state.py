@@ -157,3 +157,31 @@ def test_one_wave_v4_slow_or_broken_not_hit():
         }
     )
     assert bs.check_one_wave_v4(df)["hit"] is False
+
+
+def test_short_tail_new_low_or_high_v0609(monkeypatch):
+    """owner 2026-11-27：切点后不足 4 个点，但最后一个点是窗口最低 L（最高 H）⇒ 后段算下跌（上涨）。"""
+    up_then_crash = [
+        _seg("L", 9, 1),
+        _seg("H", 11, 5),
+        _seg("L", 9.5, 10),
+        _seg("H", 12, 15),
+        _seg("L", 10, 20),
+        _seg("H", 13, 25),
+        _seg("L", 8, 30),
+    ]
+    r = _with(monkeypatch, up_then_crash)
+    assert r["state"] == "上涨转下跌" and r["turn_bars_ago"] == 59 - 25
+    down_then_pop = [
+        _seg("H", 12, 1),
+        _seg("L", 10, 5),
+        _seg("H", 11, 10),
+        _seg("L", 9, 15),
+        _seg("H", 10, 20),
+        _seg("L", 8, 25),
+        _seg("H", 13, 30),
+    ]
+    assert _with(monkeypatch, down_then_pop)["state"] == "下跌转上涨"
+    # 最后一个点不是窗口极值 ⇒ 不适用（整段一个态）
+    mild = up_then_crash[:-1] + [_seg("L", 9.8, 30)]
+    assert _with(monkeypatch, mild)["turn_bars_ago"] is None

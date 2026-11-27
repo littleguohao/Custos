@@ -803,6 +803,7 @@ def check_swing_state(df) -> dict[str, Any]:
     个点），每段看首尾的平台底与平台顶：都抬高 = 上涨，都降低 = 下跌，其余 = 横盘。两段不同 ⇒「X 转 Y」（两个切点都可用时取较晚的）；
     切不出不同的两段 ⇒ 整段一个态。``now`` = 当前态全称；``turn_bars_ago`` = 切点距当根根数。不足 4 个点 ⇒ ``available=False``。
     owner 标的 133 张：后段一致 89（v0.589 三组版 76）；未参与调参的 37 张后段 31（25）。
+    v0.609：切点后不足 4 个点、但最后一个点是窗口最低 L（最高 H）⇒ 后段算下跌（上涨）；133 张后段 89 → 91，v0.604 图集 31 张 23 → 24。
     🔄 v0.589~v0.603 的「往回取三组，最近两组定态、第三组判转折」停用；v4 两段直线拟合（SW4_*）v0.589 已停用。"""
     off = {
         "available": False,
@@ -834,6 +835,17 @@ def check_swing_state(df) -> dict[str, Any]:
             a, b = _part_state(pts[: k + 1]), _part_state(pts[k:])
             if a != b:
                 cut = (k, a, b)
+    # v0.609（owner 2026-11-27）：切点之后不足 SW_MIN_PART_POINTS 个点，但最后一个点就是窗口最低 L（最高 H）
+    # ⇒ 后段直接算下跌（上涨）。例：最高 H 之后一根急跌到新低、刚从最低 L 反弹到新高。
+    last = len(pts) - 1
+    if k_lo == last and 2 <= last + 1 - k_hi < SW_MIN_PART_POINTS <= k_hi + 1:
+        a = _part_state(pts[: k_hi + 1])
+        if a != "下降":
+            cut = (k_hi, a, "下降")
+    if k_hi == last and 2 <= last + 1 - k_lo < SW_MIN_PART_POINTS <= k_lo + 1:
+        a = _part_state(pts[: k_lo + 1])
+        if a != "上升":
+            cut = (k_lo, a, "上升")
     base = {"available": True, "n_points": len(pts), "basis": "macd_platform"}
     if cut is None:
         st = _part_state(pts)
