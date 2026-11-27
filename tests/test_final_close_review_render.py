@@ -93,17 +93,32 @@ class TestSectorFor:
 
 
 class TestRenderNews:
-    """v0.57 角色定版：盘后 §2 从信息流压缩为「与今日操作相关的事实核对」。"""
+    """owner 2026-11-27：盘后 §2 改为新闻热度与重点行业影响。"""
 
-    def test_section_title_is_fact_check(self):
+    @staticmethod
+    def _industry_row(title, **kw):
+        row = {
+            "title": title,
+            "published_at": "2026-11-27T08:00:00+00:00",
+            "source_name": "财联社-电报快讯",
+            "source_url": "https://www.cls.cn/detail/2545404",
+            "matched_industries": ["科技", "AI"],
+            "heat_level": "高",
+            "heat_score": 35,
+            "industry_impact_level": "高",
+            "industry_impact_score": 70,
+            "impact_drivers": ["政策规划"],
+            "relevance_score": 105,
+        }
+        row.update(kw)
+        return row
+
+    def test_section_title_is_industry_heat(self):
         lines = []
         fcr.render_news(lines, {})
-        assert "## 2. 新闻、政策、风向与舆情（与今日操作相关的事实核对）" in "\n".join(
-            lines
-        )
+        assert "## 2. 新闻热度与行业影响" in "\n".join(lines)
 
     def test_cls_priority_rendered_without_holding_intersection(self):
-        """重点栏目独立展示，不因没有持仓交集而被普通事实核对过滤。"""
         lines = []
         fcr.render_news(
             lines,
@@ -114,7 +129,6 @@ class TestRenderNews:
                         "title": "11月25日涨停分析",
                         "summary": "涨停与连板结构原文",
                         "cls_priority": "涨停与舆情分析",
-                        "analysis_focus": "看封板率、焦点股与情绪",
                         "source_url": "https://www.cls.cn/detail/1",
                     }
                 ],
@@ -130,60 +144,35 @@ class TestRenderNews:
         assert "内容总结" not in text and "**解读**" not in text
 
     def test_empty_section_says_unavailable_not_blank(self):
-        """⚠️ 空节写 `unavailable` 并说明原因（没过时效/来源质量门），
-        不是留空 —— 留空分不清「没消息」与「这步没跑」。"""
         lines = []
         fcr.render_news(lines, {"sections": {}})
         assert any("`unavailable`" in x and "时效和来源质量门" in x for x in lines)
 
-    def test_only_operation_relevant_facts_kept(self):
-        """核心断言：无交集的行不进表（信息流压缩），有交集的进。"""
+    def test_industry_news_shown_without_holding_match(self):
+        """广东算力规划没有持仓命中，也必须按行业影响进入正文。"""
         lines = []
         fcr.render_news(
             lines,
             {
                 "sections": {
-                    "政策": [
-                        {
-                            "published_at": "2026-08-07T09:00",
-                            "title": "国常会部署",
-                            "source_name": "gov.cn",
-                            "fact_status": "confirmed",
-                            "matched_themes": ["半导体"],
-                            "trade_meaning": "利多",
-                        },
-                        {
-                            "published_at": "2026-08-07T10:00",
-                            "title": "无关国际新闻",
-                            "source_name": "x",
-                            "fact_status": "confirmed",
-                            "matched_themes": ["地缘"],
-                        },
+                    "信息": [
+                        self._industry_row("广东算力发展十五五规划"),
+                        self._industry_row(
+                            "无关国际新闻", matched_industries=[], relevance_score=999
+                        ),
                     ]
                 }
             },
-            hold_sectors={"半导体"},
-        )
-        text = "\n".join(lines)
-        assert "国常会部署" in text and "半导体" in text and "gov.cn/confirmed" in text
-        assert "无关国际新闻" not in text, "无交集的信息流条目必须被压缩掉"
-
-    def test_no_intersection_says_so(self):
-        """有证据但无交集 ⇒ 如实说「已检索无交集」，不是静默空节（v0.136 措辞：
-        与「这步没跑」的 unavailable 明确区分；``evidence=[]`` 表示全量证据已扫描）。"""
-        lines = []
-        fcr.render_news(
-            lines,
-            {"sections": {"信息": [{"title": "t", "matched_themes": ["宏观政策"]}]}},
-            hold_sectors={"半导体"},
             evidence=[],
         )
-        assert any("信息流已检索，无与持仓/操作交集的事实" in x for x in lines)
+        text = "\n".join(lines)
+        assert "重点行业热度与影响" in text
+        assert "[广东算力发展十五五规划](https://www.cls.cn/detail/2545404)" in text
+        assert "政策驱动" in text and "高/35" in text and "高/70" in text
+        assert "无关国际新闻" not in text
+        assert "关联持仓" not in text and "与今日操作的交集" not in text
 
-    def test_holding_code_match_counts(self):
-        """matched_codes 命中持仓代码算交集（生产者形状：matched_codes=代码、
-        matched_holdings=名称——2026-08-14 前错用 matched_holdings 相交，
-        生产上恒为空）。"""
+    def test_holding_code_alone_does_not_show_news(self):
         lines = []
         fcr.render_news(
             lines,
@@ -194,48 +183,48 @@ class TestRenderNews:
                             "title": "浦发银行公告",
                             "matched_holdings": ["浦发银行"],
                             "matched_codes": ["600000"],
+                            "matched_industries": [],
                         }
                     ]
                 }
             },
             hold_codes={"600000"},
-        )
-        assert any("浦发银行公告" in x for x in lines)
-
-    def test_holding_names_alone_do_not_match_codes(self):
-        """名称键（matched_holdings）不得当成代码用——名称与代码永不相交，
-        若错用它做代码交集，生产数据（只有名称）会静默漏报。"""
-        lines = []
-        fcr.render_news(
-            lines,
-            {"sections": {"信息": [{"title": "t", "matched_holdings": ["浦发银行"]}]}},
-            hold_codes={"600000"},
             evidence=[],
         )
-        assert any("无与持仓/操作交集的事实" in x for x in lines)
+        text = "\n".join(lines)
+        assert "浦发银行公告" not in text
+        assert "当前窗口无科技、AI、医疗医药、电力、电网" in text
 
     def test_caps_at_eight_rows(self):
-        """有界：最多 8 条 —— 报告要有界，否则一节几十条没人读。"""
         lines = []
         fcr.render_news(
             lines,
-            {
-                "sections": {
-                    "信息": [
-                        {"title": f"第{i}条", "matched_codes": ["600000"]}
-                        for i in range(12)
-                    ]
-                }
-            },
-            hold_codes={"600000"},
+            {"sections": {"信息": [self._industry_row(f"第{i}条") for i in range(12)]}},
         )
         assert sum(1 for x in lines if "第" in x and "条" in x) == 8
 
     def test_missing_sources_listed(self):
-        """缺哪些新闻源要写出来 —— 否则「节为空」无法归因。"""
         lines = []
         fcr.render_news(lines, {"missing": ["rss_filter", "postclose_digest"]})
         assert any("新闻数据缺失" in x and "rss_filter" in x for x in lines)
+
+    def test_legacy_holding_fallback_is_not_called(self, monkeypatch):
+        monkeypatch.setattr(
+            fcr, "_digest_rows", lambda *a: pytest.fail("持仓交集筛选不得再调用")
+        )
+        monkeypatch.setattr(
+            fcr, "_evidence_fallback", lambda *a, **k: pytest.fail("持仓兜底不得再调用")
+        )
+        lines = []
+        fcr.render_news(
+            lines,
+            {"sections": {"信息": [self._industry_row("行业新闻")]}},
+            hold_codes={"600000"},
+            hold_sectors={"半导体"},
+            hold_keywords={"600000": ("浦发银行", ["浦发银行"])},
+            evidence=[],
+        )
+        assert "行业新闻" in "\n".join(lines)
 
 
 class TestExtractedUnits:
@@ -683,140 +672,6 @@ class TestHabitCheck:
         text = "\n".join(lines)
         assert "unavailable" in text and "未执行检查" in text
         assert "今日无复发" not in text
-
-
-class TestNewsEvidenceFallback:
-    """§2 v0.136：digest 优先 + 全量 RSS 证据兜底。
-
-    钉的是匹配层修复本身：digest 没选上的候选不再漏报（owner 案例：「美国发起
-    电力设备检查」影响电力持仓，但该新闻不在 digest 池里）；仍无交集如实写明；
-    证据文件缺失 unavailable（与「检索了没有」分开）。
-    """
-
-    EVIDENCE = [
-        {
-            "title": "美国发起电力设备检查",
-            "summary": "涉及输变电设备出口",
-            "source_name": "金十数据-快讯",
-            "source_tier": "B",
-            "published_at": "2026-08-28T10:00:00+00:00",
-        },
-        {
-            "title": "无关国际新闻",
-            "summary": "与持仓无关",
-            "source_name": "x",
-            "source_tier": "C",
-            "published_at": "2026-08-28T11:00:00+00:00",
-        },
-    ]
-    KEYWORDS = {"600312": ("平高电气", ["平高电气", "电气设备", "输变电设备", "电力"])}
-
-    def test_fallback_hit_when_digest_missed(self):
-        """核心断言：digest 无交集但全量证据按持仓关键词命中 ⇒ 列出（带来源/tier/时间）。"""
-        lines = []
-        fcr.render_news(
-            lines,
-            {
-                "sections": {
-                    "信息": [{"title": "digest 里的无关条", "matched_themes": ["宏观"]}]
-                }
-            },
-            hold_sectors={"半导体"},
-            evidence=self.EVIDENCE,
-            hold_keywords=self.KEYWORDS,
-        )
-        text = "\n".join(lines)
-        assert "美国发起电力设备检查" in text
-        assert "金十数据-快讯/B" in text and "600312 平高电气" in text
-        assert "无关国际新闻" not in text, "无交集的证据条目必须被压缩掉"
-
-    def test_fallback_no_hit_says_searched_no_intersection(self):
-        """全量证据检索后仍无交集 ⇒ 如实写「信息流已检索，无与持仓/操作交集的事实」。"""
-        lines = []
-        fcr.render_news(
-            lines,
-            {"sections": {"信息": [{"title": "t", "matched_themes": ["宏观"]}]}},
-            evidence=[self.EVIDENCE[1]],
-            hold_keywords=self.KEYWORDS,
-        )
-        assert any("信息流已检索，无与持仓/操作交集的事实" in x for x in lines)
-
-    def test_missing_evidence_is_unavailable_not_no_intersection(self):
-        """⚠️ 证据文件缺失 ⇒ unavailable「兜底匹配未执行」——不得写成「无交集」。"""
-        lines = []
-        fcr.render_news(
-            lines,
-            {"sections": {"信息": [{"title": "t", "matched_themes": ["宏观"]}]}},
-            evidence=None,
-            hold_keywords=self.KEYWORDS,
-        )
-        text = "\n".join(lines)
-        assert "兜底匹配未执行" in text
-        assert "无与持仓/操作交集的事实" not in text
-
-    def test_digest_priority_and_fallback_dedupes(self):
-        """digest 已展示的条目，兜底不再重复列（按标题去重）。"""
-        lines = []
-        fcr.render_news(
-            lines,
-            {
-                "sections": {
-                    "信息": [
-                        {
-                            "title": "美国发起电力设备检查",
-                            "matched_themes": ["电气设备"],
-                            "source_name": "金十数据-快讯",
-                            "fact_status": "confirmed",
-                        }
-                    ]
-                }
-            },
-            hold_sectors={"电气设备"},
-            evidence=self.EVIDENCE,
-            hold_keywords=self.KEYWORDS,
-        )
-        text = "\n".join(lines)
-        assert text.count("美国发起电力设备检查") == 1
-
-    def test_keywords_built_from_mapping_and_themes(self):
-        """关键词来源钉死：股票名 + industry/BlockName/concepts + 主题名分段。
-
-        v0.156 起主题行不再有 semantic_tags（人工主题映射表已废弃），
-        关键词只从 theme_name 分段取。"""
-        pmap = {"600312": {"代码": "600312", "名称": "平高电气"}}
-        sectors = [
-            {
-                "theme_name": "电力/电网设备",
-                "holding_related": ["600312.SH"],
-            }
-        ]
-        mapping = [
-            {
-                "code": "600312",
-                "industry": "电气设备",
-                "concepts": ["储能"],
-                "raw_relation": [{"BlockName": "输变电设备"}],
-            }
-        ]
-        name, words = fcr._holding_keywords(pmap, sectors, mapping)["600312"]
-        assert name == "平高电气"
-        for w in (
-            "平高电气",
-            "电气设备",
-            "输变电设备",
-            "储能",
-            "电力",
-            "电网设备",
-        ):
-            assert w in words, w
-
-    def test_news_interest_reads_theme_name(self):
-        """⚠️ hold_sectors 必须读 `theme_name`（生产形状）——漏了它主题交集恒为空。"""
-        sectors = [{"theme_name": "电力/电网设备", "holding_related": ["600312.SH"]}]
-        _codes, hold_sectors = fcr._news_interest(
-            {"600312": {"代码": "600312"}}, [], sectors
-        )
-        assert "电力/电网设备" in hold_sectors
 
 
 class TestSectorBoard:

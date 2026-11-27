@@ -151,8 +151,8 @@ def _run(env, monkeypatch, session="premarket", as_of="2026-08-07T08:45:00+08:00
     )
 
 
-class TestEntitiesHistory:
-    """#49（2026-08-18）：`entities(date)` 优先读持仓历史归档，不再无视 date。"""
+class TestHoldingsNotUsed:
+    """owner 2026-11-27：持仓历史、名称和代码均不得参与新闻筛选。"""
 
     def _history(self, env, date, rows):
         d = env / "data" / "trades" / "hist"
@@ -161,29 +161,20 @@ class TestEntitiesHistory:
             json.dumps(rows, ensure_ascii=False), encoding="utf-8"
         )
 
-    def test_historical_date_uses_archived_snapshot(self, env, monkeypatch):
-        """回填历史日期必须用**那天**的持仓：归档里持有的票命中，当前快照里的不命中。"""
-        # 当前快照持有平安银行；但 2026-08-05 归档（≤ 查询日 08-07 的最近一份）持有浦发银行
+    def test_archived_positions_do_not_change_matching(self, env, monkeypatch):
         _positions(env, [{"代码": "000001", "名称": "平安银行"}])
         self._history(env, "2026-08-05", [{"代码": "600000", "名称": "浦发银行"}])
-        _items(
-            env,
-            _item(title="浦发银行获批新业务", source_url="https://x.com/h1"),
-            _item(title="平安银行发布中报", source_url="https://x.com/h2"),
-        )
-        sel, rep = _run(env, monkeypatch)
-        by_title = {x["title"]: x for x in sel}
-        assert by_title["浦发银行获批新业务"]["matched_holdings_or_pool"]["names"]
-        assert not by_title["平安银行发布中报"]["matched_holdings_or_pool"]["names"]
-        assert rep["positions_source"] == "history:2026-08-05(≤2026-08-07)"
-
-    def test_no_history_falls_back_to_current_snapshot(self, env, monkeypatch):
-        """归档尚未积累时回退当前快照，并在报告落痕 —— 让审计看得出用了哪份。"""
-        _positions(env, [{"代码": "600000", "名称": "浦发银行"}])
         _items(env, _item(title="浦发银行获批新业务"))
         sel, rep = _run(env, monkeypatch)
-        assert sel[0]["matched_holdings_or_pool"]["names"] == ["浦发银行"]
-        assert rep["positions_source"] == "current_snapshot"
+        assert sel[0]["matched_holdings_or_pool"] == {"names": [], "codes": []}
+        assert rep["positions_source"] == "not_used"
+
+    def test_current_positions_do_not_change_matching(self, env, monkeypatch):
+        _positions(env, [{"代码": "600000", "名称": "浦发银行"}])
+        _items(env, _item(title="浦发银行600000发布公告"))
+        sel, rep = _run(env, monkeypatch)
+        assert sel[0]["matched_holdings_or_pool"] == {"names": [], "codes": []}
+        assert rep["positions_source"] == "not_used"
 
 
 class TestHelpers:
@@ -238,52 +229,23 @@ class TestDedupe:
         assert len(rf.dedupe(items)) == 2
 
 
-class TestCodeMatching:
-    """⚠️ 回归：代码命中必须要求**数字边界**。
-
-    持仓命中 +45 分（单项最大）且是排序的**首要键**，误配会把无关新闻顶到候选第一条。
-    """
+class TestCodeMatchingDisabled:
+    """🔄 旧代码边界规则保留历史说明，但不再参与新闻评分或候选命中。"""
 
     @pytest.mark.parametrize(
-        "text,hit",
+        "text",
         [
-            ("浦发银行600000发布公告", True),
-            ("（600000）浦发银行", True),
-            ("成交额达6000001万元", False),  # 嵌在更长数字里
-            ("上证指数报3600000点", False),
+            "浦发银行600000发布公告",
+            "（600000）浦发银行",
+            "600000浦发银行：公告",
+            "浦发银行（600000）分红每10股派2元",
         ],
     )
-    def test_digit_boundary(self, env, monkeypatch, text, hit):
+    def test_name_and_code_stay_empty(self, env, monkeypatch, text):
         _positions(env, [{"代码": "600000", "名称": "浦发银行"}])
         _items(env, _item(title=text))
         sel, _ = _run(env, monkeypatch)
-        got = bool(sel and sel[0]["matched_holdings_or_pool"]["codes"])
-        assert got is hit, f"{text!r} 应{'命中' if hit else '不命中'}"
-
-    def test_name_match_also_counts(self, env, monkeypatch):
-        _positions(env, [{"代码": "600000", "名称": "浦发银行"}])
-        _items(env, _item(title="浦发银行获批新业务"))
-        sel, _ = _run(env, monkeypatch)
-        assert sel[0]["matched_holdings_or_pool"]["names"] == ["浦发银行"]
-
-    @pytest.mark.parametrize(
-        "text,hit",
-        [
-            ("净利润600000元", False),  # 代码恰好等于一个独立金额
-            ("成交600000万元创年内新高", False),
-            ("全年交付600000辆", False),  # 计数量词
-            ("第600000列", False),  # 计数类
-            ("600000浦发银行：公告", True),  # 紧邻名称而非量词
-            ("浦发银行（600000）分红每10股派2元", True),  # 紧邻括号，真命中不误杀
-        ],
-    )
-    def test_unit_suffix_negation(self, env, monkeypatch, text, hit):
-        """⚠️ 回归（#48，2026-08-12 方案 A）：代码命中后紧邻金额/计数量词不计命中。"""
-        _positions(env, [{"代码": "600000", "名称": "浦发银行"}])
-        _items(env, _item(title=text))
-        sel, _ = _run(env, monkeypatch)
-        got = bool(sel and sel[0]["matched_holdings_or_pool"]["codes"])
-        assert got is hit, f"{text!r} 应{'命中' if hit else '不命中'}"
+        assert sel[0]["matched_holdings_or_pool"] == {"names": [], "codes": []}
 
 
 class TestWindowing:
@@ -373,9 +335,18 @@ class TestRelevanceAndExclusion:
 
     def test_spam_penalized_not_excluded(self, env, monkeypatch):
         _positions(env, [])
-        _items(env, _item(title="芯片直播带货"))
+        _items(
+            env,
+            _item(title="芯片需求回暖", source_url="https://x.com/clean"),
+            _item(title="芯片直播带货", source_url="https://x.com/spam"),
+        )
         sel, _ = _run(env, monkeypatch)
-        assert len(sel) == 1 and sel[0]["relevance_score"] < 20 + 12
+        by_title = {row["title"]: row for row in sel}
+        assert len(sel) == 2
+        assert (
+            by_title["芯片直播带货"]["relevance_score"]
+            < by_title["芯片需求回暖"]["relevance_score"]
+        )
 
 
 class TestConsultationStage:
@@ -413,29 +384,21 @@ class TestConsultationStage:
 
 
 class TestOrderingAndLimits:
-    def test_holdings_hit_ranks_first(self, env, monkeypatch):
-        """排序首要键是**持仓命中**，压过源级别与分数 ——
-        持仓相关的消息必须最先被看到。"""
+    def test_high_impact_industry_news_ranks_before_holding_news(
+        self, env, monkeypatch
+    ):
+        """高影响行业政策优先；持仓名称不再获得额外排序权重。"""
         _positions(env, [{"代码": "600000", "名称": "浦发银行"}])
         _items(
             env,
-            _item(
-                title="国常会降准芯片晶圆成交额北向",
-                source_id="gov",
-                source_tier="S",
-                category="policy_official",
-                source_url="https://a/1",
-            ),
-            _item(
-                title="浦发银行小事一则",
-                source_id="media1",
-                source_tier="C",
-                category="media",
-                source_url="https://a/2",
-            ),
+            _item(title="浦发银行小事一则", source_url="https://a/1"),
+            _item(title="广东芯片产业十五五规划", source_url="https://a/2"),
         )
         sel, _ = _run(env, monkeypatch)
-        assert sel[0]["title"] == "浦发银行小事一则"
+        assert sel[0]["title"] == "广东芯片产业十五五规划"
+        assert sel[0]["matched_industries"] == ["科技"]
+        assert sel[0]["heat_score"] > 0
+        assert sel[0]["matched_holdings_or_pool"] == {"names": [], "codes": []}
 
     def test_per_source_limit_prevents_flooding(self, env, monkeypatch):
         """单源上限先于全局上限生效 —— 防一个源刷满候选池。"""
@@ -472,6 +435,26 @@ class TestOrderingAndLimits:
         assert (
             sum(x.get("source_id") == "media1" for x in sel) > rep["per_source_limit"]
         )
+
+    def test_high_impact_industry_overrides_per_source_limit_not_global(
+        self, env, monkeypatch
+    ):
+        """高影响行业政策不得被单源 5 条上限挤掉；全局上限仍有效。"""
+        _positions(env, [])
+        _items(
+            env,
+            *[
+                _item(
+                    title=f"广东芯片产业十五五规划订单产能技术突破{i}",
+                    source_url=f"https://a/high-{i}",
+                )
+                for i in range(4)
+            ],
+        )
+        sel, rep = _run(env, monkeypatch)
+        assert len(sel) == 4 > rep["per_source_limit"]
+        assert all(x["industry_impact_score"] >= 60 for x in sel)
+        assert len(sel) <= rep["limit"]
 
     def test_global_limit_respected(self, env, monkeypatch):
         _positions(env, [])

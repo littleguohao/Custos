@@ -189,8 +189,8 @@ def direction_label(v: Any) -> str:
 
 
 def fallback_rss_events(day: str) -> list[dict[str, Any]]:
-    # 新源体系(S/A tier 官方源)相关性分普遍偏高且多数不命中市场关键词,
-    # 旧规则(matched_market_keywords 且 >=80)基本恒空;改为 relevance_score>=60 排序取 top3
+    # relevance_score = 信源/主题 + 新闻热度 + 重点行业影响（不读取持仓代码），
+    # 按 >=60 排序取 top3；只作候选风险证据，不放宽交易权限。
     path = DATA / "news" / "rss" / "filtered" / f"{day}_premarket_rss_candidates.json"
     items = load(path, [])
     ranked = sorted(

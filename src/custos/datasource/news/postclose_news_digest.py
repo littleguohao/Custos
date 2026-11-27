@@ -75,8 +75,12 @@ def classify(item: dict) -> str:
         x in themes
         for x in (
             "AI算力",
+            "科技",
             "半导体",
             "机器人",
+            "医疗医药",
+            "电力",
+            "电网",
             "船舶军工",
             "能源",
             "券商金融",
@@ -131,22 +135,32 @@ def _event_from_item(item: dict) -> dict | None:
         "recommend": item.get("recommend"),
         "stocks": item.get("stocks") or [],
         "subject_tags": item.get("subject_tags") or [],
+        "relevance_score": item.get("relevance_score") or 0,
+        "heat_score": item.get("heat_score") or 0,
+        "heat_level": item.get("heat_level") or "低",
+        "cross_source_count": item.get("cross_source_count") or 1,
+        "matched_industries": item.get("matched_industries") or [],
+        "industry_impact_score": item.get("industry_impact_score") or 0,
+        "industry_impact_level": item.get("industry_impact_level") or "非重点",
+        "impact_drivers": item.get("impact_drivers") or [],
     }
 
 
 def _collect_events(rss: list) -> list:
-    """重点栏目 > 持仓命中 > 高信源 > 发布时间；总量仍截断到 15 条。"""
+    """重点栏目 > 热度＋行业影响综合分 > 高信源；最多保留候选全集 30 条。"""
     events = [e for e in (_event_from_item(item) for item in rss) if e is not None]
     events.sort(
         key=lambda x: (
             bool(x.get("cls_priority")),
-            bool(x["matched_holdings"] or x["matched_codes"]),
+            x.get("relevance_score") or 0,
+            x.get("industry_impact_score") or 0,
+            x.get("heat_score") or 0,
             x["source_tier"] in {"S", "A"},
             x["published_at"],
         ),
         reverse=True,
     )
-    return events[:15]
+    return events[:30]
 
 
 def _collect_missing(rss_path, intel_path, intel: dict, sections: dict) -> list:

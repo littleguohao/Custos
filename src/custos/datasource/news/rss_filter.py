@@ -24,6 +24,10 @@ from custos.datasource.news.cls_priority import (  # noqa: E402
     exclude_presented_cls,
     presented_cls_priority,
 )
+from custos.datasource.news.industry_news import (  # noqa: E402
+    apply_heat,
+    industry_assessment,
+)
 
 LOG = LOGS / "rss"
 CFG = RSS_FILTER_CONFIG_FILE
@@ -197,12 +201,11 @@ def _match_signals(text, cfg, code_pats, names):
     return hits_names, hits_codes, themes, market_hits, spam, policy_neg
 
 
-def _relevance_score(cfg, tier, cat, signals) -> int:
-    hits_names, hits_codes, themes, market_hits, spam, _ = signals
+def _relevance_score(cfg, tier, cat, themes, market_hits, spam) -> int:
+    """信源与主题基础分；持仓名称/代码不再加分（owner 2026-11-27）。"""
     return (
         cfg["tier_weight"].get(tier, 0)
         + cfg["category_weight"].get(cat, 0)
-        + (45 if hits_names or hits_codes else 0)
         + min(36, len(themes) * 12)
         + min(18, len(market_hits) * 6)
         - (18 if spam else 0)
@@ -224,11 +227,8 @@ def _annotate_policy_stage(y, x, reg):
         )
 
 
-def _score_item(x, cfg, reg, code_pats, names, asof, cutoff, session_type, excluded):
-    """逐条评分：窗口过滤 → 命中匹配 → 打分 → C 档无关剔除 → 政策阶段标注。
-
-    返回打好分的候选 dict；被剔除时返回 None 并把原因计入 excluded。
-    """
+def _score_item(x, cfg, reg, asof, cutoff, session_type, excluded):
+    """窗口过滤 → 行业/主题匹配 → 行业影响评分 → C 档无关剔除 → 政策标注。"""
     pub = parse_dt(x.get("published_at"))
     text = (str(x.get("title") or "") + " " + str(x.get("summary") or "")).lower()
     tier = x.get("source_tier", "C")
@@ -239,22 +239,27 @@ def _score_item(x, cfg, reg, code_pats, names, asof, cutoff, session_type, exclu
     if pub and not _in_window(pub, asof, cutoff):
         excluded["outside_window"] = excluded.get("outside_window", 0) + 1
         return None
-    signals = _match_signals(text, cfg, code_pats, names)
-    hits_names, hits_codes, themes, market_hits, _, policy_neg = signals
-    score = _relevance_score(cfg, tier, cat, signals)
-    if tier == "C" and not (hits_names or hits_codes or themes or market_hits):
+    # 空名称/代码集合刻意保留调用形状：新口径完全不读取持仓做新闻筛选。
+    signals = _match_signals(text, cfg, {}, set())
+    _, _, themes, market_hits, spam, policy_neg = signals
+    impact = industry_assessment(themes=themes, category=cat, text=text, cfg=cfg)
+    score = _relevance_score(cfg, tier, cat, themes, market_hits, spam)
+    score += impact["industry_impact_score"]
+    if tier == "C" and not (themes or market_hits):
         excluded["c_tier_irrelevant"] = excluded.get("c_tier_irrelevant", 0) + 1
         return None
     y = dict(x)
     y.update(
         {
             "relevance_score": score,
-            "matched_holdings_or_pool": {"names": hits_names, "codes": hits_codes},
+            # 契约兼容字段；新规则固定为空，防止旧持仓偏好再次进入候选排序。
+            "matched_holdings_or_pool": {"names": [], "codes": []},
             "matched_themes": themes,
             "matched_market_keywords": market_hits,
             "matched_policy_negative": policy_neg,
             "filter_session": session_type,
             "filter_cutoff": cutoff.isoformat(),
+            **impact,
         }
     )
     _annotate_policy_stage(y, x, reg)
@@ -262,32 +267,30 @@ def _score_item(x, cfg, reg, code_pats, names, asof, cutoff, session_type, exclu
 
 
 def _rank_key(x):
-    """重点栏目 > 持仓命中 > S/A 档 > 相关性分 > 发布时间（全部倒序）。"""
+    """重点栏目 > 热度＋行业影响综合分 > 影响/热度 > 信源 > 发布时间。"""
     return (
         bool(x.get("cls_priority")),
-        bool(
-            x["matched_holdings_or_pool"]["names"]
-            or x["matched_holdings_or_pool"]["codes"]
-        ),
-        x.get("source_tier") in {"S", "A"},
         x["relevance_score"],
+        x.get("industry_impact_score") or 0,
+        x.get("heat_score") or 0,
+        x.get("source_tier") in {"S", "A"},
         x.get("published_at") or "",
     )
 
 
 def _select(unique, limit, per_source_limit):
-    """总量 limit 不变；财联社重点栏目不受单源上限截断。"""
+    """重点栏目和高影响行业新闻豁免单源上限；所有条目仍受全局 limit 约束。"""
     selected = []
     source_selected = {}
     for x in unique:
         source = x.get("source_id", "unknown")
-        if (
-            not x.get("cls_priority")
-            and source_selected.get(source, 0) >= per_source_limit
-        ):
+        exempt = bool(x.get("cls_priority")) or (
+            int(x.get("industry_impact_score") or 0) >= 60
+        )
+        if not exempt and source_selected.get(source, 0) >= per_source_limit:
             continue
         selected.append(x)
-        if not x.get("cls_priority"):
+        if not exempt:
             source_selected[source] = source_selected.get(source, 0) + 1
         if len(selected) >= limit:
             break
@@ -336,7 +339,14 @@ def _build_topic_clusters(
             "title": x.get("title"),
             "published_at": x.get("published_at"),
             "relevance_score": x.get("relevance_score"),
+            "heat_score": x.get("heat_score") or 0,
+            "heat_level": x.get("heat_level") or "低",
+            "cross_source_count": x.get("cross_source_count") or 1,
             "matched_themes": x.get("matched_themes") or [],
+            "matched_industries": x.get("matched_industries") or [],
+            "industry_impact_score": x.get("industry_impact_score") or 0,
+            "industry_impact_level": x.get("industry_impact_level") or "非重点",
+            "impact_drivers": x.get("impact_drivers") or [],
         }
         for x in unique
     ]
@@ -365,7 +375,7 @@ def _build_topic_clusters(
         "cross_source_clusters": [c for c in clusters if c["cross_source"]],
         "in_window_brief": brief,
         "cls_priority_articles": priority_articles,
-        "cls_priority_rule": "财联社重点栏目须逐篇提炼核心逻辑、对持仓/候选的影响及后续验证点；仅作消息分析，不提高交易权限",
+        "cls_priority_rule": "财联社重点栏目须逐篇提炼核心逻辑、新闻热度、对重点行业的影响及后续验证点；仅作消息分析，不提高交易权限",
         "permission_rule": "主题聚类仅供 LLM 研判参考，不能直接提高交易权限",
     }
 
@@ -471,19 +481,16 @@ def main():
         asof = min(asof, postclose_end)
     limit = cfg["limits"][a.session_type]
     per_source_limit = cfg.get("per_source_limits", {}).get(a.session_type, limit)
-    names, codes, positions_source = entities(a.date)
+    positions_source = "not_used"
     excluded = {}
-    code_pats = _compile_code_patterns(cfg, codes)
     scored = [
         y
         for x in raw
-        if (
-            y := _score_item(
-                x, cfg, reg, code_pats, names, asof, cutoff, a.session_type, excluded
-            )
-        )
+        if (y := _score_item(x, cfg, reg, asof, cutoff, a.session_type, excluded))
         is not None
     ]
+    # 时效、跨来源覆盖与源站推荐形成热度分，再与行业影响分一起排序。
+    apply_heat(scored, asof)
     scored.sort(key=_rank_key, reverse=True)
     unique = dedupe(scored)
     previous_postclose_excluded = 0

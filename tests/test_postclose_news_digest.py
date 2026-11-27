@@ -130,3 +130,43 @@ def test_priority_event_excludes_same_day_premarket(monkeypatch, tmp_path):
     assert [x["title"] for x in result["priority_events"]] == ["7月17日涨停分析"]
     assert result["premarket_excluded_count"] == 1
     assert result["premarket_dedup_articles"] == 1
+
+
+def test_industry_heat_fields_drive_digest_order(monkeypatch, tmp_path):
+    rss_dir = tmp_path / "news" / "rss" / "filtered"
+    rss_dir.mkdir(parents=True)
+    rows = [
+        {
+            "published_at": "2026-11-27T08:00:00+00:00",
+            "title": "持仓代码命中但非重点行业",
+            "source_name": "媒体",
+            "source_tier": "B",
+            "relevance_score": 20,
+            "matched_holdings_or_pool": {"names": ["浦发银行"], "codes": ["600000"]},
+            "matched_industries": [],
+        },
+        {
+            "published_at": "2026-11-27T08:01:00+00:00",
+            "title": "广东算力发展十五五规划",
+            "source_name": "财联社-电报快讯",
+            "source_tier": "B",
+            "relevance_score": 105,
+            "heat_score": 35,
+            "heat_level": "高",
+            "cross_source_count": 2,
+            "matched_industries": ["科技", "AI"],
+            "industry_impact_score": 70,
+            "industry_impact_level": "高",
+            "impact_drivers": ["政策规划"],
+            "matched_holdings_or_pool": {"names": [], "codes": []},
+        },
+    ]
+    (rss_dir / "2026-07-17_postclose_rss_candidates.json").write_text(
+        json.dumps(rows, ensure_ascii=False), encoding="utf-8"
+    )
+    result = _run(monkeypatch, tmp_path, [])
+    events = [row for rows in result["sections"].values() for row in rows]
+    assert events[0]["title"] == "广东算力发展十五五规划"
+    assert events[0]["heat_score"] == 35
+    assert events[0]["matched_industries"] == ["科技", "AI"]
+    assert events[0]["industry_impact_score"] == 70

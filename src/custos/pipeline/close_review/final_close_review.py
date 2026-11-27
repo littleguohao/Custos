@@ -33,6 +33,7 @@ from custos.datasource.news.cls_priority import (  # noqa: E402
     presented_cls_priority,
     render_cls_article,
 )
+from custos.datasource.news.industry_news import impact_narrative  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 from custos.core.exit_rules import LOSS_REDUCTION_PCT  # noqa: E402  L0，−7% 减仓线唯一来源
 from custos.core.trades.position_plans import load_plans  # noqa: E402  L2，持仓计划影子读取
@@ -177,25 +178,16 @@ def _evidence_fallback(evidence: list, keywords: dict, skip_titles: set, limit=8
 def render_news(
     lines, news, hold_codes=None, hold_sectors=None, evidence=None, hold_keywords=None
 ):
-    """§2（v0.57 角色定版 + v0.136 兜底）：盘后=复盘纠错+预案主产地 ⇒ 新闻节压缩为
-    「与今日操作相关的事实核对」——只留与当日持仓/当日成交有交集的事实。
-
-    v0.136 匹配层修复：digest 优先 + **全量 RSS 证据兜底**——此前只在 digest
-    选出的 ~15 条里找交集（候选 20 → digest 15，持仓相关新闻常被挤掉），本节
-    几乎恒空；现在对持仓关键词扫 `{date}_rss_evidence.json` 全量，digest 没选上
-    不再漏报。仍无交集如实写「已检索无交集」，证据文件缺失报 unavailable
-    （「没跑」与「跑了没有」必须分得开）。"""
+    """§2：新闻热度与重点行业影响；持仓参数只为旧调用兼容，绝不参与筛选。"""
     lines += [
         "",
-        "## 2. 新闻、政策、风向与舆情（与今日操作相关的事实核对）",
+        "## 2. 新闻热度与行业影响",
         "",
-        "> 复盘视角：本节只核对**与今日持仓/操作有交集**的新闻事实；"
-        "digest 优先，全量 RSS 证据兜底（v0.136）。",
+        "> 不按持仓名称或代码匹配；按时效、跨来源覆盖判断热度，"
+        "重点关注科技、AI、医疗医药、电力、电网。仅作信息分析，不改变交易权限。",
         "",
     ]
     sections = news.get("sections") or {}
-    hold_codes = set(hold_codes or [])
-    hold_sectors = set(hold_sectors or [])
 
     def cell(value) -> str:
         return str(value or "-").replace("|", "／").replace("\n", " ")
@@ -206,7 +198,7 @@ def render_news(
         lines += [
             "### 财联社重点栏目（文章链接）",
             "",
-            "> 仅展示当日 09:30～17:00、当日 0905 未收录的文章；点击标题查看原文，不影响交易权限。",
+            "> 仅展示当日 08:50～17:00、当日 0905 未收录的文章；点击标题查看原文，不影响交易权限。",
             "",
             "| 栏目 | 时间 | 文章链接 |",
             "|---|---|---|",
@@ -220,50 +212,46 @@ def render_news(
 
     rows = [
         row
-        for row in _digest_rows(news, hold_codes, hold_sectors)
-        if row[3].get("title") not in priority_titles
+        for name in ("信息", "政策", "风向", "舆情")
+        for row in sections.get(name) or []
+        if row.get("matched_industries") and row.get("title") not in priority_titles
     ]
+    rows.sort(
+        key=lambda row: (
+            row.get("relevance_score") or 0,
+            row.get("industry_impact_score") or 0,
+            row.get("heat_score") or 0,
+            row.get("published_at") or "",
+        ),
+        reverse=True,
+    )
     if rows:
         lines += [
-            "| 类别 | 时间 | 事件 | 来源/质量 | 与今日操作的交集 | 交易含义 |",
+            "### 重点行业热度与影响",
+            "",
+            "> 热度＝时效＋跨独立来源覆盖＋源站推荐；影响＝重点行业＋政策/订单/产能/技术/监管驱动。",
+            "",
+            "| 重点行业 | 热度 | 影响 | 来源/时间 | 文章链接 | 影响判断 |",
             "|---|---|---|---|---|---|",
         ]
-        for name, codes_hit, themes_hit, row in rows[:8]:  # 有界：最多 8 条
-            intersection = "、".join(sorted(codes_hit) + sorted(themes_hit))
-            lines.append(
-                f"| {name} | {row.get('published_at')} | {row.get('title')} | {row.get('source_name')}/{row.get('fact_status')} | {intersection} | {row.get('trade_meaning')} |"
+        for row in rows[:8]:
+            heat = f"{row.get('heat_level') or '低'}/{row.get('heat_score') or 0}"
+            impact = (
+                f"{row.get('industry_impact_level') or '非重点'}/"
+                f"{row.get('industry_impact_score') or 0}"
             )
-    skip_titles = priority_titles | {r.get("title") for _n, _c, _t, r in rows[:8]}
-    fallback = (
-        _evidence_fallback(evidence, hold_keywords or {}, skip_titles)
-        if evidence is not None
-        else []
-    )
-    if fallback:
-        lines += [
-            "",
-            "全量证据兜底命中（digest 未选用但与持仓相关）：",
-            "",
-            "| 时间 | 事实 | 来源/tier | 关联持仓 |",
-            "|---|---|---|---|",
-        ]
-        for item, related in fallback:
-            lines.append(
-                f"| {item.get('published_at')} | {item.get('title')} | "
-                f"{item.get('source_name')}/{item.get('source_tier')} | {'、'.join(related)} |"
+            source_time = (
+                f"{cell(row.get('source_name'))}<br>{cell(row.get('published_at'))}"
             )
-    if not rows and not fallback:
-        if sections and evidence is None:
-            lines.append("- digest 内无与今日持仓/操作的交集。")
-        elif sections or evidence:
-            # 全量证据真的扫过了（空列表也算扫过）才能说「已检索无交集」
-            lines.append("- 信息流已检索，无与持仓/操作交集的事实。")
-        else:
-            lines.append("- `unavailable`：当前窗口没有通过时效和来源质量门的证据。")
-    if evidence is None:
-        lines.append(
-            "- `unavailable`：RSS 全量证据文件缺失，兜底匹配未执行（不等于无交集）。"
-        )
+            lines.append(
+                f"| {cell('、'.join(row.get('matched_industries') or []))} "
+                f"| {heat} | {impact} | {source_time} | {render_cls_article(row)} "
+                f"| {cell(impact_narrative(row))} |"
+            )
+    elif sections or evidence:
+        lines.append("- 当前窗口无科技、AI、医疗医药、电力、电网的重点行业影响新闻。")
+    else:
+        lines.append("- `unavailable`：当前窗口没有通过时效和来源质量门的证据。")
     if news.get("missing"):
         lines.append("\n- 新闻数据缺失：" + "、".join(news["missing"]))
 
@@ -1102,15 +1090,7 @@ def main():
     render_habit_check(
         lines, revalued, execution, plans=plan_positions, regime=regime, tmap=tmap
     )
-    hold_codes, hold_sectors = _news_interest(pmap, today, sectors)
-    render_news(
-        lines,
-        news,
-        hold_codes=hold_codes,
-        hold_sectors=hold_sectors,
-        evidence=rss_evidence,
-        hold_keywords=_holding_keywords(pmap, sectors, sector_mapping),
-    )
+    render_news(lines, news, evidence=rss_evidence)
 
     render_market(lines, checks, chief, indices)
 
