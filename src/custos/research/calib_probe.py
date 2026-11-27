@@ -99,16 +99,22 @@ MODULES: dict[str, dict[str, Any]] = {
         "defmod": "custos.core.factors.rsi_state",
         "eval": "signal",
         "fields": ["signal.rsi_deep_oversold"],
+        # v0.607（owner 2026-11-27「标记尽量少」）：只抽成立 + 参数边界两类；随机的不成立类几乎都一眼不是，不再出图
+        "sample_classes": ["hit", "boundary"],
     },
     "label_sb": {
         "defmod": "custos.core.factors.b2_surge_factor",
         "eval": "signal",
         "fields": ["signal.surge_then_b1"],
+        # v0.607（owner 2026-11-27「标记尽量少」）：只抽成立 + 参数边界两类；随机的不成立类几乎都一眼不是，不再出图
+        "sample_classes": ["hit", "boundary"],
     },
     # v0.533（owner 2026-11-17，TODO #123④）：两个展示用评分的重新校准——按分档抽样，问「分档与图形是否相符」
     "perfect_b1_fit": {
         "defmod": "custos.core.factors.perfect_b1_fit",
         "fields": ["@pb1_level"],
+        # v0.607（owner 2026-11-27「标记尽量少」）：只抽成立 + 参数边界两类；随机的不成立类几乎都一眼不是，不再出图
+        "sample_classes": ["hit", "boundary"],
     },
     "s_shape": {
         "defmod": "custos.core.factors.s_shape",
@@ -155,11 +161,15 @@ MODULES: dict[str, dict[str, Any]] = {
         "defmod": "custos.core.factors.s_shape",
         "eval": "hourglass_b1",
         "fields": ["hourglass_b1.hit"],
+        # v0.607（owner 2026-11-27「标记尽量少」）：只抽成立 + 参数边界两类；随机的不成立类几乎都一眼不是，不再出图
+        "sample_classes": ["hit", "boundary"],
     },
     "red_green_v2": {  # 阴阳量 + 红肥绿瘦合并定义候选（owner 2026-11-16）
         "defmod": "custos.core.factors.bottom_patterns",
         "eval": "red_green_v2",
         "fields": ["red_green_v2.status"],
+        # v0.607（owner 2026-11-27「标记尽量少」）：只抽成立 + 参数边界两类；随机的不成立类几乎都一眼不是，不再出图
+        "sample_classes": ["hit", "boundary"],
     },
     "b1_structure_v2": {  # v0.520 候选对照（owner 2026-11-13 校准确认后的非一波流 v2）
         "defmod": "custos.core.factors.b1_structure",
@@ -208,6 +218,8 @@ MODULES: dict[str, dict[str, Any]] = {
             "WAVE_ACCEL_10D_GAIN",
             "WAVE_TOP_VOL_RATIO",
         ],
+        # v0.607（owner 2026-11-27「标记尽量少」）：只抽成立 + 参数边界两类；随机的不成立类几乎都一眼不是，不再出图
+        "sample_classes": ["hit", "boundary"],
     },
     "dist_more": {  # v0.603 出货 ④ 双头 / ⑤ 顶部绿肥红瘦 / ⑥ 顶部大风车（与 ③ 合计 ≥2 项 = 出货高，否决）
         "defmod": "custos.core.factors.distribution",
@@ -226,6 +238,8 @@ MODULES: dict[str, dict[str, Any]] = {
             "DIST_WINDMILL_RANGE_PCT",
             "DIST_WINDMILL_VOL_RATIO",
         ],
+        # v0.607（owner 2026-11-27「标记尽量少」）：只抽成立 + 参数边界两类；随机的不成立类几乎都一眼不是，不再出图
+        "sample_classes": ["hit", "boundary"],
     },
     "stairstep": {  # 出货 ③ 阶梯放量跌破趋势线（owner 2026-11-26 要校准；live 单项 = 出货观察 −10）
         "defmod": "custos.core.factors.distribution",
@@ -233,6 +247,8 @@ MODULES: dict[str, dict[str, Any]] = {
         "chart_panes": ["vol", "zx"],  # 主图叠加 QSX（蓝）/ DKS（橙），跌破看得见
         "fields": ["stairstep.hit"],
         "params": ["DIST_RECENT", "DIST_STAIR_MIN_BARS", "DIST_STAIR_BREAK_VR"],
+        # v0.607（owner 2026-11-27「标记尽量少」）：只抽成立 + 参数边界两类；随机的不成立类几乎都一眼不是，不再出图
+        "sample_classes": ["hit", "boundary"],
     },
     "pullback_v2": {  # 回调缩量企稳 v2 候选（owner 2026-11-25）
         "defmod": "custos.core.factors.ignition",

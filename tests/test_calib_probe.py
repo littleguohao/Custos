@@ -887,3 +887,18 @@ def test_field_def_has_no_duplicate_keys():
             ks = [k.value for k in node.keys if isinstance(k, ast.Constant)]
             dup = [k for k, c in collections.Counter(ks).items() if c > 1]
             assert not dup, f"line {node.lineno} 重复键：{dup}"
+
+
+def test_pattern_galleries_hit_and_boundary_only_v0607():
+    """owner 2026-11-27「标记尽量少」：形态类图集只抽成立 + 参数边界两类。"""
+    for m in (
+        "wave_sprint",
+        "stairstep",
+        "dist_more",
+        "red_green_v2",
+        "hourglass_b1",
+        "label_sb",
+        "perfect_b1_fit",
+        "label_rd",
+    ):
+        assert cp.MODULES[m]["sample_classes"] == ["hit", "boundary"], m
