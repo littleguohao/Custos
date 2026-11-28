@@ -20,6 +20,7 @@ from custos.datasource.news.cls_priority import render_cls_article
 
 from custos.core.paths import DATA, PLANS, REVIEW_DIR, REVIEWS, cn_now, daily_report_dir
 from custos.core.paths import read_json as load
+from custos.core.code_utils import fnum
 from custos.core import report_audit
 from custos.core.runtime_guards import previous_confirmed_trading_day
 
@@ -423,6 +424,8 @@ def _gather_inputs(day: str, cal_day: str) -> dict[str, Any]:
         "chief": chief,
         "market": market,
         "tech": tech,
+        "positions": load(DATA / "trades" / "current_positions.json", []),
+        "positions_available": (DATA / "trades" / "current_positions.json").exists(),
         "prior": prior,
         "prior_day": prior_day,
         "prior_actions": prior_actions,
@@ -516,6 +519,58 @@ def _section_cls_priority(articles: list[dict[str, Any]], available: bool) -> li
     return lines
 
 
+def current_position_text(
+    positions: list[dict[str, Any]],
+    prior: dict[str, Any],
+    positions_available: bool,
+) -> str:
+    """现有仓位只展示完整比例；缺账户权益时不得把空值合计成 0。"""
+    current_rows = [x for x in positions if isinstance(x, dict)]
+    if positions_available and isinstance(positions, list) and not positions:
+        return "0.0%（空仓）"
+    current_values = [fnum(x.get("仓位占比")) for x in current_rows]
+    if current_rows and all(x is not None for x in current_values):
+        return f"{sum(x for x in current_values if x is not None):.1%}（当前持仓快照）"
+
+    prior_rows = [
+        x for x in (prior.get("revalued_positions") or []) if isinstance(x, dict)
+    ]
+    prior_values = [fnum(x.get("position_pct")) for x in prior_rows]
+    if prior_rows and all(x is not None for x in prior_values):
+        prior_day = clean(prior.get("date"))
+        return f"{sum(x for x in prior_values if x is not None):.1%}（{prior_day} 收盘重估）"
+
+    count = len(current_rows or prior_rows)
+    detail = f"{count} 只持仓，" if count else ""
+    return f"待确认（{detail}缺账户权益或仓位占比）"
+
+
+def _section_core_conclusion(
+    chief: dict[str, Any],
+    positions: list[dict[str, Any]],
+    prior: dict[str, Any],
+    positions_available: bool,
+) -> list[str]:
+    """§1 只保留攻防、建议仓位和现有仓位，不夹带评分与权限明细。"""
+    return [
+        "## 1. 今日核心结论",
+        "",
+        f"- 攻防方向：**{chief.get('market_state', '未知')}**",
+        f"- 总仓位建议：**{chief.get('total_position_range', '待确认')}**",
+        f"- 现有仓位：**{current_position_text(positions, prior, positions_available)}**",
+    ]
+
+
+def _market_direction_rank(event: dict[str, Any]) -> int:
+    """市场消息按利多→中性→利空排序；分化和待确认归入中性组。"""
+    label = direction_label(event.get("direction"))
+    if label == "利好":
+        return 0
+    if label == "利空":
+        return 2
+    return 1
+
+
 def _section_overnight_news(
     market_events: list[dict[str, Any]],
     holding_events: list[dict[str, Any]],
@@ -524,7 +579,7 @@ def _section_overnight_news(
     cls_priority_articles: list[dict[str, Any]] | None = None,
     cls_priority_available: bool = False,
 ) -> list[str]:
-    """§2 隔夜重大消息与持仓公告。"""
+    """§2 市场消息分组排序，持仓消息仍由独立持仓事件源渲染。"""
     lines = [
         "",
         "## 2. 隔夜重大消息与持仓公告",
@@ -539,7 +594,8 @@ def _section_overnight_news(
         "| 时间 | 事件 | 方向 | 对A股/持仓的影响 | 来源/质量 |",
         "|---|---|---|---|---|",
     ]
-    for e in market_events:
+    # sorted 稳定排序：同方向内部保留情报原顺序，不再按时间二次重排。
+    for e in sorted(market_events, key=_market_direction_rank):
         lines.append(
             f"| {clean(e.get('published_at'))} | {clean(e.get('title'))} | {direction_label(e.get('direction'))} | {clean(e.get('impact'))} | {clean(e.get('source'))}/{clean(e.get('quality'), 'candidate')} |"
         )
@@ -648,10 +704,10 @@ def _section_data_freshness(
     intel_path: Any,
     intel_check: dict[str, Any],
 ) -> list[str]:
-    """§7 数据时效与声明。"""
+    """§4 数据时效与声明。"""
     snapshot_date = freshness.get("snapshot_date") or "未知"
     return [
-        "## 5. 数据时效与声明",
+        "## 4. 数据时效与声明",
         "",
         f"- ChiefDecision：`{chief_path}`",
         f"- 持仓新鲜度：{freshness.get('status', '未知')}；快照日期 {snapshot_date}；导入时间 {freshness.get('imported_at', '未知')}；源文件时间 {freshness.get('source_mtime', '未知')}",
@@ -671,7 +727,7 @@ def main():
     ap.add_argument(
         "--non-trading-day",
         action="store_true",
-        help="休市口径：数据回退最近已确认交易日，省略 §4 持仓与预案确认",
+        help="休市口径：数据回退最近已确认交易日",
     )
     a = ap.parse_args()
     day = a.data_date or a.date
@@ -689,14 +745,13 @@ def main():
     chief = inp["chief"]
     quality = inp["quality"]
     freshness = inp["freshness"]
-    pgate = inp["pgate"]
     audit = report_audit.build(a.date, a.session or "premarket", inp["audit_inputs"])
     lines = [
         f"# 每日投研简报｜{dt.year}年{dt.month}月{dt.day}日（星期{WEEKDAY[dt.weekday()]}）"
         + (f"｜{a.session}" if a.session else "")
         + ("｜非交易日（休市）" if a.non_trading_day else ""),
         "",
-        "> 角色（v0.57 owner 定版）：**盘前=信息处理 + 预案确认** ｜ "
+        "> 角色（v0.611 owner 定版）：**盘前=信息处理 + 核心结论** ｜ "
         "盘中14:45=按规则的交易提醒 ｜ 盘后=复盘纠错 + 条件化预案主产地。",
         f"> 信息窗口：{inp['window_start']} 至 {inp['window_end']}（Asia/Shanghai）  ",
         f"> 生成时间：{cn_now().strftime('%Y-%m-%d %H:%M:%S')} Asia/Shanghai",
@@ -704,21 +759,10 @@ def main():
         # 0AMV 漏录/manual 未确认提示（v0.378，TODO #96）——顶部醒目、不阻断
         *_amv_guard_lines(quality),
         "",
-        "## 1. 今日核心结论",
-        "",
-        f"**{chief.get('market_state', '未知')}，总仓位建议 {chief.get('total_position_range', '待确认')}；新开仓权限：{chief.get('new_position_permission', '禁止')}。**",
-        "",
-        f"- 择时评分：{chief.get('market_score', '待确认')}",
-        f"- 风控等级：{chief.get('risk_level', '提高')}",
-        f"- 市场数据质量：{quality.get('status', '未知')}（{quality.get('quality_score', 'NA')}）",
-        f"- 持仓快照：{freshness.get('status', '未知')}——{freshness.get('reason', '')}",
-        f"- 精确数量权限：{'允许' if pgate.get('allow_precise_quantity') else '禁止'}",
+        *_section_core_conclusion(
+            chief, inp["positions"], inp["prior"], inp["positions_available"]
+        ),
     ]
-    if a.non_trading_day:
-        lines.append(
-            f"- ⏸️ 今日休市：无新增交易数据，以上结论沿用最近交易日 **{day}** 收盘口径；"
-            "不授予新的交易权限，§4 持仓与预案确认按休市规则整节省略。"
-        )
     lines += _section_overnight_news(
         inp["market_events"],
         inp["holding_events"],
@@ -728,18 +772,8 @@ def main():
         inp["cls_priority_available"],
     )
     lines += _section_overseas(inp["market"].get("overseas_market", {}))
-    # v0.100（owner）：原 §5（主线题材观察节，口径 TODO #26 待重设计，一直挂着
-    # 「仅观察参考」——不下决策的节是噪声）整节下线；原 §4+§6 合并为
-    # 「持仓与预案确认」（两节都是盘后计划 vs 盘前动作的逐票对照，拆开必重复）。
-    if not a.non_trading_day:
-        lines += holdings_plan_section(
-            chief,
-            inp["tech"],
-            inp["prior_actions"],
-            inp["holding_event_map"],
-            inp["prior"],
-            inp["prior_day"],
-        )
+    # v0.611：原「持仓与预案确认」整节从 0905 下线，交易日/休市日均不渲染；
+    # 条件化预案仍由盘后复盘生成，不在盘前报告重复展示。
     lines += [
         "",
         *_section_data_freshness(

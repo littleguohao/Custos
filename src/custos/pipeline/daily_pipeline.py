@@ -270,7 +270,7 @@ def _parse_args() -> argparse.Namespace:
         "--non-trading-day",
         action="store_true",
         help="休市模式:只跑海外/RSS 发现采集与日报渲染,跳过行情底座/门控/持仓决策链;"
-        "日报省略§4并沿用最近已确认交易日口径(由 run_0905 --run-on-closed 传入)",
+        "日报沿用最近已确认交易日口径(由 run_0905 --run-on-closed 传入)",
     )
     return ap.parse_args()
 

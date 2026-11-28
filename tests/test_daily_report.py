@@ -175,7 +175,7 @@ class TestHoldingsPlanSection:
         import inspect
 
         daily_src = inspect.getsource(dr.main)
-        assert "盘前=信息处理 + 预案确认" in daily_src
+        assert "盘前=信息处理 + 核心结论" in daily_src
         from custos.pipeline.close_review import final_close_review as fcr
 
         assert "盘后=复盘纠错 + 条件化预案主产地" in inspect.getsource(fcr.main)
@@ -191,6 +191,79 @@ class TestHoldingsPlanSection:
         src = inspect.getsource(dr.main)
         assert "主线、机会与风险" not in src
         assert "stock_pool_section" not in src, "公式选股备选池随 §5 一并下线"
+
+
+class TestCoreConclusion:
+    def test_only_direction_target_and_current_position(self):
+        chief = {
+            "market_state": "进攻",
+            "total_position_range": "0%-80%",
+            "new_position_permission": "禁止",
+            "market_score": "75.47/93",
+            "risk_level": "强风控",
+        }
+        text = "\n".join(
+            dr._section_core_conclusion(
+                chief,
+                [{"仓位占比": 0.25}, {"仓位占比": 0.15}],
+                {},
+                True,
+            )
+        )
+        assert "攻防方向：**进攻**" in text
+        assert "总仓位建议：**0%-80%**" in text
+        assert "现有仓位：**40.0%（当前持仓快照）**" in text
+        assert "新开仓权限" not in text
+        assert "择时评分" not in text and "风控等级" not in text
+
+    def test_missing_equity_never_turns_null_positions_into_zero(self):
+        text = dr.current_position_text(
+            [{"代码": "600000"}],
+            {
+                "date": "2026-11-27",
+                "reference_position_pct": 0,
+                "revalued_positions": [{"code": "600000", "position_pct": None}],
+            },
+            True,
+        )
+        assert text.startswith("待确认")
+        assert "1 只持仓" in text and "0.0%" not in text
+
+    def test_available_empty_snapshot_means_zero_position(self):
+        assert dr.current_position_text([], {}, True) == "0.0%（空仓）"
+
+
+class TestMarketNewsOrdering:
+    def test_positive_neutral_negative_and_holdings_stay_separate(self):
+        events = [
+            {"title": "中性一", "direction": "neutral"},
+            {"title": "利空一", "direction": "negative"},
+            {"title": "利好一", "direction": "positive"},
+            {"title": "分化一", "direction": "mixed"},
+            {"title": "利好二", "direction": "利好"},
+            {"title": "利空二", "direction": "bearish"},
+        ]
+        holding = {"code": "600000.SH", "title": "仅持仓公告", "direction": "neutral"}
+        lines = dr._section_overnight_news(events, [holding], {"valid": True})
+        titles = [
+            events_title
+            for events_title in (
+                "利好一",
+                "利好二",
+                "中性一",
+                "分化一",
+                "利空一",
+                "利空二",
+            )
+        ]
+        rows = [
+            line for line in lines if any(f"| {title} |" in line for title in titles)
+        ]
+        assert [row.split("|")[2].strip() for row in rows] == titles
+        text = "\n".join(lines)
+        market_part, holding_part = text.split("### 2.2 持仓相关消息与公告", 1)
+        assert "仅持仓公告" not in market_part
+        assert "600000" in holding_part and "仅持仓公告" in holding_part
 
 
 class TestClsPrioritySection:
@@ -224,9 +297,8 @@ class TestClsPrioritySection:
 
 
 class TestNonTradingDayReport:
-    """--non-trading-day（休市版日报，v0.255 owner）：数据口径回退最近已确认
-    交易日、§4 持仓与预案确认整节省略；隔夜情报/海外行情仍按**日历日**取——
-    休市日早晨的新消息正是这份报告的价值。"""
+    """--non-trading-day：数据口径回退最近已确认交易日；隔夜情报/海外行情仍按
+    **日历日**取。v0.611 起交易日与休市日均不渲染持仓预案节。"""
 
     _CHIEF_0918 = {
         "market_state": "防守",
@@ -275,28 +347,27 @@ class TestNonTradingDayReport:
         monkeypatch.setattr(sys, "argv", argv)
         dr.main()
 
-    def test_closed_report_omits_section4_and_uses_prior_trading_day(
-        self, tmp_path, monkeypatch
-    ):
+    def test_closed_report_uses_prior_trading_day(self, tmp_path, monkeypatch):
         out = self._setup(tmp_path, monkeypatch)
         self._render(monkeypatch, ["x", "--date", "2026-09-19", "--non-trading-day"])
         text = out.read_text(encoding="utf-8")
         assert "非交易日（休市）" in text
-        assert "## 4. 持仓与预案确认" not in text, "休市日 §4 必须整节省略"
-        assert "2026-09-18" in text, "§1 休市行必须标明数据口径日"
+        assert "持仓与预案确认" not in text
+        assert "2026-09-18" in text, "数据时效区必须标明数据口径日"
         assert "防守" in text, "§1 结论应来自最近交易日 0918 的 ChiefDecision"
         assert "偏多" in text, "§3 海外行情必须按日历日 0919 取"
         assert "2026-09-18T17:00:00+08:00 至 2026-09-19T08:50:00+08:00" in text
-        assert "## 5. 数据时效与声明" in text
+        assert "## 4. 数据时效与声明" in text
 
-    def test_trading_day_keeps_section4(self, tmp_path, monkeypatch):
+    def test_trading_day_also_omits_holdings_plan(self, tmp_path, monkeypatch):
         out = self._setup(tmp_path, monkeypatch)
         self._render(
             monkeypatch,
             ["x", "--date", "2026-09-19", "--data-date", "2026-09-18"],
         )
         text = out.read_text(encoding="utf-8")
-        assert "## 4. 持仓与预案确认" in text, "交易日口径 §4 必须在"
+        assert "持仓与预案确认" not in text
+        assert "## 4. 数据时效与声明" in text
         assert "非交易日（休市）" not in text
 
     def test_data_date_overrides_auto_fallback(self, tmp_path, monkeypatch):

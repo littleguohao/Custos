@@ -95,7 +95,7 @@ def _daily_pipeline_cmd(
     if reuse_discovery:
         cmd.append("--reuse-discovery")
     if non_trading:
-        # 休市口径：daily_pipeline 跳过门控与持仓决策链，日报省略 §4、沿用最近交易日数据
+        # 休市口径：daily_pipeline 跳过门控与持仓决策链，日报沿用最近交易日数据
         cmd.append("--non-trading-day")
     return cmd
 
@@ -108,8 +108,7 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--run-on-closed",
         action="store_true",
-        help="非交易日也出休市版日报（沿用最近交易日口径、省略§4）；"
-        "缺省保持休市即退出的旧语义",
+        help="非交易日也出休市版日报（沿用最近交易日口径）；缺省保持休市即退出的旧语义",
     )
     args = ap.parse_args(argv)
     target = args.date
