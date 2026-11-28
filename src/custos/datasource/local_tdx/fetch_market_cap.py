@@ -56,6 +56,13 @@ import requests
 
 
 from custos.core.paths import cn_today, DATA  # noqa: E402
+from custos.datasource.eastmoney_pagination import (  # noqa: E402
+    FetchIncomplete,
+    as_int,
+    brief,
+    is_empty_ok,
+    page_done,
+)
 
 API = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 UA = {"User-Agent": "Mozilla/5.0"}
@@ -74,43 +81,10 @@ MV_START = "2018-01-02"
 
 PAGE_SLEEP = 0.35  # 翻页间隔（秒）：东财 datacenter 无官方配额，连打会被静默限流
 
-
-class FetchIncomplete(RuntimeError):
-    """分页未拉完 / 响应残缺 —— 对本模块尤其危险，见 fetch_trade_date 说明。"""
-
-
-def _as_int(v):
-    """转 int；不可解析或非有限值返回 None。
-
-    ⚠️ 必须捕 `OverflowError`：这个函数解析东财响应自报的 `pages` / `count`，
-    而 Python 的 `json.loads` **接受** `Infinity`（非标准但 json 模块允许），
-    `int(float("inf"))` 抛的是 OverflowError —— 只 catch TypeError/ValueError
-    会让一个畸形响应直接崩掉整次抓取，而本函数的全部用途就是「坏输入返回 None」。
-
-    ⚠️ 为什么不并入 `code_utils.fnum`：语义不同 —— 这里要的是**整数截断**
-    （`pages`/`count` 是页数），`fnum` 返回 float。同名不同语义的合并踩过一次
-    （`b1_holding_state.finite` 与 `code_utils.finite` 失败语义相反），不再重复。
-    """
-    try:
-        return int(v)
-    except (TypeError, ValueError, OverflowError):
-        return None
-
-
-def _is_empty_ok(payload: dict) -> bool:
-    """响应自称成功但 result 为空 ⇒ 该日**确实**无数据（非交易日、早于 MV_START）。"""
-    if payload.get("success") is False:
-        return False
-    if str(payload.get("code", 0)) not in ("0", "None"):
-        return False
-    return "result" in payload
-
-
-def _brief(payload: dict, n: int = 160) -> str:
-    try:
-        return json.dumps(payload, ensure_ascii=False)[:n]
-    except (TypeError, ValueError):
-        return str(payload)[:n]
+# 保留原私有名称作为兼容通道；分页协议本体只有 eastmoney_pagination 一份。
+_as_int = as_int
+_is_empty_ok = is_empty_ok
+_brief = brief
 
 
 def _f(v):
@@ -172,14 +146,8 @@ def _empty_page(
 
 
 def _page_done(trade_date: str, page: int, pages, count, rows: list[dict]) -> bool:
-    """按接口自报的 pages/count 判断是否翻完；两者都缺无法判断 ⇒ 抛 FetchIncomplete。"""
-    if pages is not None:
-        return page >= pages
-    if count is not None and len(rows) >= count:
-        return True
-    raise FetchIncomplete(
-        f"{trade_date} 第 {page} 页未给 pages/count，无法判断是否翻完"
-    )
+    """兼容原参数顺序；分页结束判断见 ``eastmoney_pagination.page_done``。"""
+    return page_done(trade_date, page, pages, count, rows)
 
 
 def _check_complete(trade_date: str, rows: list[dict], count) -> None:

@@ -44,6 +44,7 @@ from custos.core.paths import (  # noqa: E402
 )
 from custos.core.contracts import require  # noqa: E402
 from custos.core.code_utils import market_of  # noqa: E402
+from custos.datasource.local_tdx import tq_sector as _tq_sector  # noqa: E402
 
 SECTOR_DIR = SECTORS_DIR
 
@@ -269,11 +270,8 @@ def build_sector_summary(
 
 
 def latest_tq_sector_map() -> dict[str, Any]:
-    """最新一份板块→成员股反向映射（*_tq_sector_map.json）；没有则返回 {}。"""
-    files = sorted(SECTOR_DIR.glob("*_tq_sector_map.json"))
-    if not files:
-        return {}
-    return load_json(files[-1], {}) or {}
+    """严格包装：最新板块映射读取本体在 ``local_tdx.tq_sector``。"""
+    return _tq_sector.latest_tq_sector_map(SECTOR_DIR, strict=True)
 
 
 def holding_industry_names(date: str) -> dict[str, str]:

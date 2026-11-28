@@ -44,11 +44,22 @@ REGISTRY = {
     "量比（量 / 前 N 日均量）": ("core/indicators.py", "vol_ratio"),
     "MACD 序列": ("core/indicators.py", "macd_series"),
     "EMA": ("core/indicators.py", "ema"),
+    "A 股个股资格": ("core/code_utils.py", "is_ashare_stock"),
+    "交易所识别": ("core/code_utils.py", "market_of"),
+    "可空有限数值解析": ("core/code_utils.py", "fnum"),
+    "最新 TQ 板块映射读取": (
+        "datasource/local_tdx/tq_sector.py",
+        "latest_tq_sector_map",
+    ),
+    "数值权重覆盖": ("core/pipeline_kit.py", "resolve_numeric_weights"),
+    "东财分页完整性": ("datasource/eastmoney_pagination.py", "page_done"),
 }
 
 NAME_PAT = re.compile(
     r"swing|pivot|fractal|rally_seg|limit_up|platform_seg|divergence|n_structure|price_zone"
-    r"|candle_side|vol_ratio|vol_ma_prev|top_bear|price_limit|trend_state",
+    r"|candle_side|vol_ratio|vol_ma_prev|top_bear|price_limit|trend_state"
+    r"|is_ashare_stock|is_bj|market_of|to_float|latest_tq_sector_map"
+    r"|resolve_(numeric|capital|tech)_weights|page_done",
     re.I,
 )
 
@@ -129,6 +140,45 @@ ALLOWED = {
         "pipeline/close_review/holding_structure.py",
         "n_structure_basis",
     ): "消费方：复盘展示",
+    (
+        "datasource/local_tdx/local_tdx_data.py",
+        "_is_ashare_stock_file",
+    ): "vipdoc 目录语境：委托 ASHARE_STOCK_PREFIXES",
+    (
+        "datasource/local_tdx/local_tdx_data.py",
+        "_is_bj_code",
+    ): "交易所识别：委托 market_of",
+    ("pipeline/screening/formula_screen.py", "_is_bj"): "委托 market_of",
+    ("pipeline/screening/manual_pools.py", "_is_bj"): "显式市场适配后委托 market_of",
+    ("datasource/refresh_market_indices.py", "to_float"): "委托 fnum",
+    (
+        "pipeline/market_timing/market_timing_collector.py",
+        "to_float",
+    ): "委托 fnum",
+    (
+        "pipeline/screening/enrich_candidates.py",
+        "latest_tq_sector_map",
+    ): "容错门面：委托 tq_sector.latest_tq_sector_map(strict=False)",
+    (
+        "pipeline/market_timing/theme_tracker_report.py",
+        "latest_tq_sector_map",
+    ): "严格门面：委托 tq_sector.latest_tq_sector_map(strict=True)",
+    (
+        "core/factors/capital_intent.py",
+        "resolve_capital_weights",
+    ): "资金意图默认表门面：委托 resolve_numeric_weights",
+    (
+        "pipeline/screening/score_candidates.py",
+        "resolve_tech_weights",
+    ): "技术分默认表门面：委托 resolve_numeric_weights",
+    (
+        "datasource/local_tdx/fetch_market_cap.py",
+        "_page_done",
+    ): "原参数顺序门面：委托 eastmoney_pagination.page_done",
+    (
+        "datasource/local_tdx/fetch_pit_financials.py",
+        "_page_done",
+    ): "原参数顺序门面：委托 eastmoney_pagination.page_done",
 }
 
 # 只减不增（v0.596 基线）。新代码请调 indicators.candle_side / vol_ratio；数字变小时把这里改小。

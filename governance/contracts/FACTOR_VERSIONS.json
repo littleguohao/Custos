@@ -202,12 +202,17 @@
     },
     "capital_intent": {
       "version": 1,
-      "source_digest": "603953a849569fa02946",
+      "source_digest": "1e16c65e120c5808486a",
       "history": [
         {
           "version": 1,
           "date": "2026-11-03",
           "change": "初始版本（定义校准前基线，TODO #121）"
+        },
+        {
+          "version": 1,
+          "date": "2026-11-28",
+          "refactor": "数值权重覆盖通用逻辑收敛到 pipeline_kit，判定语义不变"
         }
       ]
     },

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -31,6 +30,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from custos.core.paths import DATA, SCREEN_FORMULA_REGISTRY_FILE  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
+from custos.core.code_utils import is_ashare_stock, market_of  # noqa: E402
 from custos.datasource.local_tdx import tq_http  # noqa: E402
 from custos.datasource.local_tdx.tq_sector import is_tdxw_running  # noqa: E402
 from custos.datasource.local_tdx import local_tdx_data  # noqa: E402
@@ -45,9 +45,6 @@ CIRCUIT_BREAK_AFTER = 2  # 连续失败熔断阈值
 FORMULA_COUNT = 60  # 每股回溯 K 线根数（供公式内部指标计算，非返回序列长度）
 FORMULA_BATCH = 1000  # 每次 formula_process_mul_xg 调用携带的最大股票数
 # (全市场 6k+ 只×60根单调用会让 TQ 服务端 OOM;分批逐块合并命中)
-
-# 沪深 A 股代码前缀（mootdx stocks 返回全品类证券，含指数/基金/债券，必须过滤）
-_A_SHARE_RE = re.compile(r"^(60[0-5]|688|00[0-3]|30[0-3])\d{3}$")
 
 
 def load_registry(path: Optional[Path] = None) -> dict:
@@ -67,10 +64,8 @@ def _strip_suffix(code: str) -> str:
 
 
 def _is_bj(code: str) -> bool:
-    s = str(code).strip().upper()
-    if "." in s:
-        return s.split(".")[1] == "BJ"
-    return _strip_suffix(s).startswith(("4", "8", "920"))
+    """兼容包装：交易所识别唯一实现是 ``code_utils.market_of``。"""
+    return market_of(code) == "BJ"
 
 
 # 名称缓存路径已收敛到 local_tdx/stock_names.CACHE（单一定义）
@@ -137,9 +132,11 @@ def build_universe(
         if cfg.get("exclude_bj", True) and _is_bj(c):
             continue
         code6 = _strip_suffix(c)
-        # exclude_bj=False 时 BJ 段（4/8/920）显式放行——_A_SHARE_RE 只认沪深，
-        # 不加这个分支开关关了也进不来（半死开关，v0.257 修复）
-        if (_A_SHARE_RE.match(code6) or _is_bj(c)) and code6 not in seen:
+        candidate = str(c).strip().upper()
+        if "." not in candidate:
+            candidate = code6
+        # 个股资格唯一实现：880/881 指数不因 8 前缀误放为 BJ；689 CDR 维持原排除口径。
+        if is_ashare_stock(candidate) and code6 not in seen:
             seen.add(code6)
             codes.append(code6)
     name_map = _load_name_map(diag)
@@ -169,13 +166,15 @@ def _extract_hits(value: Any, date: str, name_map: dict[str, str]) -> list[dict]
         if not hit:
             continue
         code6 = _strip_suffix(raw_code)
-        hits.append(
-            {
-                "code": code6,
-                "name": name_map.get(code6, ""),
-                "signal_date": date,
-            }
-        )
+        row = {
+            "code": code6,
+            "name": name_map.get(code6, ""),
+            "signal_date": date,
+        }
+        # 仅 880/881 存在板块指数与 BJ 个股歧义；保留后缀语境供 enrich 区分，其他命中结构不变。
+        if code6.startswith(("880", "881")) and market_of(raw_code) == "BJ":
+            row["market"] = "BJ"
+        hits.append(row)
     hits.sort(key=lambda x: x["code"])
     return hits
 

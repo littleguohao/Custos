@@ -37,6 +37,32 @@ from pathlib import Path
 from custos.core.paths import TOOLS, cn_now, is_snapshot_mode, snapshot_root
 
 
+def resolve_numeric_weights(
+    defaults: dict, overrides: dict | None, warned_keys: set
+) -> dict:
+    """合并数值权重：未知键忽略，非数值保留默认并按调用方集合去重 WARN。
+
+    ``warned_keys`` 由调用方持有，避免技术分与资金意图共用去重状态而互相吞告警。
+    bool 虽为 int 子类，但不作为数值权重；其余行为与两份原实现逐位一致。
+    """
+    weights = dict(defaults)
+    if isinstance(overrides, dict):
+        for key, val in overrides.items():
+            if key not in weights:
+                continue
+            if not isinstance(val, (int, float)) or isinstance(val, bool):
+                if key not in warned_keys:
+                    warned_keys.add(key)
+                    print(
+                        f"[WARN] scoring.weights[{key}]={val!r} 非数值，"
+                        f"忽略并按默认 {weights[key]} 计",
+                        file=sys.stderr,
+                    )
+                continue
+            weights[key] = val
+    return weights
+
+
 def _kill_process_tree(p: subprocess.Popen) -> None:
     """超时杀**整棵进程树**（2026-11-05 1800 卡死事故）。
 

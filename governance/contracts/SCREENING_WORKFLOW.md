@@ -37,7 +37,7 @@ TdxW 未运行或任一阶段失败时整链干净降级（status=unavailable / 
   当前启用老登（`POOL_LAODENG`）、科技（`POOL_KEJI`）、医药（`POOL_YIYAO`）三池（v0.581），
   旧震荡池不再启用。池子增删股票只需在客户端操作，次日自动生效；新增池子在注册表
   `manual_pools` 加一条（block_name 为客户端板块中文名）。
-- 股票池：全 A 含北交所（2026-09-19 v0.257 owner 拍板放开；exclude_bj 开关关闭；ST、上市天数在 [2] 过滤）。
+- 股票池：全 A 含北交所（2026-09-19 v0.257 owner 拍板放开；exclude_bj 开关关闭；ST、上市天数在 [2] 过滤）。v0.610 起个股 / 交易所识别统一走 `code_utils.is_ashare_stock` / `market_of`，880 / 881 板块指数不得按 8 前缀误放；689 CDR 维持原排除口径。
 - 单公式超时 15s；连续 2 个公式失败熔断，剩余标记 `circuit_open_skipped`。
 - 命中判定：返回的按股按日 0/1 序列，最后一个元素（最新交易日）为 '1'。
 - **注意**：`formula_get_all` 已两次打挂 TQ 服务（2026-07-20 / 07-22），

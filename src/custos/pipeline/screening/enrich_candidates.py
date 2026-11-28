@@ -29,9 +29,7 @@ CLI::
 from __future__ import annotations
 
 import argparse
-import glob
 import json
-import re
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -139,6 +137,8 @@ from custos.core.paths import (
 )  # noqa: E402
 from custos.pipeline.screening import signal_labels  # noqa: E402
 from custos.datasource.local_tdx import local_tdx_data  # noqa: E402
+from custos.datasource.local_tdx import tq_sector as _tq_sector  # noqa: E402
+from custos.core.code_utils import is_ashare_stock, market_of  # noqa: E402
 from custos.core.factors import s_shape as s_shape_mod  # noqa: E402
 from custos.pipeline.screening import financials as financials_mod  # noqa: E402
 from custos.core.factors import sector_phase as sector_phase_mod  # noqa: E402
@@ -159,12 +159,7 @@ SCREENING_DIR = DATA / "screening"
 # 板块归属唯一逻辑=走势贴合（theme_tracker_report），候选侧不再有主题族归属。
 INDEX_CODE = "999999"  # 上证指数 vipdoc 代码（reader.daily 里 000001 是平安银行）
 
-# 沪深 A 股代码前缀白名单（与 formula_screen/manual_pools 同一份规则）。
-# 本段是候选进 StockPool 契约前的最后一道过滤：上游只有 build_universe 走了白名单，
-# 自选池与外部注入的命中都没走，而这里此前只排 BJ 前缀 → ETF(51/15/16)、可转债(11/12/13)、
-# B股(900/2xx)、指数能进 A-D 分层并被当成"可买个股"（审计 B10）。
-_A_SHARE_RE = re.compile(r"^(60[0-5]|688|00[0-3]|30[0-3])\d{3}$")
-_BJ_PREFIX = ("4", "8", "920")
+# 候选进 StockPool 契约前的最后一道过滤统一走 code_utils；880/881 是指数，不得按 8 前缀误放为 BJ 个股。
 
 # J 低位/极致缩量三阈值与反转 K 区间同源：`b1_thresholds`（L0，env 可配）。
 # ⚠️ 这里原先本地硬编码同名常量（J_LOW_THRESHOLD=13.0 / VOL_RATIO_MAX=0.5 /
@@ -342,11 +337,8 @@ def load_holding_codes() -> set[str]:
 
 
 def latest_tq_sector_map() -> dict:
-    """加载最新的 data/sectors/*_tq_sector_map.json（880板块→成分股）。"""
-    files = sorted(glob.glob(str(SECTORS_DIR / "*_tq_sector_map.json")))
-    if not files:
-        return {}
-    return _load_json(Path(files[-1]), {})
+    """容错包装：最新板块映射读取本体在 ``local_tdx.tq_sector``。"""
+    return _tq_sector.latest_tq_sector_map(SECTORS_DIR, strict=False)
 
 
 def build_stock_industry_map() -> dict[str, str]:
@@ -932,18 +924,30 @@ def _init_enrich_result(
 
 
 def _merge_hits(hits_data: dict) -> dict[str, dict]:
-    """去重合并：code → {name, formula_ids}。"""
+    """去重合并：code → {name, market, formula_ids}；保留 BJ88 与 880 指数的区分语境。"""
     merged: dict[str, dict] = {}
     for f in hits_data.get("formulas", []):
         for h in f.get("hits", []):
-            code6 = str(h.get("code", "")).split(".")[0].zfill(6)
+            raw_code = str(h.get("code", ""))
+            code6 = raw_code.split(".")[0].zfill(6)
             if not (code6.isdigit() and len(code6) == 6):
                 continue
+            market = str(h.get("market") or "").strip().upper()
+            if not market and "." in raw_code:
+                market = raw_code.rsplit(".", 1)[1].upper()
             entry = merged.setdefault(
-                code6, {"code": code6, "name": h.get("name", ""), "formula_hits": []}
+                code6,
+                {
+                    "code": code6,
+                    "name": h.get("name", ""),
+                    "market": market,
+                    "formula_hits": [],
+                },
             )
             if not entry["name"] and h.get("name"):
                 entry["name"] = h["name"]
+            if not entry["market"] and market:
+                entry["market"] = market
             if f.get("id") and f["id"] not in entry["formula_hits"]:
                 entry["formula_hits"].append(f["id"])
     return merged
@@ -1063,13 +1067,15 @@ def _precheck_exclusion(
     exclude_st: bool,
     st_filter_broken: bool,
     risk_high: set,
+    market: str = "",
 ) -> Optional[str]:
-    """加载 K 线前的硬排除（BJ/A股白名单/ST/风险名单）；返回剔除原因或 None。"""
-    if code6.startswith(_BJ_PREFIX):
+    """加载 K 线前的硬排除；显式市场用于区分 BJ88 个股与 880 板块指数。"""
+    qualified = f"{code6}.{market}" if market else code6
+    if market_of(qualified) == "BJ":
         # BJ 有独立开关（可配置放开），单列一类，不与 not_a_share 混同
         if cfg.get("exclude_bj", True):
             return "exclude_bj"
-    elif not _A_SHARE_RE.match(code6):
+    elif not is_ashare_stock(qualified):
         return "not_a_share"  # ETF/可转债/B股/指数：不是可买个股（审计 B10）
     if exclude_st:
         if "ST" in name.upper():
@@ -1237,7 +1243,13 @@ def enrich(
         name = item["name"]
 
         reason = _precheck_exclusion(
-            code6, name, cfg, exclude_st, st_filter_broken, ctx["risk_high"]
+            code6,
+            name,
+            cfg,
+            exclude_st,
+            st_filter_broken,
+            ctx["risk_high"],
+            item.get("market", ""),
         )
         if reason is None:
             df, df_long, last_date, reason = _load_stock_frames(

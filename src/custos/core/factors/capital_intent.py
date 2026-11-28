@@ -29,8 +29,9 @@
 
 from __future__ import annotations
 
-import sys
 from typing import Any, Optional
+
+from custos.core.pipeline_kit import resolve_numeric_weights
 
 FACTOR: dict[str, Any] = {
     "id": "capital_intent",
@@ -67,39 +68,16 @@ DEFAULT_EVIDENCE_WEIGHTS: dict[str, int] = {
 }
 
 
-def _is_numeric_weight(val: Any) -> bool:
-    """权重覆盖值必须是 int/float；bool 是 int 子类，显式排除。"""
-    return isinstance(val, (int, float)) and not isinstance(val, bool)
-
-
 # 非数值覆盖值的 WARN 去重记录（每键每进程一次）：整池逐票打分都会 resolve，
-# 不去重同一坏键会刷屏。
+# 不去重同一坏键会刷屏。与技术分保持独立集合，避免互相吞告警。
 _WARNED_BAD_WEIGHT_KEYS: set = set()
 
 
 def resolve_capital_weights(overrides: Optional[dict]) -> dict:
-    """把外部（registry scoring.weights）传入的权重并入默认表；未知键忽略。
-
-    覆盖模式仿 `score_candidates.resolve_cap_rules`：默认表兜底，只认已知键。
-    覆盖值必须是 int/float——字符串/None/bool 等忽略并用默认兜底 +
-    stderr [WARN] 一次（绝不 raise：误写配置不能炸掉整池打分）。
-    """
-    w = dict(DEFAULT_EVIDENCE_WEIGHTS)
-    if isinstance(overrides, dict):
-        for key, val in overrides.items():
-            if key not in w:
-                continue
-            if not _is_numeric_weight(val):
-                if key not in _WARNED_BAD_WEIGHT_KEYS:
-                    _WARNED_BAD_WEIGHT_KEYS.add(key)
-                    print(
-                        f"[WARN] scoring.weights[{key}]={val!r} 非数值，"
-                        f"忽略并按默认 {w[key]} 计",
-                        file=sys.stderr,
-                    )
-                continue
-            w[key] = val
-    return w
+    """合并资金意图权重；通用数值覆盖逻辑见 ``pipeline_kit.resolve_numeric_weights``。"""
+    return resolve_numeric_weights(
+        DEFAULT_EVIDENCE_WEIGHTS, overrides, _WARNED_BAD_WEIGHT_KEYS
+    )
 
 
 def capital_intent_strength(

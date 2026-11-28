@@ -827,7 +827,7 @@ def get_stock_list(pool_type: str = "5", ashare_only: bool = True) -> list[str]:
     含 `999999` 等指数、ETF、债券，而沪深 A 股个股只有约 5300 只。
     两个生产调用方的处境完全不同：
 
-      · `formula_screen` 有下游过滤（`_A_SHARE_RE` + `exclude_bj`）⇒ 不受影响
+      · `formula_screen` 有下游过滤（`code_utils.is_ashare_stock` + `exclude_bj`）⇒ 不受影响
       · `backtest_factors:2285`（不传 `--universe-local` 时的 universe 源）
         **没有任何过滤**，直接 `sample_codes(base, N, seed)`
         ⇒ 抽样时约 **89% 的概率抽到非个股**

@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -42,6 +41,7 @@ from typing import Any
 from custos.datasource.local_tdx import local_tdx_data as ltd  # type: ignore
 from custos.core.paths import cn_now, write_json_atomic, MARKET_DIR  # noqa: E402
 from custos.core.indicators import pct_change as pct  # noqa: E402
+from custos.core.code_utils import fnum  # noqa: E402
 from custos.core.runtime_guards import previous_confirmed_trading_day  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 from custos.datasource.breadth_basis import breadth_counts_real  # noqa: E402
@@ -76,19 +76,8 @@ TURNOVER_CODE = "880001.SH"  # amount=全市场成交额(元)
 
 
 def to_float(x: Any):
-    try:
-        if x is None:
-            return None
-        s = str(x).strip()
-        if s in ("", "--", "nan", "None"):
-            return None
-        v = float(s)
-        if not math.isfinite(v):
-            # NaN 与 ±inf 都不是有效读数（inf 会被下游阈值当成真实极大值）
-            return None
-        return v
-    except Exception:
-        return None
+    """兼容包装：可空有限数值解析唯一实现是 ``code_utils.fnum``。"""
+    return fnum(x)
 
 
 def read_day(prefix: str, code: str) -> list[dict]:

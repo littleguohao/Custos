@@ -10,13 +10,13 @@ Preserves all other fields in market_timing_input.json (AMV, macro, etc.).
 from __future__ import annotations
 
 import json
-import math
 from typing import Any
 
 
 from custos.core.paths import MARKET_DIR, write_json_atomic  # noqa: E402
 from custos.core.contracts import require  # noqa: E402
 from custos.core.indicators import pct_change as pct  # noqa: E402
+from custos.core.code_utils import fnum  # noqa: E402
 
 
 from custos.datasource.local_tdx import local_tdx_data as ltd  # type: ignore
@@ -38,16 +38,8 @@ SENTIMENT_CODE = "880006.SH"  # close=涨停数(收盘), high=涨停数(最高),
 
 
 def to_float(x):
-    try:
-        if x is None:
-            return None
-        s = str(x).strip()
-        if s in ("", "--", "nan", "None"):
-            return None
-        v = float(s)
-        return None if math.isnan(v) else v
-    except Exception:
-        return None
+    """兼容包装：可空有限数值解析唯一实现是 ``code_utils.fnum``。"""
+    return fnum(x)
 
 
 def _is_stale(as_of, target_date) -> bool:

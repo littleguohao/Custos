@@ -58,6 +58,26 @@ DEFAULT_MIN_SUCCESS_RATE = 0.6  # 成分股取数成功率门槛，低于此值 
 DEFAULT_SLEEP_MS = 0  # 板块间限速（毫秒）；默认 0 保持既有节奏，生产可调
 
 
+def latest_tq_sector_map(
+    sector_dir: Optional[Path] = None, *, strict: bool = True
+) -> dict[str, Any]:
+    """读取最新 ``*_tq_sector_map.json``；没有文件返回 {}。
+
+    ``strict=True`` 保留主题报告的损坏文件抛错口径；``False`` 保留选股充实的
+    缺文件/损坏文件降级为 {} 口径。目录显式传入以保留两个门面常量的可 patch 性。
+    """
+    directory = Path(sector_dir) if sector_dir else SECTORS_DIR
+    files = sorted(directory.glob("*_tq_sector_map.json"))
+    if not files:
+        return {}
+    try:
+        return json.loads(files[-1].read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError):
+        if strict:
+            raise
+        return {}
+
+
 def _err(code: str, detail: Any = "", **extra: Any) -> dict:
     """结构化错误返回。"""
     out = {"error": code}

@@ -176,7 +176,8 @@ uv run --with mypy==2.4.0 mypy --config-file scripts/mypy.linux.ini src/   # 0 �
   （改判定语义 = 语义变更，须立项 + 回测）。
 
 **概念唯一实现**（v0.596，`tests/test_concept_single_source.py`）：走势三态、MACD 平台点 / N 结构、上涨段、价格区间、顶部放量阴线、
-MACD 背离、涨停、涨跌停幅度、K 线阴阳、量比、EMA / MACD 各只有一份实现（登记表见 `governance/strategy/_factors/README.md`「概念唯一实现」）。
+MACD 背离、涨停、涨跌停幅度、K 线阴阳、量比、EMA / MACD、A 股个股 / 交易所识别、可空有限数值、最新 TQ 板块映射、
+数值权重覆盖、东财分页完整性各只有一份实现（登记表见 `governance/strategy/_factors/README.md`「概念唯一实现」）。
 同类名字的新函数、写死涨停阈值、indicators.py 之外的 EMA 都会红；原始 `收<开` 比较与 `vol[-6:-1].mean()` 只减不增。
 
 **因子版本表**（v0.481，`governance/contracts/FACTOR_VERSIONS.json`，`tests/test_factor_versions.py`）：每个因子模块 + `b1_thresholds`

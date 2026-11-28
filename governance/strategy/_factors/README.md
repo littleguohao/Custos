@@ -112,6 +112,11 @@
 | K 线阴阳 | `indicators.candle_side` | 假阴真阳底部算阳、顶部算阴；一字板按前收；假阳真阴暂按阳 |
 | 量比 | `indicators.vol_ratio` / `vol_ma_prev` | 量 / 前 5 日均量（不含当根） |
 | MACD / EMA | `indicators.macd_series` / `ema` | 中式 ×2 柱 |
+| A 股个股 / 交易所识别 | `code_utils.is_ashare_stock` / `market_of` | 显式后缀优先；880 / 881 裸码为板块指数，不按 8 前缀误放 BJ；689 CDR 维持选股宇宙排除口径 |
+| 可空有限数值解析 | `code_utils.fnum` | 失败 / NaN / ±inf ⇒ None；合法 0.0 保留，行情 `to_float` 只作兼容包装 |
+| 最新 TQ 板块映射读取 | `local_tdx.tq_sector.latest_tq_sector_map` | 最新文件选择 + 读取单源；选股容错 / 主题严格两种异常策略由 `strict` 显式保留 |
+| 数值权重覆盖 | `pipeline_kit.resolve_numeric_weights` | 未知键忽略、非数值默认兜底 + WARN；技术分与资金意图各持独立去重集合 |
+| 东财分页完整性 | `eastmoney_pagination.page_done` | pages 优先、count 兜底、双缺抛 FetchIncomplete；两个采集模块保留原参数顺序门面 |
 
 ## 新增因子
 
