@@ -214,8 +214,8 @@ TOOLS: dict[str, tuple[str, str]] = {
     ),
     "swing_state": (
         "diagnostic",
-        "走势三态候选研究入口（v4 实现在 b1_structure.check_swing_state：最高 / 最低点切段 + 段内直线 ±15%）；"
-        "只服务 calib_probe trend_shape 图集，不进 live（库模块，无 CLI）",
+        "走势三态研究入口（实现在 b1_structure.check_swing_state：近 120 根 MACD 平台点按最高 H / 最低 L 切段，"
+        "v0.609 短末段例外）；本库模块只服务 calib_probe trend_shape 图集，无 CLI",
     ),
     "calib_probe": (
         "diagnostic",

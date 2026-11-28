@@ -101,7 +101,7 @@
 | 概念 | 唯一实现 | 口径 |
 |---|---|---|
 | MACD 平台点 | `b1_structure.macd_platform_segments` | owner 通达信公式：红柱段内阴线最高开盘 = 平台顶 H，绿柱段内阴线最低收盘 = 平台底 L |
-| 走势三态 | `b1_structure.check_swing_state` | v0.604：近 120 根全部平台点（`platform_window`），在最高 H 或最低 L 处切两段（每段 ≥4 点），每段首尾 H、L 都抬高 = 上涨、都降低 = 下跌、其余 = 横盘；两段不同 ⇒「X 转 Y」 |
+| 走势三态 | `b1_structure.check_swing_state` | v0.604：近 120 根全部平台点（`platform_window`），在最高 H 或最低 L 处切两段（每段 ≥4 点），每段首尾 H、L 都抬高 = 上涨、都降低 = 下跌、其余 = 横盘；两段不同 ⇒「X 转 Y」。v0.609 短末段例外：切点后不足 4 点、但最后一个点是窗口最低 L / 最高 H ⇒ 后段算下跌 / 上涨 |
 | 上升 / 下降 N 结构位 | `b1_structure.check_n_structure` / `check_descending_n_structure` | v0.604：近 120 根已完成的最近两组平台点，底、顶都抬高 = 上升 N（L1 = P0、L2 = P1），都降低 = 下降 N；当前绿柱段平台底跌破 L1（下降 N 为 L2）= 破位 |
 | 上涨段 / 回调段 | `b1_structure.rally_segment` | 最近平台顶 H 与前一平台底 L；H 之后 = 回调段 |
 | 价格区间 | `b1_structure.price_zone` | 走势三态最后一段上涨 = 顶部；有下跌段 = 底部 |

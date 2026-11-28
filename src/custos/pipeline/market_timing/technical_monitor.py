@@ -441,6 +441,7 @@ def _trend_metrics(df: pd.DataFrame) -> dict[str, Any]:
 def trend_state(df: pd.DataFrame) -> dict[str, Any]:
     """趋势三态（v0.589 起由 MACD 平台 N 结构推出；v0.604 起取近 120 根全部平台点、按最高顶 / 最低底切两段，唯一实现 = b1_structure.check_swing_state，owner 2026-11-25）：
     state ∈ 上涨 / 下跌 / 横盘震荡（当前态）/ 数据不足；swing_state = 含「X 转 Y」的全称。均线值只作展示。
+    v0.609 短末段例外：切点后不足 4 点、但最后一个点是窗口最低 L / 最高 H ⇒ 后段算下跌 / 上涨。
     🔄 v0.585 前的「均线斜率 + 20 日高低点」三态判定停用。"""
     sw = check_swing_state(df)
     if len(df) < TREND_MIN_BARS or not sw.get("available"):
